@@ -2,14 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 import numpy as np
-from os.path import join as pjoin
 import argparse
 
 import nibabel as nib
 
-from utils import map_coordinates_3d_4d
+from learn2track.utils import map_coordinates_3d_4d
 from dipy.tracking.streamline import set_number_of_points
 
 
