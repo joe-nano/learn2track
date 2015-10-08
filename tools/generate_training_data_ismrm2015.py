@@ -1,5 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+from __future__ import print_function
 
 import os
 import numpy as np
@@ -8,7 +9,7 @@ import argparse
 import nibabel as nib
 
 from learn2track.utils import map_coordinates_3d_4d
-from dipy.tracking.streamline import set_number_of_points
+#from dipy.tracking.streamline import set_number_of_points
 
 
 NB_POINTS = 100
@@ -21,7 +22,7 @@ def buildArgsParser():
     p.add_argument('dwi', type=str, help='Nifti file containing the original HCP dwi used in the ISMRM2015 challenge.')
     p.add_argument('--bvals', type=str, help='text file containing the bvalues used in the dwi. By default, uses "subject1.bvals" in the same folder as the dwi file.')
     p.add_argument('bundles', metavar='bundle', type=str, nargs="+", help='list of ground truth bundle files.')
-    #p.add_argument('--out', metavar='DIR', type=str, help='output folder where to put generated training data. Default: along the bundles')
+    p.add_argument('--out', metavar='DIR', type=str, help='output folder where to put generated training data. Default: along the bundles')
 
     p.add_argument('--sanity-check', action='store_true', help='perform sanity check on the data and quit.')
     p.add_argument('-v', '--verbose', action='store_true', help='enable verbose mode.')
@@ -74,14 +75,19 @@ def generate_training_data(streamlines, dwi, bvals):
     weights_normed = weights / b0
     weights_normed[np.isnan(weights_normed)] = 0.
 
-    for i, streamline_points in enumerate(set_number_of_points(streamlines.points, nb_points=NB_POINTS)):
-        # Get diffusion weights for every points along the streamlines (the inputs)
+    #for i, streamline_points in enumerate(set_number_of_points(streamlines.points, nb_points=NB_POINTS)):
+    for i, streamline_points in enumerate(streamlines.points):
+        # Get diffusion weights for every points along the streamlines (the inputs).
         weights_interpolated = map_coordinates_3d_4d(weights_normed, streamline_points)
-        inputs.append(weights_interpolated)
+        # We don't need the last point though (nothing to predict from it).
+        inputs.append(weights_interpolated[:-1])
+        # Also add the flip version of the streamline (except its last point).
+        inputs.append(weights_interpolated[::-1][:-1])
 
         # Get streamlines directions (the targets)
         directions = streamline_points[1:, :] - streamline_points[:-1, :]
         targets.append(directions)
+        targets.append(-directions)  # Flip directions
 
     return inputs, targets
 
@@ -94,9 +100,9 @@ def do_sanity_check_on_data(streamlines, dwi):
         max_pts = np.maximum(max_pts, streamline_points.max(axis=0))
 
     if np.any(min_pts < np.zeros(3)-0.5) or np.any(max_pts >= np.array(dwi.shape[:3])+0.5):
-        print "Streamlines are not in voxel space!"
-        print "min_pts", min_pts
-        print "max_pts", max_pts
+        print ("Streamlines are not in voxel space!")
+        print ("min_pts", min_pts)
+        print ("max_pts", max_pts)
         return False
 
     return True
@@ -105,7 +111,7 @@ def do_sanity_check_on_data(streamlines, dwi):
 def main():
     parser = buildArgsParser()
     args = parser.parse_args()
-    print args
+    print (args)
 
     dwi = nib.load(args.dwi)
 
@@ -114,7 +120,7 @@ def main():
     if bvals_filename is None:
         bvals_filename = args.dwi.split('.')[0] + ".bvals"
 
-    bvals = map(float, open(bvals_filename).read().split())
+    bvals = list(map(float, open(bvals_filename).read().split()))
     bvals = np.round(bvals).astype(int)
 
     assert dwi.shape[-1] == len(bvals)
@@ -122,20 +128,25 @@ def main():
     if args.sanity_check:
         for no, bundle in enumerate(args.bundles):
             streamlines = nib.streamlines.load(bundle, ref=dwi)
-            print "Checking {0}...".format(bundle)
+            print ("Checking {0} ({1:,} streamlines)...".format(bundle, len(streamlines)), end=" ")
             is_ok = do_sanity_check_on_data(streamlines, dwi)
-            print "OK" if is_ok else "FAIL"
+            print ("OK" if is_ok else "FAIL")
     else:
         for bundle in args.bundles:
             if args.verbose:
-                print "Processing {0}...".format(bundle)
+                print ("Processing {0}...".format(bundle))
             streamlines = nib.streamlines.load(bundle, ref=dwi)
 
             inputs, targets = generate_training_data(streamlines, dwi, bvals)
 
             # Dump data as numpy array
-            filename = os.path.splitext(bundle)[0]
-            np.savez(filename + ".npz", inputs=inputs, targets=targets)
+            if args.out is None:  # Put training data along the streamlines.
+                path = os.path.splitext(bundle)[0] + ".npz"
+            else:
+                filename = os.path.splitext(os.path.basename(bundle))[0]
+                path = os.path.join(args.out, filename + ".npz")
+
+            np.savez(path, inputs=inputs, targets=targets)
 
 
 if __name__ == '__main__':

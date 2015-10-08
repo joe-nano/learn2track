@@ -7,10 +7,11 @@ import theano
 from time import time
 from os.path import join as pjoin
 from scipy.ndimage import map_coordinates
+from itertools import chain
 
 
 from smartlearner import Dataset
-from .dataset import BundlesDataset
+from .dataset import SequenceDataset, BundlesDataset
 
 
 floatX = theano.config.floatX
@@ -24,32 +25,70 @@ def load_bundles(bundles_path):
         if f.endswith("_trainset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
             data = np.load(pjoin(bundles_path, f))
-            dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
+            dataset = SequenceDataset(data['inputs'], data['targets'], name=bundle_name)
             bundles["trainset"].append(dataset)
         elif f.endswith("_validset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
             data = np.load(pjoin(bundles_path, f))
-            dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
+            dataset = SequenceDataset(data['inputs'], data['targets'], name=bundle_name)
             bundles["validset"].append(dataset)
         elif f.endswith("_testset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
             data = np.load(pjoin(bundles_path, f))
-            dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
+            dataset = SequenceDataset(data['inputs'], data['targets'], name=bundle_name)
             bundles["testset"].append(dataset)
 
     trainset = BundlesDataset(bundles["trainset"], name=dataset_name+"_trainset")
 
-    validset_inputs = np.concatenate([b.inputs.get_value() for b in bundles["validset"]])
-    validset_targets = np.concatenate([b.targets.get_value() for b in bundles["validset"]])
-    validset = Dataset(validset_inputs, validset_targets, name=dataset_name+"_validset")
-    #testset = BundlesDataset(bundles["validset"], name=dataset_name+"_validset")
+    #validset_inputs = np.concatenate([b.inputs for b in bundles["validset"]])
+    #validset_targets = np.concatenate([b.targets for b in bundles["validset"]])
+    validset_inputs = list(chain(*[b.inputs for b in bundles["validset"]]))
+    validset_targets = list(chain(*[b.targets for b in bundles["validset"]]))
+    validset = SequenceDataset(validset_inputs, validset_targets, name=dataset_name+"_validset")
+    #validset = BundlesDataset(bundles["validset"], name=dataset_name+"_validset")
 
-    testset_inputs = np.concatenate([b.inputs.get_value() for b in bundles["testset"]])
-    testset_targets = np.concatenate([b.targets.get_value() for b in bundles["testset"]])
-    testset = Dataset(testset_inputs, testset_targets, name=dataset_name+"_testset")
+    testset_inputs = np.concatenate([b.inputs for b in bundles["testset"]])
+    testset_targets = np.concatenate([b.targets for b in bundles["testset"]])
+    testset = SequenceDataset(testset_inputs, testset_targets, name=dataset_name+"_testset")
     #testset = BundlesDataset(bundles["testset"], name=dataset_name+"_testset")
 
     return trainset, validset, testset
+
+
+# def load_bundles(bundles_path):
+#     dataset_name = "ISMRM15_Challenge"
+
+#     bundles = {'trainset': [], 'validset': [], 'testset': []}
+#     for f in os.listdir(bundles_path):
+#         if f.endswith("_trainset.npz"):
+#             bundle_name = f.split("/")[-1][:-len(".npz")]
+#             data = np.load(pjoin(bundles_path, f))
+#             dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
+#             bundles["trainset"].append(dataset)
+#         elif f.endswith("_validset.npz"):
+#             bundle_name = f.split("/")[-1][:-len(".npz")]
+#             data = np.load(pjoin(bundles_path, f))
+#             dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
+#             bundles["validset"].append(dataset)
+#         elif f.endswith("_testset.npz"):
+#             bundle_name = f.split("/")[-1][:-len(".npz")]
+#             data = np.load(pjoin(bundles_path, f))
+#             dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
+#             bundles["testset"].append(dataset)
+
+#     trainset = BundlesDataset(bundles["trainset"], name=dataset_name+"_trainset")
+
+#     validset_inputs = np.concatenate([b.inputs.get_value() for b in bundles["validset"]])
+#     validset_targets = np.concatenate([b.targets.get_value() for b in bundles["validset"]])
+#     validset = Dataset(validset_inputs, validset_targets, name=dataset_name+"_validset")
+#     #validset = BundlesDataset(bundles["validset"], name=dataset_name+"_validset")
+
+#     testset_inputs = np.concatenate([b.inputs.get_value() for b in bundles["testset"]])
+#     testset_targets = np.concatenate([b.targets.get_value() for b in bundles["testset"]])
+#     testset = Dataset(testset_inputs, testset_targets, name=dataset_name+"_testset")
+#     #testset = BundlesDataset(bundles["testset"], name=dataset_name+"_testset")
+
+#     return trainset, validset, testset
 
 
 class Timer():

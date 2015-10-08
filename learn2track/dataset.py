@@ -1,120 +1,119 @@
 from __future__ import division
 
-import numpy as np
-
 import theano
 import theano.tensor as T
 
 from smartlearner import Dataset
-from smartlearner.batch_schedulers import MiniBatchScheduler
-from smartlearner.utils import sharedX
+
+floatX = theano.config.floatX
 
 
-class BundlesDataset(Dataset):
+class SequenceDataset(Dataset):
+    """ Dataset interface.
+
+    Attributes
+    ----------
+    symb_inputs : `theano.tensor.TensorType` object
+        Symbolic variables representing the inputs.
+    symb_targets : `theano.tensor.TensorType` object or None
+        Symbolic variables representing the targets.
+
+    Notes
+    -----
+    `symb_inputs` and `symb_targets` have test value already tagged to them. Use
+    THEANO_FLAGS="compute_test_value=warn" to use them.
+    """
+    def __init__(self, inputs, targets=None, name="dataset"):
+        """
+        Parameters
+        ----------
+        inputs : list of ndarray
+            Training examples (can be variable length sequences).
+        targets : ndarray (optional)
+            Target for each training example (can be variable length sequences).
+        name : str (optional)
+            The name of the dataset is used to name Theano variables. Default: 'dataset'.
+        """
+        self.name = name
+        self.inputs = inputs
+        self.targets = targets
+
+        self.symb_inputs = T.TensorVariable(type=T.TensorType("floatX", [False]*(inputs[0].ndim+1)),
+                                            name=self.name+'_symb_inputs')
+        self.symb_inputs.tag.test_value = inputs[0][None, ...]  # For debugging Theano graphs.
+
+        self.symb_targets = None
+        if self.has_targets:
+            self.symb_targets = T.TensorVariable(type=T.TensorType("floatX", [False]*(targets[0].ndim+1)),
+                                                 name=self.name+'_symb_targets')
+            self.symb_targets.tag.test_value = targets[0][None, ...]  # For debugging Theano graphs.
+
+        self.symb_mask = T.TensorVariable(type=T.TensorType("floatX", [False]*inputs[0].ndim),
+                                          name=self.name+'_symb_mask')
+        self.symb_mask.tag.test_value = (inputs[0][:, 0] > 0.5).astype(floatX)[None, ...]  # For debugging Theano graphs.
+
+    @property
+    def inputs(self):
+        return self._inputs
+
+    @inputs.setter
+    def inputs(self, value):
+        self._inputs = value
+
+    @property
+    def targets(self):
+        return self._targets
+
+    @targets.setter
+    def targets(self, value):
+        if value is not None:
+            self._targets = value
+        else:
+            self._targets = None
+
+    @property
+    def has_targets(self):
+        return self.targets is not None
+
+    @property
+    def input_shape(self):
+        return self.inputs[0].shape
+
+    @property
+    def target_shape(self):
+        if self.has_targets:
+            return self.targets[0].shape
+
+        return None
+
+    @property
+    def input_size(self):
+        # TODO: is this property really useful? If needed one could just call directly `dataset.input_shape[-1]`.
+        return self.input_shape[-1]
+
+    @property
+    def target_size(self):
+        # TODO: is this property really useful? If needed one could just call directly `dataset.target_shape[-1]`.
+        if self.has_targets:
+            return self.target_shape[-1]
+
+        return None
+
+    def __len__(self):
+        return len(self.inputs)
+
+
+class BundlesDataset(SequenceDataset):
     def __init__(self, bundles, name=""):
         """
         Parameters
         ----------
         bundles : list of `smartlearner.interfaces.dataset.Dataset` objects
         """
-        super().__init__(bundles[0].inputs.get_value(), bundles[0].targets.get_value(), name)
+        super().__init__(bundles[0].inputs, bundles[0].targets, name=name)
 
         self.bundles = bundles
         self.bundles_size = list(map(len, self.bundles))
 
-        # self.symb_inputs = self.bundles[0].symb_inputs.copy()
-        # self.symb_inputs.name = self.name + '_inputs'
-        # self.symb_targets = self.bundles[0].symb_targets.copy()
-        # self.symb_targets.name = self.name + '_targets'
-
-    @property
-    def has_targets(self):
-        return True
-
-    @property
-    def input_shape(self):
-        return self.bundles[0].input_shape
-
-    @property
-    def target_shape(self):
-        return self.bundles[0].target_shape
-
     def __len__(self):
         return sum(self.bundles_size)
-
-
-class BundlesBatchScheduler(MiniBatchScheduler):
-    """ Batch of examples are sampled proportionally from each bundle.
-    """
-    def __init__(self, bundles_dataset, batch_size, nb_updates_per_epoch, seed=1234):
-        """
-        Parameters
-        ----------
-        bundles_dataset : `BundlesDataset` object
-            Dataset of datasets (one for each bundle).
-        batch_size : int
-            Number of examples per batch. *Must be greater than the number of
-            bundles in `bundles_dataset`.*
-        nb_updates_per_epoch : int
-            Number of updates to do each epoch.
-        seed : int (optional)
-            Seed of the random numbers generator used to sample different examples
-            for each batch.
-        """
-        super(BundlesBatchScheduler, self).__init__(bundles_dataset, batch_size)
-        self.batch_size = batch_size
-        self.nb_updates_per_epoch = nb_updates_per_epoch
-        self.seed = seed
-        self.rng = np.random.RandomState(self.seed)
-
-        self._shared_batch_inputs = sharedX(np.zeros((self.batch_size,) + self.dataset.input_shape))
-        self._shared_batch_targets = sharedX(np.zeros((self.batch_size,) + self.dataset.target_shape))
-        self.batch_inputs = np.empty_like(self._shared_batch_inputs.get_value())
-        self.batch_targets = np.empty_like(self._shared_batch_targets.get_value())
-
-    @property
-    def batch_size(self):
-        return self._shared_batch_size.get_value()
-
-    @batch_size.setter
-    def batch_size(self, value):
-        self._shared_batch_size.set_value(np.array(value, dtype='i4'))
-
-        # Compute the number of streamlines from each bundle that should be
-        # present in a batch.
-        self.nb_streamlines_from_each_bundle = []
-        nb_streamlines_total = len(self.dataset)
-        for bundle_size in self.dataset.bundles_size:
-            nb_streamlines = int(np.round(self.batch_size * (bundle_size / nb_streamlines_total)))
-            # Make sure we got at least one streamline from each bundle.
-            nb_streamlines = max(nb_streamlines, 1)
-            self.nb_streamlines_from_each_bundle.append(nb_streamlines)
-
-        # Make sure the splits sum to `batch_size`.
-        self.nb_streamlines_from_each_bundle[-1] += self.batch_size - sum(self.nb_streamlines_from_each_bundle)
-        assert sum(self.nb_streamlines_from_each_bundle) == self.batch_size
-
-    @property
-    def givens(self):
-        if self.dataset.has_targets:
-            return {self.dataset.symb_inputs: self._shared_batch_inputs,
-                    self.dataset.symb_targets: self._shared_batch_targets}
-        else:
-            return {self.dataset.symb_inputs: self._shared_batch_inputs}
-
-    def __iter__(self):
-        for batch_count in range(self.nb_updates_per_epoch):
-            # Sample examples for next batch
-            start = 0
-            for bundle, nb_streamlines in zip(self.dataset.bundles, self.nb_streamlines_from_each_bundle):
-                end = start + nb_streamlines
-                indices = self.rng.permutation(len(bundle))[:nb_streamlines]
-                self.batch_inputs[start:end] = bundle.inputs.get_value()[indices]
-                self.batch_targets[start:end] = bundle.targets.get_value()[indices]
-                start = end
-
-            self._shared_batch_inputs.set_value(self.batch_inputs)
-            self._shared_batch_targets.set_value(self.batch_targets)
-
-            self.shared_batch_count.set_value(batch_count)
-            yield batch_count + 1

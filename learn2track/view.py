@@ -6,6 +6,16 @@ from smartlearner.interfaces import View
 from smartlearner import views
 
 
+class LossView(View):
+    def __init__(self, loss, batch_scheduler):
+        super().__init__()
+
+        self.compute_error = theano.function([],
+                                             loss._loss,
+                                             givens=batch_scheduler.givens,
+                                             name="compute_error")
+
+
 class RegressionError(View):
     def __init__(self, predict_fct, dataset, batch_size=100):
         super(RegressionError, self).__init__()
