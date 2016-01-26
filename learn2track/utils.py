@@ -9,6 +9,7 @@ from os.path import join as pjoin
 from scipy.ndimage import map_coordinates
 from itertools import chain
 
+from nibabel.streamlines import CompactList
 
 from smartlearner import Dataset
 from .dataset import SequenceDataset, BundlesDataset
@@ -54,6 +55,63 @@ def load_bundles(bundles_path):
 
     return trainset, validset, testset
 
+
+def save_bundle(file, inputs, targets):
+    """ Saves a bundle compatible with the learn2track framework.
+
+    Parameters
+    ----------
+    file : str or file
+        Either the file name (string) or an open file (file-like object)
+        where the data will be saved. If file is a string, the ``.npz``
+        extension will be appended to the file name if it is not already there.
+    inputs : `nibabel.streamlines.CompactList` object
+        the interpolated dwi data for every 3D point of every streamline found in
+        `tractogram.streamlines`.
+    targets : `nib.streamlines.CompactList` object
+        the direction leading from any 3D point to the next in every streamline.
+    """
+    np.savez(file,
+             inputs_data=inputs._data,
+             inputs_offsets=inputs._offsets,
+             inputs_lengths=inputs._lengths,
+             targets_data=targets._data,
+             targets_offsets=targets._offsets,
+             targets_lengths=targets._lengths
+             )
+
+
+def load_bundle(file):
+    """ Loads a bundle compatible with the learn2track framework.
+
+    Parameters
+    ----------
+    file : str or file
+        Either the file name (string) or an open file (file-like object)
+        where the data will be saved. If file is a string, the ``.npz``
+        extension will be appended to the file name if it is not already there.
+
+    Returns
+    -------
+    inputs : `nibabel.streamlines.CompactList` object
+        the interpolated dwi data for every 3D point of every streamline found in
+        `tractogram.streamlines`.
+    targets : `nib.streamlines.CompactList` object
+        the direction leading from any 3D point to the next in every streamline.
+    """
+    data = np.load(file)
+
+    inputs = CompactList()
+    inputs._data = data["inputs_data"]
+    inputs._offsets = data["inputs_offsets"]
+    inputs._lengths = data["inputs_lengths"]
+
+    targets = CompactList()
+    targets._data = data["targets_data"]
+    targets._offsets = data["targets_offsets"]
+    targets._lengths = data["targets_lengths"]
+
+    return inputs, targets
 
 # def load_bundles(bundles_path):
 #     dataset_name = "ISMRM15_Challenge"
@@ -104,7 +162,7 @@ class Timer():
         print("{:.2f} sec.".format(time()-self.start))
 
 
-def map_coordinates_3d_4d(input_array, indices):
+def map_coordinates_3d_4d(input_array, indices, affine=None):
     """ Evaluate the input_array data at the given indices
     using trilinear interpolation
 
@@ -123,6 +181,9 @@ def map_coordinates_3d_4d(input_array, indices):
     -----
     At some point this will be merged in Dipy. See PR #587.
     """
+    if affine is not None:
+        inv_affine = np.linalg.inv(affine)
+        indices = (np.dot(indices, inv_affine[:3, :3]) + inv_affine[:3, 3])
 
     if input_array.ndim <= 2 or input_array.ndim >= 5:
         raise ValueError("Input array can only be 3d or 4d")
