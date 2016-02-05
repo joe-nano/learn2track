@@ -12,7 +12,6 @@ import argparse
 
 import nibabel as nib
 from nibabel.streamlines import CompactList
-from nibabel.streamlines.compact_list import save_compact_list, load_compact_list
 
 from learn2track.utils import save_bundle
 from learn2track.utils import map_coordinates_3d_4d
