@@ -4,6 +4,8 @@ import os
 import sys
 import numpy as np
 import theano
+import string
+import hashlib
 from time import time
 from os.path import join as pjoin
 from scipy.ndimage import map_coordinates
@@ -12,31 +14,33 @@ from itertools import chain
 from nibabel.streamlines import CompactList
 
 from smartlearner import Dataset
-from .dataset import SequenceDataset, BundlesDataset
+from .dataset import ReconstructionDataset, SequenceDataset, BundlesDataset
 
+
+DATASETS_ENV = "DATASETS"
 
 floatX = theano.config.floatX
 
 
-def load_bundles(bundles_path):
+def load_ismrm2015_challenge(bundles_path):
     dataset_name = "ISMRM15_Challenge"
 
     bundles = {'trainset': [], 'validset': [], 'testset': []}
     for f in os.listdir(bundles_path):
         if f.endswith("_trainset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
-            data = np.load(pjoin(bundles_path, f))
-            dataset = SequenceDataset(data['inputs'], data['targets'], name=bundle_name)
+            inputs, targets = load_bundle(pjoin(bundles_path, f))
+            dataset = SequenceDataset(inputs, targets, name=bundle_name)
             bundles["trainset"].append(dataset)
         elif f.endswith("_validset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
-            data = np.load(pjoin(bundles_path, f))
-            dataset = SequenceDataset(data['inputs'], data['targets'], name=bundle_name)
+            inputs, targets = load_bundle(pjoin(bundles_path, f))
+            dataset = SequenceDataset(inputs, targets, name=bundle_name)
             bundles["validset"].append(dataset)
         elif f.endswith("_testset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
-            data = np.load(pjoin(bundles_path, f))
-            dataset = SequenceDataset(data['inputs'], data['targets'], name=bundle_name)
+            inputs, targets = load_bundle(pjoin(bundles_path, f))
+            dataset = SequenceDataset(inputs, targets, name=bundle_name)
             bundles["testset"].append(dataset)
 
     trainset = BundlesDataset(bundles["trainset"], name=dataset_name+"_trainset")
@@ -113,40 +117,62 @@ def load_bundle(file):
 
     return inputs, targets
 
-# def load_bundles(bundles_path):
-#     dataset_name = "ISMRM15_Challenge"
 
-#     bundles = {'trainset': [], 'validset': [], 'testset': []}
-#     for f in os.listdir(bundles_path):
-#         if f.endswith("_trainset.npz"):
-#             bundle_name = f.split("/")[-1][:-len(".npz")]
-#             data = np.load(pjoin(bundles_path, f))
-#             dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
-#             bundles["trainset"].append(dataset)
-#         elif f.endswith("_validset.npz"):
-#             bundle_name = f.split("/")[-1][:-len(".npz")]
-#             data = np.load(pjoin(bundles_path, f))
-#             dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
-#             bundles["validset"].append(dataset)
-#         elif f.endswith("_testset.npz"):
-#             bundle_name = f.split("/")[-1][:-len(".npz")]
-#             data = np.load(pjoin(bundles_path, f))
-#             dataset = Dataset(data['inputs'].astype(floatX), data['targets'].astype(floatX), name=bundle_name, keep_on_cpu=True)
-#             bundles["testset"].append(dataset)
+vocabulary_size = len(string.ascii_lowercase) + 1 # [a-z] + ' '
+first_letter = ord(string.ascii_lowercase[0])
 
-#     trainset = BundlesDataset(bundles["trainset"], name=dataset_name+"_trainset")
+def char2id(char):
+    if char in string.ascii_lowercase:
+        return ord(char) - first_letter + 1
+    elif char == ' ':
+        return 0
+    else:
+        print('Unexpected character: %s' % char)
+        return 0
 
-#     validset_inputs = np.concatenate([b.inputs.get_value() for b in bundles["validset"]])
-#     validset_targets = np.concatenate([b.targets.get_value() for b in bundles["validset"]])
-#     validset = Dataset(validset_inputs, validset_targets, name=dataset_name+"_validset")
-#     #validset = BundlesDataset(bundles["validset"], name=dataset_name+"_validset")
+def id2char(dictid):
+    if dictid > 0:
+        return chr(dictid + first_letter - 1)
+    else:
+        return ' '
 
-#     testset_inputs = np.concatenate([b.inputs.get_value() for b in bundles["testset"]])
-#     testset_targets = np.concatenate([b.targets.get_value() for b in bundles["testset"]])
-#     testset = Dataset(testset_inputs, testset_targets, name=dataset_name+"_testset")
-#     #testset = BundlesDataset(bundles["testset"], name=dataset_name+"_testset")
+def load_text8():
+    # http://mattmahoney.net/dc/textdata
+    dataset_name = "Text8"
 
-#     return trainset, validset, testset
+    datasets_repo = os.environ.get(DATASETS_ENV, './datasets')
+    if not os.path.isdir(datasets_repo):
+        os.mkdir(datasets_repo)
+
+    repo = os.path.join(datasets_repo, dataset_name)
+    dataset_npy = os.path.join(repo, 'data.npz')
+
+    if not os.path.isfile(dataset_npy):
+        filename = os.path.join(repo, 'text8.zip')
+        if not os.path.isdir(repo) or not os.path.isfile(filename):
+            os.mkdir(repo)
+
+            import urllib.request
+            filename, _ = urllib.request.urlretrieve('http://mattmahoney.net/dc/text8.zip', filename)
+
+        import zipfile
+        with zipfile.ZipFile(filename) as f:
+            text = f.read(f.namelist()[0])
+            text = np.array(list(map(char2id, map(chr, text))), dtype=np.int8)
+
+        valid_size = 1000
+        validset, trainset = text[:valid_size], text[valid_size:]
+        np.savez(dataset_npy,
+                 trainset_inputs=trainset,
+                 validset_inputs=validset)
+
+    data = np.load(dataset_npy)
+    trainset = SequenceDataset(data['trainset_inputs'], data['trainset_inputs'], name="trainset")
+    validset = SequenceDataset(data['validset_inputs'], data['trainset_inputs'], name="validset")
+    trainset.vocabulary_size = vocabulary_size
+    validset.vocabulary_size = vocabulary_size
+
+    return trainset, validset
 
 
 class Timer():
@@ -160,6 +186,11 @@ class Timer():
 
     def __exit__(self, type, value, tb):
         print("{:.2f} sec.".format(time()-self.start))
+
+
+def generate_uid_from_string(value):
+    """ Creates unique identifier from a string. """
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def map_coordinates_3d_4d(input_array, indices, affine=None):

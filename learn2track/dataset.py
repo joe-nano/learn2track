@@ -8,6 +8,35 @@ from smartlearner import Dataset
 floatX = theano.config.floatX
 
 
+class ReconstructionDataset(Dataset):
+    """ ReconstructionDataset interface.
+
+    Behaves like a normal `Dataset` object but the targets are the inputs.
+
+    Attributes
+    ----------
+    symb_inputs : `theano.tensor.TensorType` object
+        Symbolic variables representing the inputs.
+
+    Notes
+    -----
+    `symb_inputs` and `symb_targets` have test value already tagged to them. Use
+    THEANO_FLAGS="compute_test_value=warn" to use them.
+    """
+    def __init__(self, inputs, name="dataset", keep_on_cpu=False):
+        """
+        Parameters
+        ----------
+        inputs : ndarray
+            Training examples
+        name : str (optional)
+            The name of the dataset is used to name Theano variables. Default: 'dataset'.
+        """
+        super().__init__(inputs, name=name, keep_on_cpu=keep_on_cpu)
+        self._targets_shared = self._inputs_shared
+        self.symb_targets = self.symb_inputs.copy()
+
+
 class SequenceDataset(Dataset):
     """ Dataset interface.
 
@@ -47,10 +76,6 @@ class SequenceDataset(Dataset):
             self.symb_targets = T.TensorVariable(type=T.TensorType("floatX", [False]*(targets[0].ndim+1)),
                                                  name=self.name+'_symb_targets')
             self.symb_targets.tag.test_value = targets[0][None, ...]  # For debugging Theano graphs.
-
-        self.symb_mask = T.TensorVariable(type=T.TensorType("floatX", [False]*inputs[0].ndim),
-                                          name=self.name+'_symb_mask')
-        self.symb_mask.tag.test_value = (inputs[0][:, 0] > 0.5).astype(floatX)[None, ...]  # For debugging Theano graphs.
 
     @property
     def inputs(self):
@@ -103,7 +128,39 @@ class SequenceDataset(Dataset):
         return len(self.inputs)
 
 
-class BundlesDataset(SequenceDataset):
+class MaskedSequenceDataset(SequenceDataset):
+    """ Dataset interface.
+
+    Attributes
+    ----------
+    symb_inputs : `theano.tensor.TensorType` object
+        Symbolic variables representing the inputs.
+    symb_targets : `theano.tensor.TensorType` object or None
+        Symbolic variables representing the targets.
+
+    Notes
+    -----
+    `symb_inputs` and `symb_targets` have test value already tagged to them. Use
+    THEANO_FLAGS="compute_test_value=warn" to use them.
+    """
+    def __init__(self, inputs, targets=None, name="dataset"):
+        """
+        Parameters
+        ----------
+        inputs : list of ndarray
+            Training examples (can be variable length sequences).
+        targets : ndarray (optional)
+            Target for each training example (can be variable length sequences).
+        name : str (optional)
+            The name of the dataset is used to name Theano variables. Default: 'dataset'.
+        """
+        super().__init__(inputs, targets, name)
+        self.symb_mask = T.TensorVariable(type=T.TensorType("floatX", [False]*inputs[0].ndim),
+                                          name=self.name+'_symb_mask')
+        self.symb_mask.tag.test_value = (inputs[0][:, 0] > 0.5).astype(floatX)[None, ...]  # For debugging Theano graphs.
+
+
+class BundlesDataset(MaskedSequenceDataset):
     def __init__(self, bundles, name=""):
         """
         Parameters

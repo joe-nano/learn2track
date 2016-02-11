@@ -1,5 +1,8 @@
 import theano
 import numpy as np
+import pickle
+import theano.tensor as T
+from os.path import join as pjoin
 
 from smartlearner.interfaces import BatchScheduler
 from smartlearner.utils import sharedX
@@ -192,6 +195,22 @@ class BundlesBatchScheduler(BatchScheduler):
             self.shared_batch_count.set_value(batch_count)
             yield batch_count + 1
 
+    def save(self, savedir):
+        state = {"version": 1,
+                 "seed": self.seed,
+                 "batch_size": self.batch_size,
+                 "shared_batch_count": self.shared_batch_count.get_value(),
+                 "rng": pickle.dumps(self.rng)
+                 }
+
+        np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)
+
+    def load(self, loaddir):
+        state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
+        self.batch_size = state["batch_size"]
+        self.shared_batch_count.set_value(state["shared_batch_count"])
+        self.rng = pickle.loads(state["rng"])
+
 
 class ProportionalBundlesBatchScheduler(BatchScheduler):
     """ Batch of examples are sampled proportionally from each bundle.
@@ -296,3 +315,88 @@ class ProportionalBundlesBatchScheduler(BatchScheduler):
 
             self.shared_batch_count.set_value(batch_count)
             yield batch_count + 1
+
+
+class SequenceBatchSchedulerText8(BatchScheduler):
+    """ BatchScheduler specially design for the Text8 dataset. """
+
+    def __init__(self, dataset, batch_size, sequence_length=10, nb_updates_per_epoch=100):
+        """
+        Parameters
+        ----------
+        dataset : `SequenceDataset` object
+            Dataset of datasets (one for each bundle).
+        batch_size : int
+            Number of examples per batch. *Must be greater than the number of
+            bundles in `bundles_dataset`.*
+        """
+        super().__init__(dataset)
+        self._shared_batch_size = theano.shared(np.array(0, dtype='i4'))
+        self.batch_size = batch_size
+        self.sequence_length = sequence_length + 1
+        self.nb_updates_per_epoch = nb_updates_per_epoch
+        segment_length = len(self.dataset) // batch_size
+        self._cursors = np.array([offset * segment_length for offset in range(batch_size)])
+
+        # Redefine symbolic inputs
+        self.dataset.symb_inputs = T.TensorVariable(type=T.TensorType("floatX", [False]*3),
+                                                    name=self.dataset.name+'_symb_inputs')
+        self.dataset.symb_targets = T.TensorVariable(type=T.TensorType("floatX", [False]*3),
+                                                     name=self.dataset.name+'_symb_targets')
+
+        # Keep only `batch_size` examples as test values.
+        self.dataset.symb_inputs.tag.test_value = self._next_batch()[:, :-1, :]
+        self.dataset.symb_targets.tag.test_value = self._next_batch()[:, 1:, :]
+
+        self._shared_batch_inputs = sharedX(np.zeros((self.batch_size, sequence_length, self.dataset.vocabulary_size)))
+        self._shared_batch_targets = sharedX(np.zeros((self.batch_size, sequence_length, self.dataset.vocabulary_size)))
+
+    def _next_batch(self):
+        # Make sure there are self.sequence_length characters available ahead of us.
+        self._cursors[self._cursors + self.sequence_length > len(self.dataset)] %= len(self.dataset) - self.sequence_length
+
+        batch = np.zeros(shape=(self.batch_size, self.sequence_length, self.dataset.vocabulary_size), dtype=theano.config.floatX)
+        for i in range(self.sequence_length):
+            batch[range(self.batch_size), i, self.dataset.inputs[self._cursors].astype(int)] = 1.0
+            self._cursors += 1
+
+        # self._cursors -= 1  # Overlap
+
+        return batch
+
+    @property
+    def updates(self):
+        return {}  # No updates
+
+    @property
+    def batch_size(self):
+        return self._shared_batch_size.get_value()
+
+    @batch_size.setter
+    def batch_size(self, value):
+        self._shared_batch_size.set_value(np.array(value, dtype='i4'))
+
+    @property
+    def givens(self):
+        return {self.dataset.symb_inputs: self._shared_batch_inputs,
+                self.dataset.symb_targets: self._shared_batch_targets}
+
+    def __iter__(self):
+        for batch_count in range(self.nb_updates_per_epoch):
+            inputs = self._next_batch()
+            self._shared_batch_inputs.set_value(inputs[:, :-1, :])
+            self._shared_batch_targets.set_value(inputs[:, 1:, :])
+            yield batch_count + 1
+
+    def save(self, savedir):
+        state = {"version": 1,
+                 "sequence_length": self.sequence_length,
+                 "batch_size": self.batch_size,
+                 "cursors": self._cursors
+                 }
+
+        np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)
+
+    def load(self, loaddir):
+        state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
+        self._cursors = state["cursors"]

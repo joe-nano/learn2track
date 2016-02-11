@@ -3,6 +3,10 @@
 
 import os
 import sys
+
+# Hack so you don't have to put the library containing this script in the PYTHONPATH.
+sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
+
 import numpy as np
 from os.path import join as pjoin
 import argparse
@@ -126,7 +130,8 @@ def track_no_stopping(model, dwi, seeds, step_size=0.5, allowed_voxels=None, max
         # If a streamline goes outside the wm mask, mark is as done.
         if allowed_voxels is not None:
             next_points = sequences[undone, -1] + directions[undone]
-            next_points_voxel = np.round(next_points)
+            # next_points_voxel = np.round(next_points)
+            next_points_voxel = np.floor(next_points + 0.5)
             for idx, voxel in zip(undone, next_points_voxel):
                 if tuple(voxel) not in allowed_voxels:
                     done += [idx]
@@ -191,20 +196,23 @@ def main():
     with Timer("Generating seeds"):
         step_size = 0.5
         if args.trk is not None:
-            streamlines = nib.streamlines.load(args.trk, ref=args.dwi)
+            trk = nib.streamlines.load(args.trk)
+            trk.tractogram.apply_affine(np.linalg.inv(trk.affine))  # We track in voxel space.
             #step_size = np.mean([np.mean(np.sqrt(np.sum((pts[1:]-pts[:-1])**2, axis=1))) for pts in streamlines.points])
             #seeds = [s[0] for s in streamlines.points[::10]]
-            seeds = [s[0] for s in streamlines.points]
-            seeds += [s[-1] for s in streamlines.points]
+            seeds = [s[0] for s in trk.streamlines]
+            seeds += [s[-1] for s in trk.streamlines]
 
     with Timer("Tracking"):
         new_streamlines = track_fct(model, weights, seeds, step_size, allowed_voxels)
 
     with Timer("Saving streamlines"):
         new_streamlines = compress_streamlines(new_streamlines)
-        s = nib.streamlines.Streamlines(new_streamlines)
+        tractogram = nib.streamlines.Tractogram(new_streamlines)
+        tractogram.apply_affine(trk.affine)  # Streamlines were generated in voxel space.
+        new_trk = nib.streamlines.TrkFile(tractogram, trk.header)
         save_path = pjoin(args.experiment, "generated_streamlines.trk")
-        nib.streamlines.save(s, save_path, ref=args.dwi)
+        nib.streamlines.save(new_trk, save_path)
 
 if __name__ == "__main__":
     main()

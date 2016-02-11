@@ -5,7 +5,7 @@ from os.path import join as pjoin
 from setuptools import setup, find_packages
 
 setup(
-    name='learn2track',
+    name='learn2track',',
     version='0.0.1',
     author='Marc-Alexandre Côté',
     author_email='marc-alexandre.cote@usherbrooke.ca',
