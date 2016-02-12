@@ -172,22 +172,11 @@ class BundlesBatchScheduler(BatchScheduler):
             batch_inputs = np.zeros((self.batch_size, max_sequence_length) + inputs[0].shape[1:], dtype=floatX)
             batch_targets = np.zeros((self.batch_size, max_sequence_length) + targets[0].shape[1:], dtype=floatX)
 
-            # Clear previous batch values
-            # self._batch_mask[:, :] = 0
-            # self._batch_inputs[:, :] = 0
-            # self._batch_targets[:, :] = 0
-
             for i, (x, y) in enumerate(zip(inputs, targets)):
-                # self._batch_mask[i, :len(x)] = 1
-                # self._batch_inputs[i, :len(x)] = x
-                # self._batch_targets[i, :len(y)] = y
                 batch_mask[i, :len(x)] = 1
                 batch_inputs[i, :len(x)] = x
                 batch_targets[i, :len(y)] = y
 
-            # self._shared_batch_inputs.set_value(self._batch_inputs)
-            # self._shared_batch_targets.set_value(self._batch_targets)
-            # self._shared_batch_mask.set_value(self._batch_mask)
             self._shared_batch_inputs.set_value(batch_inputs)
             self._shared_batch_targets.set_value(batch_targets)
             self._shared_batch_mask.set_value(batch_mask)

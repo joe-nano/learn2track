@@ -7,7 +7,7 @@ import sys
 # Hack so you don't have to put the library containing this script in the PYTHONPATH.
 sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
-
+import shutil
 import numpy as np
 from os.path import join as pjoin
 import argparse
@@ -20,6 +20,7 @@ from smartlearner import Trainer, tasks, Dataset
 from smartlearner import tasks
 from smartlearner import stopping_criteria
 from smartlearner import views
+from smartlearner import utils as smartutils
 from smartlearner.optimizers import SGD, AdaGrad, Adam
 from smartlearner.direction_modifiers import ConstantLearningRate
 
@@ -132,6 +133,7 @@ def buildArgsParser():
 
     return p
 
+
 def maybe_create_experiment_folder(args):
     # Extract experiments hyperparameters
     hyperparams = dict(vars(args))
@@ -181,6 +183,7 @@ def main():
 
     with Timer("Loading dataset"):
         trainset, validset, testset = load_ismrm2015_challenge(args.dataset)
+        print("Datasets:", len(trainset), len(validset), len(testset))
 
         # TODO: do this when generating the data (in the create_dataset script)
         # Normalize (inplace) the target directions
@@ -194,7 +197,7 @@ def main():
         # for target in testset.targets:
         #     target /= np.sqrt(np.sum(target**2, axis=1, keepdims=True))
 
-        batch_scheduler = BundlesBatchScheduler(trainset, args.batch_size, nb_updates_per_epoch=50)
+        batch_scheduler = BundlesBatchScheduler(trainset, args.batch_size, nb_updates_per_epoch=100)
 
     with Timer("Creating model"):
         input_size = trainset.input_shape[-1]
@@ -228,10 +231,10 @@ def main():
 
         # Print NLL mean/stderror.
         error = views.LossView(loss=L2DistanceForSequences(model, validset),
-                               batch_scheduler=SequenceBatchScheduler(validset, batch_size=512))
+                               batch_scheduler=SequenceBatchScheduler(validset, batch_size=1024))
 
         # Print mean/stderror of loss.
-        trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} ± {1:.2f}", error.mean, error.stderror))
+        trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} ± {1:.2f}", error.sum, error.stderror))
 
         # Save training progression
         # def save_model(*args):
@@ -239,7 +242,7 @@ def main():
             print("\n*** Best epoch: {0}".format(obj.best_epoch))
             trainer.save(experiment_path)
 
-        trainer.append_task(stopping_criteria.EarlyStopping(error.mean, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_model))
+        trainer.append_task(stopping_criteria.EarlyStopping(error.sum, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_model))
 
         if args.max_epoch is not None:
             trainer.append_task(stopping_criteria.MaxEpochStopping(args.max_epoch))

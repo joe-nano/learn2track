@@ -11,10 +11,10 @@ from os.path import join as pjoin
 from scipy.ndimage import map_coordinates
 from itertools import chain
 
-from nibabel.streamlines import CompactList
+from nibabel.streamlines import ArraySequence
 
 from smartlearner import Dataset
-from .dataset import ReconstructionDataset, SequenceDataset, BundlesDataset
+from .dataset import ReconstructionDataset, MaskedSequenceDataset, SequenceDataset, BundlesDataset
 
 
 DATASETS_ENV = "DATASETS"
@@ -30,17 +30,17 @@ def load_ismrm2015_challenge(bundles_path):
         if f.endswith("_trainset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
             inputs, targets = load_bundle(pjoin(bundles_path, f))
-            dataset = SequenceDataset(inputs, targets, name=bundle_name)
+            dataset = MaskedSequenceDataset(inputs, targets, name=bundle_name)
             bundles["trainset"].append(dataset)
         elif f.endswith("_validset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
             inputs, targets = load_bundle(pjoin(bundles_path, f))
-            dataset = SequenceDataset(inputs, targets, name=bundle_name)
+            dataset = MaskedSequenceDataset(inputs, targets, name=bundle_name)
             bundles["validset"].append(dataset)
         elif f.endswith("_testset.npz"):
             bundle_name = f.split("/")[-1][:-len(".npz")]
             inputs, targets = load_bundle(pjoin(bundles_path, f))
-            dataset = SequenceDataset(inputs, targets, name=bundle_name)
+            dataset = MaskedSequenceDataset(inputs, targets, name=bundle_name)
             bundles["testset"].append(dataset)
 
     trainset = BundlesDataset(bundles["trainset"], name=dataset_name+"_trainset")
@@ -49,12 +49,12 @@ def load_ismrm2015_challenge(bundles_path):
     #validset_targets = np.concatenate([b.targets for b in bundles["validset"]])
     validset_inputs = list(chain(*[b.inputs for b in bundles["validset"]]))
     validset_targets = list(chain(*[b.targets for b in bundles["validset"]]))
-    validset = SequenceDataset(validset_inputs, validset_targets, name=dataset_name+"_validset")
+    validset = MaskedSequenceDataset(validset_inputs, validset_targets, name=dataset_name+"_validset")
     #validset = BundlesDataset(bundles["validset"], name=dataset_name+"_validset")
 
     testset_inputs = np.concatenate([b.inputs for b in bundles["testset"]])
     testset_targets = np.concatenate([b.targets for b in bundles["testset"]])
-    testset = SequenceDataset(testset_inputs, testset_targets, name=dataset_name+"_testset")
+    testset = MaskedSequenceDataset(testset_inputs, testset_targets, name=dataset_name+"_testset")
     #testset = BundlesDataset(bundles["testset"], name=dataset_name+"_testset")
 
     return trainset, validset, testset
@@ -69,10 +69,10 @@ def save_bundle(file, inputs, targets):
         Either the file name (string) or an open file (file-like object)
         where the data will be saved. If file is a string, the ``.npz``
         extension will be appended to the file name if it is not already there.
-    inputs : `nibabel.streamlines.CompactList` object
+    inputs : `nibabel.streamlines.ArraySequence` object
         the interpolated dwi data for every 3D point of every streamline found in
         `tractogram.streamlines`.
-    targets : `nib.streamlines.CompactList` object
+    targets : `nib.streamlines.ArraySequence` object
         the direction leading from any 3D point to the next in every streamline.
     """
     np.savez(file,
@@ -97,20 +97,20 @@ def load_bundle(file):
 
     Returns
     -------
-    inputs : `nibabel.streamlines.CompactList` object
+    inputs : `nibabel.streamlines.ArraySequence` object
         the interpolated dwi data for every 3D point of every streamline found in
         `tractogram.streamlines`.
-    targets : `nib.streamlines.CompactList` object
+    targets : `nib.streamlines.ArraySequence` object
         the direction leading from any 3D point to the next in every streamline.
     """
     data = np.load(file)
 
-    inputs = CompactList()
+    inputs = ArraySequence()
     inputs._data = data["inputs_data"]
     inputs._offsets = data["inputs_offsets"]
     inputs._lengths = data["inputs_lengths"]
 
-    targets = CompactList()
+    targets = ArraySequence()
     targets._data = data["targets_data"]
     targets._offsets = data["targets_offsets"]
     targets._lengths = data["targets_lengths"]

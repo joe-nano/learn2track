@@ -391,7 +391,7 @@ class LSTM_Regression(LSTM):
 
     The output of this model is normalized vector.
     """
-    def __init__(self, input_size, hidden_sizes, output_size):
+    def __init__(self, input_size, hidden_sizes, output_size, **_):
         """
         Parameters
         ----------
