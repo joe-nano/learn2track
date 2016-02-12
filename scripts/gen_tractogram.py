@@ -33,6 +33,8 @@ def build_argparser():
     p.add_argument('name', type=str, help='name/path of the experiment.')
     p.add_argument('dwi', type=str, help="diffusion weighted images (.nii|.nii.gz).")
 
+    p.add_argument('--max-nb-points', type=int, help="maximum number of points for a streamline. Default: 1000", default=1000)
+    p.add_argument('--step-size', type=float, help="step size between two consecutive points in a streamlines (in mm). Default: 0.5mm", default=0.5)
     p.add_argument('--wm-mask', type=str, help="streamlines will stop if going outside this mask (.nii|.nii.gz).")
     p.add_argument('--bvals', type=str, help='text file with the bvalues. Default: same name as the dwi file but with extension .bvals.')
     p.add_argument('--seeding-mask', type=str, help="streamlines will start from this mask (.nii|.nii.gz).")
@@ -44,7 +46,6 @@ def build_argparser():
     return p
 
 floatX = theano.config.floatX
-NB_POINTS = 100
 
 
 def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_threshold=0.05, affine=None):
@@ -56,7 +57,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_t
     streamlines = []
     sequences = np.asarray(seeds)[:, None, :]
     # streamlines_dwi = map_coordinates_3d_4d(dwi, sequences[:, [-1]])
-    streamlines_dwi = values_from_volume(dwi, sequences[:, [-1]], affine)[0].astype(np.float32)
+    streamlines_dwi = values_from_volume(dwi, sequences[:, [-1]], affine).astype(np.float32)
 
     for i in range(max_nb_points):
         if (i+1) % 10 == 0:
@@ -71,17 +72,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_t
         # If a streamline goes outside the wm mask, mark is as done.
         if mask is not None:
             next_points = sequences[undone, -1] + directions[undone]
-
-            # # next_points_voxel = np.round(next_points)
-            # next_points_voxel = np.floor(next_points + 0.5)
-            # for idx, voxel in list(zip(undone, next_points_voxel)):
-            #     if tuple(voxel) not in allowed_voxels:
-            #         done += [idx]
-            #         undone.remove(idx)
-
-            values = values_from_volume(mask, next_points.reshape((-1, 1, 3)), affine).flatten()
-            # if values.ndim == 0:  # If there is only a single points, values is scalar instead of a vector.
-            #     values = values.reshape((1,))
+            values = values_from_volume(mask, next_points.reshape((-1, 1, 3)), affine)[:, 0]
 
             done.extend(undone[values < mask_threshold])
             undone = undone[values >= mask_threshold]
@@ -97,7 +88,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_t
         sequences = np.concatenate([sequences, points], axis=1)
 
         streamlines_dwi = np.concatenate([streamlines_dwi[undone],
-                                          values_from_volume(dwi, sequences[:, [-1]], affine)[0].astype(np.float32)
+                                          values_from_volume(dwi, sequences[:, [-1]], affine).astype(np.float32)
                                           # map_coordinates_3d_4d(dwi, sequences[:, [-1]])],
                                           ], axis=1)
 
@@ -150,7 +141,7 @@ def main():
         bvals = np.round(bvals).astype(int)
 
         dwi = nib.load(args.dwi)
-        weights = normalize_dwi(dwi, bvals)
+        weights = normalize_dwi(dwi, bvals).astype(np.float32)
 
     allowed_voxels = None
     if args.wm_mask is not None:
@@ -159,7 +150,6 @@ def main():
             allowed_voxels = set(zip(*np.where(wm_mask)))
 
     with Timer("Generating seeds"):
-        step_size = 0.5
         if args.trk is not None:
             trk = nib.streamlines.load(args.trk)
             # trk.tractogram.apply_affine(np.linalg.inv(trk.affine))  # We track in voxel space.
@@ -174,7 +164,7 @@ def main():
             seeds += [s[-1] for s in trk.streamlines]
 
     with Timer("Tracking"):
-        new_streamlines = track(model, weights, seeds, step_size, mask=wm_mask, affine=dwi.affine)
+        new_streamlines = track(model, weights, seeds, step_size=args.step_size, max_nb_points=args.max_nb_points, mask=wm_mask, affine=dwi.affine)
 
     with Timer("Saving streamlines"):
         new_streamlines = compress_streamlines(new_streamlines)

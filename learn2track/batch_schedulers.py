@@ -89,7 +89,7 @@ class SequenceBatchScheduler(BatchScheduler):
 class BundlesBatchScheduler(BatchScheduler):
     """ Batch of examples are sampled proportionally from each bundle.
     """
-    def __init__(self, bundles_dataset, batch_size, nb_updates_per_epoch, seed=1234):
+    def __init__(self, bundles_dataset, batch_size, seed=1234):
         """
         Parameters
         ----------
@@ -98,8 +98,6 @@ class BundlesBatchScheduler(BatchScheduler):
         batch_size : int
             Number of examples per batch. *Must be greater than the number of
             bundles in `bundles_dataset`.*
-        nb_updates_per_epoch : int
-            Number of updates to do each epoch.
         seed : int (optional)
             Seed of the random numbers generator used to sample different examples
             for each batch.
@@ -108,7 +106,6 @@ class BundlesBatchScheduler(BatchScheduler):
         self._shared_batch_size = theano.shared(np.array(0, dtype='i4'))
         self.batch_size = batch_size
         self.shared_batch_count = theano.shared(np.array(0, dtype='i4'))
-        self.nb_updates_per_epoch = nb_updates_per_epoch
 
         self.shared_batch_count.tag.test_value = self.shared_batch_count.get_value()
         self.dataset.symb_inputs.tag.test_value = np.tile(self.dataset.symb_inputs.tag.test_value, (self.batch_size, 1, 1))
@@ -138,6 +135,7 @@ class BundlesBatchScheduler(BatchScheduler):
     @batch_size.setter
     def batch_size(self, value):
         self._shared_batch_size.set_value(np.array(value, dtype='i4'))
+        self.nb_updates_per_epoch = int(np.ceil(len(self.dataset)/self.batch_size/10.))
 
         # Compute the number of streamlines from each bundle that should be
         # present in a batch.

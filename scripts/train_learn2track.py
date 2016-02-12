@@ -197,7 +197,8 @@ def main():
         # for target in testset.targets:
         #     target /= np.sqrt(np.sum(target**2, axis=1, keepdims=True))
 
-        batch_scheduler = BundlesBatchScheduler(trainset, args.batch_size, nb_updates_per_epoch=100)
+        batch_scheduler = BundlesBatchScheduler(trainset, args.batch_size)
+        print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
 
     with Timer("Creating model"):
         input_size = trainset.input_shape[-1]
