@@ -4,6 +4,7 @@ import os
 import sys
 import numpy as np
 import theano
+import theano.tensor as T
 import string
 import hashlib
 from time import time
@@ -22,7 +23,7 @@ DATASETS_ENV = "DATASETS"
 floatX = theano.config.floatX
 
 
-def load_ismrm2015_challenge(bundles_path):
+def load_ismrm2015_challenge(bundles_path, classification=False):
     dataset_name = "ISMRM15_Challenge"
 
     bundles = {'trainset': [], 'validset': [], 'testset': []}
@@ -45,17 +46,96 @@ def load_ismrm2015_challenge(bundles_path):
 
     trainset = BundlesDataset(bundles["trainset"], name=dataset_name+"_trainset")
 
-    #validset_inputs = np.concatenate([b.inputs for b in bundles["validset"]])
-    #validset_targets = np.concatenate([b.targets for b in bundles["validset"]])
-    validset_inputs = list(chain(*[b.inputs for b in bundles["validset"]]))
-    validset_targets = list(chain(*[b.targets for b in bundles["validset"]]))
+    validset_inputs = ArraySequence(chain(*[b.inputs for b in bundles["validset"]]))
+    validset_targets = ArraySequence(chain(*[b.targets for b in bundles["validset"]]))
     validset = MaskedSequenceDataset(validset_inputs, validset_targets, name=dataset_name+"_validset")
-    #validset = BundlesDataset(bundles["validset"], name=dataset_name+"_validset")
 
-    testset_inputs = np.concatenate([b.inputs for b in bundles["testset"]])
-    testset_targets = np.concatenate([b.targets for b in bundles["testset"]])
+    testset_inputs = ArraySequence(chain(*[b.inputs for b in bundles["testset"]]))
+    testset_targets = ArraySequence(chain(*[b.targets for b in bundles["testset"]]))
     testset = MaskedSequenceDataset(testset_inputs, testset_targets, name=dataset_name+"_testset")
-    #testset = BundlesDataset(bundles["testset"], name=dataset_name+"_testset")
+
+    if classification:
+        # Transform targets (directions) into class id.
+        from dipy.data import get_sphere
+        sphere = get_sphere("repulsion724")  # All possible directions (normed)
+        sphere.vertices = sphere.vertices.astype(theano.config.floatX)
+
+        # Target is the id of the closest direction on the sphere `sphere` determined using cosine similarity.
+        # We do this for each point of the streamline and also each point of the reversed streamline.
+        directions = sphere.vertices.astype(theano.config.floatX)
+        for bundle in trainset.bundles:
+            bundle.targets._data = np.c_[np.argmax(np.dot(bundle.targets._data, directions.T), axis=-1)[:, None],
+                                         np.argmax(np.dot(-bundle.targets._data, directions.T), axis=-1)[:, None]].astype(theano.config.floatX)
+
+        validset.targets._data = np.c_[np.argmax(np.dot(validset.targets._data, directions.T), axis=-1)[:, None],
+                                       np.argmax(np.dot(-validset.targets._data, directions.T), axis=-1)[:, None]].astype(theano.config.floatX)
+
+    return trainset, validset, testset
+
+
+def load_ismrm2015_challenge_contiguous(bundles_path, classification=False, batch_size=1024*10):
+    dataset_name = "ISMRM15_Challenge"
+
+    bundles = {'trainset': [], 'validset': [], 'testset': []}
+    for f in os.listdir(bundles_path):
+        if f.endswith("_trainset.npz"):
+            bundle_name = f.split("/")[-1][:-len(".npz")]
+            inputs, targets = load_bundle(pjoin(bundles_path, f))
+            dataset = MaskedSequenceDataset(inputs, targets, name=bundle_name)
+            bundles["trainset"].append(dataset)
+        elif f.endswith("_validset.npz"):
+            bundle_name = f.split("/")[-1][:-len(".npz")]
+            inputs, targets = load_bundle(pjoin(bundles_path, f))
+            dataset = MaskedSequenceDataset(inputs, targets, name=bundle_name)
+            bundles["validset"].append(dataset)
+        elif f.endswith("_testset.npz"):
+            bundle_name = f.split("/")[-1][:-len(".npz")]
+            inputs, targets = load_bundle(pjoin(bundles_path, f))
+            dataset = MaskedSequenceDataset(inputs, targets, name=bundle_name)
+            bundles["testset"].append(dataset)
+
+    trainset_inputs = ArraySequence(chain(*[b.inputs for b in bundles["trainset"]]))
+    trainset_targets = ArraySequence(chain(*[b.targets for b in bundles["trainset"]]))
+
+    # Shuffle streamlines
+    rng = np.random.RandomState(42)
+    indices = np.arange(len(trainset_inputs))
+    rng.shuffle(indices)
+    trainset_inputs = trainset_inputs[indices]
+    trainset_targets = trainset_targets[indices]
+
+    trainset = MaskedSequenceDataset(trainset_inputs, trainset_targets, name=dataset_name+"_trainset")
+
+    validset_inputs = ArraySequence(chain(*[b.inputs for b in bundles["validset"]]))
+    validset_targets = ArraySequence(chain(*[b.targets for b in bundles["validset"]]))
+    validset = MaskedSequenceDataset(validset_inputs, validset_targets, name=dataset_name+"_validset")
+
+    testset_inputs = ArraySequence(chain(*[b.inputs for b in bundles["testset"]]))
+    testset_targets = ArraySequence(chain(*[b.targets for b in bundles["testset"]]))
+    testset = MaskedSequenceDataset(testset_inputs, testset_targets, name=dataset_name+"_testset")
+
+    if classification:
+        # Transform targets (directions) into class id.
+        from dipy.data import get_sphere
+        sphere = get_sphere("repulsion724")  # All possible directions (normed)
+        sphere.vertices = sphere.vertices.astype(theano.config.floatX)
+
+        # Target is the id of the closest direction on the sphere `sphere` determined using cosine similarity.
+        # We do this for each point of the streamline and also each point of the reversed streamline.
+        directions = sphere.vertices.astype(theano.config.floatX)
+        for start in range(0, len(trainset.targets._data), batch_size):
+            end = start + batch_size
+            trainset.targets._data[start:end, 0] = np.argmax(np.dot(trainset.targets._data[start:end], directions.T), axis=-1)
+            trainset.targets._data[start:end, 1] = np.argmax(np.dot(-trainset.targets._data[start:end], directions.T), axis=-1)
+
+        for start in range(0, len(validset.targets._data), batch_size):
+            end = start + batch_size
+            validset.targets._data[start:end, 0] = np.argmax(np.dot(validset.targets._data[start:end], directions.T), axis=-1)
+            validset.targets._data[start:end, 1] = np.argmax(np.dot(-validset.targets._data[start:end], directions.T), axis=-1)
+
+        # Remove 3rd dimension.
+        trainset.targets._data = trainset.targets._data[:, :2]
+        validset.targets._data = validset.targets._data[:, :2]
 
     return trainset, validset, testset
 
@@ -118,8 +198,9 @@ def load_bundle(file):
     return inputs, targets
 
 
-vocabulary_size = len(string.ascii_lowercase) + 1 # [a-z] + ' '
+vocabulary_size = len(string.ascii_lowercase) + 1  # [a-z] + ' '
 first_letter = ord(string.ascii_lowercase[0])
+
 
 def char2id(char):
     if char in string.ascii_lowercase:
@@ -130,11 +211,13 @@ def char2id(char):
         print('Unexpected character: %s' % char)
         return 0
 
+
 def id2char(dictid):
     if dictid > 0:
         return chr(dictid + first_letter - 1)
     else:
         return ' '
+
 
 def load_text8():
     # http://mattmahoney.net/dc/textdata
@@ -232,13 +315,20 @@ def map_coordinates_3d_4d(input_array, indices, affine=None):
 
 
 def normalize_dwi(dwi, bvals):
-    """
+    """ Normalize dwi by the first b0.
+
     Parameters:
     -----------
     dwi : `nibabel.NiftiImage` object
         Diffusion weighted images (4D).
     bvals : list of int
-        B-values used with each direction.
+        B-values used with each direction. With this we can
+        know which "directions" correspond to B0 images.
+
+    Returns
+    -------
+    ndarray
+        Diffusion weights normalized by the first B0.
     """
     # Indices of bvals sorted
     sorted_bvals_idx = np.argsort(bvals)
@@ -253,6 +343,105 @@ def normalize_dwi(dwi, bvals):
     #weights_normed = np.minimum(weights, b0)
     # Normalize dwi using the b0.
     weights_normed = weights / b0
-    weights_normed[np.isnan(weights_normed)] = 0.
+    weights_normed[np.logical_not(np.isfinite(weights_normed))] = 0.
 
     return weights_normed
+
+
+def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
+    """ Resamples a diffusion signal according to a set of directions using spherical harmonics.
+
+    Parameters
+    -----------
+    dwi : `nibabel.NiftiImage` object
+        Diffusion signal as weighted images (4D).
+    bvals : ndarray shape (N,)
+        B-values used with each direction.
+    bvecs : ndarray shape (N, 3)
+        Directions of the diffusion signal. Directions are
+        assumed to be only on the hemisphere.
+    directions : `dipy.core.sphere.Sphere` object, optional
+        Directions the diffusion signal will be resampled to. Directions are
+        assumed to be on the whole sphere, not the hemisphere like bvecs.
+        If omitted, 100 directions evenly distributed on the sphere will be used.
+    sh_order : int, optional
+        SH order. Default: 4
+    smooth : float, optional
+        Lambda-regularization in the SH fit. Default: 0.006.
+
+    Returns
+    -------
+    ndarray
+        Diffusion weights resampled according to `sphere`.
+    """
+    from dipy.data import get_sphere
+    from dipy.core.sphere import Sphere, HemiSphere
+    from dipy.reconst.shm import sph_harm_lookup, smooth_pinv
+
+    # Start by normalizing DWI with the B0.
+    weights = normalize_dwi(dwi, bvals)
+
+    idx = np.where(bvals >= 1e-4)[0]  # Discard b-value == 0
+    bvals = np.asarray(bvals)[idx]
+    bvecs = np.asarray(bvecs)[idx]
+
+    # Assuming all directions are on the hemisphere.
+    raw_sphere = HemiSphere(xyz=bvecs)
+
+    # Fit SH to signal
+    sph_harm_basis = sph_harm_lookup.get('mrtrix')
+    Ba, m, n = sph_harm_basis(sh_order, raw_sphere.theta, raw_sphere.phi)
+    L = -n * (n + 1)
+    invB = smooth_pinv(Ba, np.sqrt(smooth) * L)
+    data_sh = np.dot(weights, invB.T)
+
+    sphere = get_sphere('repulsion100')
+    # sphere = get_sphere('repulsion724')
+    if directions is not None:
+        sphere = Sphere(xyz=bvecs[1:])
+
+    Ba, m, n = sph_harm_basis(sh_order, sphere.theta, sphere.phi)
+    data_resampled = np.dot(data_sh, Ba.T)
+    return data_resampled
+
+
+def find_closest(sphere, xyz, normed=True):
+    """
+    Find the index of the vertex in the Sphere closest to the input vector
+
+    Parameters
+    ----------
+    xyz : ndarray shape (N, 3)
+        Input vector(s)
+    normed : {True, False}, optional
+        Normalized input vector(s).
+
+    Return
+    ------
+    idx : ndarray shape (N,)
+        The index/indices into the Sphere.vertices array that gives the closest
+        vertex (in angle).
+    """
+    if normed:
+        xyz = xyz / np.sqrt(np.sum(xyz**2, axis=1, dtype=float, keepdims=True)).astype(np.float32)
+
+    cos_sim = np.abs(np.dot(sphere.vertices, xyz.T))
+    return np.argmax(cos_sim, axis=0)
+
+
+def logsumexp(x, axis=None, keepdims=False):
+    max_value = T.max(x, axis=axis, keepdims=True)
+    res = max_value + T.log(T.sum(T.exp(x-max_value), axis=axis, keepdims=True))
+    if not keepdims:
+        if axis is None:
+            return T.squeeze(res)
+
+        slices = [slice(None, None, None)]*res.ndim
+        slices[axis] = 0  # Axis being merged
+        return res[tuple(slices)]
+
+    return res
+
+
+def softmax(x, axis=None):
+    return T.exp(x - logsumexp(x, axis=axis, keepdims=True))
