@@ -12,6 +12,7 @@ import numpy as np
 from os.path import join as pjoin
 import argparse
 
+import theano
 import nibabel as nib
 
 import theano.tensor as T
@@ -26,18 +27,20 @@ from smartlearner.direction_modifiers import ConstantLearningRate
 
 
 from learn2track import utils
-from learn2track.utils import Timer, load_ismrm2015_challenge
-from learn2track.lstm import LSTM_Regression, LSTM_RegressionWithFeaturesExtraction
+from learn2track.utils import Timer, load_ismrm2015_challenge, load_ismrm2015_challenge_contiguous
+from learn2track.lstm import LSTM_Regression, LSTM_RegressionWithFeaturesExtraction, LSTM_Softmax, LSTM_Hybrid
 from learn2track.factories import ACTIVATION_FUNCTIONS
 from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory
 from learn2track.factories import optimizer_factory
 #from learn2track.view import RegressionError
 
-from learn2track.losses import L2DistanceWithBinaryCrossEntropy, L2DistanceForSequences
+from learn2track.losses import L2DistanceWithBinaryCrossEntropy, L2DistanceForSequences, NLLForSequenceOfDirections, ErrorForSequenceOfDirections
+from learn2track.losses import ErrorForSequenceWithClassTarget, NLLForSequenceWithClassTarget
 from learn2track.batch_schedulers import BundlesBatchScheduler, SequenceBatchScheduler
+from learn2track.batch_schedulers import BundlesBatchSchedulerWithClassTarget, SequenceBatchSchedulerWithClassTarget
 
 # DATASETS = ["ismrm2015_challenge"]
-MODELS = ['lstm', 'lstm_extraction']
+MODELS = ['lstm', 'lstm_hybrid', 'lstm_extraction']
 
 
 def build_train_lstm_argparser(subparser):
@@ -45,10 +48,35 @@ def build_train_lstm_argparser(subparser):
 
     p = subparser.add_parser("lstm", description=DESCRIPTION, help=DESCRIPTION)
 
-    p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+    # p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
 
     # Model options (LSTM)
     model = p.add_argument_group("LSTM arguments")
+
+    model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
+                       help="Size of the hidden layers. Default: 500")
+
+    model.add_argument('--hidden-activation', type=str, choices=ACTIVATION_FUNCTIONS, default=ACTIVATION_FUNCTIONS[0],
+                       help="Activation functions: {}".format(ACTIVATION_FUNCTIONS),)
+    model.add_argument('--weights-initialization', type=str, default=WEIGHTS_INITIALIZERS[0], choices=WEIGHTS_INITIALIZERS,
+                       help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
+    model.add_argument('--initialization-seed', type=int, default=1234,
+                       help='seed used to generate random numbers. Default=1234')
+
+    # General parameters (optional)
+    general = p.add_argument_group("General arguments")
+    general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+
+
+def build_train_lstm_hybrid_argparser(subparser):
+    DESCRIPTION = "Train a LSTM Hybrid."
+
+    p = subparser.add_parser("lstm_hybrid", description=DESCRIPTION, help=DESCRIPTION)
+
+    # p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+
+    # Model options (LSTM)
+    model = p.add_argument_group("LSTM Hybrid arguments")
 
     model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
                        help="Size of the hidden layers. Default: 500")
@@ -70,7 +98,7 @@ def build_train_lstm_extraction_argparser(subparser):
 
     p = subparser.add_parser("lstm_extraction", description=DESCRIPTION, help=DESCRIPTION)
 
-    p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+    # p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
 
     # Model options (LSTM)
     model = p.add_argument_group("LSTM arguments")
@@ -98,6 +126,13 @@ def buildArgsParser():
                    " (ismrm2015_challenge) using Theano.")
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
+    # Dataset options
+    dataset = p.add_argument_group("Dataset")
+    dataset.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+    dataset.add_argument('--nb-updates-per-epoch', type=int,
+                         help=('If specified, a batch will be composed of streamlines drawn from each different bundle (similar amount) each update.'
+                               ' Default: go through all streamlines in the trainset exactly sonce.'))
+
     duration = p.add_argument_group("Training duration options")
     duration.add_argument('--max-epoch', type=int, metavar='N', help='if specified, train for a maximum of N epochs.')
     duration.add_argument('--lookahead', type=int, metavar='K', default=10,
@@ -119,6 +154,12 @@ def buildArgsParser():
     optimizer.add_argument('--AdaGrad', metavar="LR [EPS=1e-6]", type=str, help='use AdaGrad for training.')
     optimizer.add_argument('--Adam', action="store_true", help='use Adam for training.')
 
+    # Task
+    task = p.add_argument_group("Task (required)")
+    task = task.add_mutually_exclusive_group(required=True)
+    task.add_argument('--regression', action="store_true", help='consider this problem as a regression task.')
+    task.add_argument('--classification', action="store_true", help='consider this problem as a classification task.')
+
     # General options (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('--name', type=str,
@@ -130,6 +171,7 @@ def buildArgsParser():
     subparser.required = True   # force 'required' testing
     build_train_lstm_argparser(subparser)
     build_train_lstm_extraction_argparser(subparser)
+    build_train_lstm_hybrid_argparser(subparser)
 
     return p
 
@@ -160,7 +202,7 @@ def maybe_create_experiment_folder(args):
             print("{\n" + "\n".join(["{}: {}".format(k, hyperparams[k]) for k in sorted(hyperparams.keys())]) + "\n}")
             print("{\n" + "\n".join(["{}: {}".format(k, hyperparams_loaded[k]) for k in sorted(hyperparams_loaded.keys())]) + "\n}")
             print("The arguments provided are different than the one saved. Use --force if you are certain.\nQuitting.")
-            exit(1)
+            sys.exit(1)
     else:
         if os.path.isdir(experiment_path):
             shutil.rmtree(experiment_path)
@@ -174,45 +216,61 @@ def maybe_create_experiment_folder(args):
 def main():
     parser = buildArgsParser()
     args = parser.parse_args()
+    print(args)
 
     experiment_path, hyperparams, resuming = maybe_create_experiment_folder(args)
     if resuming:
-        print ("Resuming:", experiment_path)
+        print("Resuming:", experiment_path)
     else:
-        print ("Creating:", experiment_path)
+        print("Creating:", experiment_path)
 
     with Timer("Loading dataset"):
-        trainset, validset, testset = load_ismrm2015_challenge(args.dataset)
+        if args.nb_updates_per_epoch is None:
+            trainset, validset, testset = load_ismrm2015_challenge_contiguous(args.dataset, args.classification)
+            if args.classification:
+                batch_scheduler = SequenceBatchSchedulerWithClassTarget(trainset, args.batch_size)
+            elif args.regression:
+                batch_scheduler = SequenceBatchScheduler(trainset, args.batch_size)
+
+        else:
+            trainset, validset, testset = load_ismrm2015_challenge(args.dataset, args.classification)
+            if args.classification:
+                batch_scheduler = BundlesBatchSchedulerWithClassTarget(trainset, args.batch_size)
+            elif args.regression:
+                batch_scheduler = BundlesBatchScheduler(trainset, args.batch_size)
+
         print("Datasets:", len(trainset), len(validset), len(testset))
-
-        # TODO: do this when generating the data (in the create_dataset script)
-        # Normalize (inplace) the target directions
-        for bundle in trainset.bundles:
-            for target in bundle.targets:
-                target /= np.sqrt(np.sum(target**2, axis=1, keepdims=True))
-
-        for target in validset.targets:
-            target /= np.sqrt(np.sum(target**2, axis=1, keepdims=True))
-
-        # for target in testset.targets:
-        #     target /= np.sqrt(np.sum(target**2, axis=1, keepdims=True))
-
-        batch_scheduler = BundlesBatchScheduler(trainset, args.batch_size)
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
 
     with Timer("Creating model"):
         input_size = trainset.input_shape[-1]
         output_size = trainset.target_shape[-1]
-        if args.model == "lstm":
-            model = LSTM_Regression(input_size, args.hidden_sizes, output_size)
-        elif args.model == "lstm_extraction":
-            model = LSTM_RegressionWithFeaturesExtraction(input_size, args.features_size, args.hidden_sizes, output_size)
+        if args.regression:
+            if args.model == "lstm":
+                model = LSTM_Regression(input_size, args.hidden_sizes, output_size)
+            elif args.model == "lstm_extraction":
+                model = LSTM_RegressionWithFeaturesExtraction(input_size, args.features_size, args.hidden_sizes, output_size)
+
+        elif args.classification:
+            from dipy.data import get_sphere
+            sphere = get_sphere("repulsion724")  # All possible directions (normed)
+            sphere.vertices = sphere.vertices.astype(theano.config.floatX)
+
+            if args.model == "lstm":
+                model = LSTM_Softmax(input_size, args.hidden_sizes, len(sphere.vertices))
+            elif args.model == "lstm_hybrid":
+                model = LSTM_Hybrid(input_size, args.hidden_sizes, len(sphere.vertices))
 
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
 
     with Timer("Building optimizer"):
-        loss = L2DistanceForSequences(model, trainset)
+        if args.regression:
+            loss = L2DistanceForSequences(model, trainset)
+        elif args.classification:
+            # loss = NLLForSequenceOfDirections(model, trainset)
+            loss = NLLForSequenceWithClassTarget(model, trainset)
+
         optimizer = optimizer_factory(hyperparams, loss)
 
     with Timer("Building trainer"):
@@ -230,12 +288,29 @@ def main():
         # Print average training loss.
         trainer.append_task(tasks.Print("Avg. training loss:     : {}", avg_loss))
 
+        if args.classification and args.model == "lstm_hybrid":
+            mask = trainset.symb_mask
+            targets_directions = smartutils.sharedX(sphere.vertices)[T.cast(trainset.symb_targets[:, :, 0], dtype="int32")]
+            reconstruction_error = T.sum(((model.directions - targets_directions)**2), axis=2)
+            avg_reconstruction_error_per_sequence = T.sum(reconstruction_error*mask, axis=1) #/ T.sum(mask, axis=1)
+            # avg_reconstruction_error_monitor = views.MonitorVariable(T.mean(avg_reconstruction_error_per_sequence))
+            avg_reconstruction_error_monitor = views.MonitorVariable(T.sum(avg_reconstruction_error_per_sequence))
+            avg_reconstruction_error = tasks.AveragePerEpoch(avg_reconstruction_error_monitor)
+            trainer.append_task(avg_reconstruction_error)
+            trainer.append_task(tasks.Print("Avg. reconstruction error:     : {}", avg_reconstruction_error))
+
         # Print NLL mean/stderror.
-        error = views.LossView(loss=L2DistanceForSequences(model, validset),
-                               batch_scheduler=SequenceBatchScheduler(validset, batch_size=1024))
+        if args.regression:
+            valid_loss = L2DistanceForSequences(model, validset)
+            valid_batch_scheduler = SequenceBatchScheduler(validset, batch_size=50)
+        elif args.classification:
+            valid_loss = ErrorForSequenceWithClassTarget(model, validset)
+            valid_batch_scheduler = SequenceBatchSchedulerWithClassTarget(validset, batch_size=50)
+        error = views.LossView(loss=valid_loss,
+                               batch_scheduler=valid_batch_scheduler)
 
         # Print mean/stderror of loss.
-        trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} ± {1:.2f}", error.sum, error.stderror))
+        trainer.append_task(tasks.Print("Validset - Error        : {0:.2%} ± {1:.2f}", error.mean, error.stderror))
 
         # Save training progression
         # def save_model(*args):
@@ -243,7 +318,7 @@ def main():
             print("\n*** Best epoch: {0}".format(obj.best_epoch))
             trainer.save(experiment_path)
 
-        trainer.append_task(stopping_criteria.EarlyStopping(error.sum, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_model))
+        trainer.append_task(stopping_criteria.EarlyStopping(error.mean, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_model))
 
         if args.max_epoch is not None:
             trainer.append_task(stopping_criteria.MaxEpochStopping(args.max_epoch))

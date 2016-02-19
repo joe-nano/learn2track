@@ -2,6 +2,7 @@ import theano
 import theano.tensor as T
 
 from smartlearner.interfaces import Loss
+from learn2track.utils import softmax
 
 
 class L2DistanceForSequences(Loss):
@@ -12,7 +13,8 @@ class L2DistanceForSequences(Loss):
         mask = self.dataset.symb_mask
 
         regression_outputs = model_output
-        self.mean_sqr_error = T.mean(((regression_outputs - self.dataset.symb_targets)**2)*mask[:, :, None], axis=[1, 2])
+        mean_sqr_error_per_item = T.mean(((regression_outputs - self.dataset.symb_targets)**2), axis=2)
+        self.mean_sqr_error = T.sum(mean_sqr_error_per_item*mask, axis=1) / T.sum(mask, axis=1)
 
         return self.mean_sqr_error
 
@@ -77,3 +79,127 @@ class SequenceNegativeLogLikelihood(Loss):
         # Put back the examples so they are in the first dimension.
         nlls = T.transpose(nlls, axes=(1, 0))
         return T.mean(nlls, axis=1)
+
+
+class NegativeLogLikelihoodForSequences(Loss):
+    def _get_updates(self):
+        return {}  # There is no updates for L2Distance.
+
+    def _compute_losses(self, model_output):
+        mask = self.dataset.symb_mask
+
+        nll = -T.log(model_output)  # Assume model has a softmax output, or equivalent
+        indices = T.cast(self.dataset.symb_targets[:, :, 0], dtype="int32")  # Targets are floats.
+        selected_nll = nll[T.arange(self.dataset.symb_targets.shape[0]), T.arange(self.dataset.symb_targets.shape[1]), indices]
+        selected_nll_seq = T.mean(selected_nll*mask[:, :, None], axis=[1, 2])
+
+        from ipdb import set_trace as dbg
+        dbg()
+
+        return selected_nll_seq
+
+
+class NLLForSequenceOfDirections(Loss):
+    def _get_updates(self):
+        return {}  # There is no updates for L2Distance.
+
+    def _compute_losses(self, model_output):
+        mask = self.dataset.symb_mask
+
+        target_directions = self.dataset.symb_targets
+        # target_directions /= T.sqrt(T.sum(target_directions**2, axis=1, keepdims=True))
+
+        from dipy.data import get_sphere
+        sphere = get_sphere("repulsion100")  # All possible directions (normed)
+        sphere.vertices = sphere.vertices.astype(theano.config.floatX)
+
+        # Find the closest direction.
+        cos_sim = T.dot(target_directions, sphere.vertices.T)
+        targets = T.argmax(cos_sim, axis=-1)
+
+        # Compute NLL
+        model_directions = model_output  # Assume model outputs one 3D vector (normed) per sequence element.
+        probs = softmax(T.dot(model_directions, sphere.vertices.T), axis=-1)
+        nlls = -T.log(probs)
+
+        indices = T.cast(targets, dtype="int32")  # Targets are floats.
+        selected_nll = nlls[T.arange(self.dataset.symb_targets.shape[0])[:, None],
+                            T.arange(self.dataset.symb_targets.shape[1])[None, :],
+                            indices]
+        selected_nll_seq = T.sum(selected_nll*mask, axis=1) / T.sum(mask, axis=1)
+
+        return selected_nll_seq
+
+
+class ErrorForSequenceOfDirections(Loss):
+    """ Computes classfication error for learn2track.
+    """
+    def _get_updates(self):
+        return {}  # There is no updates for ClassificationError.
+
+    def _compute_losses(self, model_output):
+        mask = self.dataset.symb_mask
+
+        target_directions = self.dataset.symb_targets
+        # target_directions /= T.sqrt(T.sum(target_directions**2, axis=1, keepdims=True))
+
+        from dipy.data import get_sphere
+        sphere = get_sphere("repulsion100")  # All possible directions (normed)
+        sphere.vertices = sphere.vertices.astype(theano.config.floatX)
+
+        # Find the closest direction.
+        cos_sim = T.dot(target_directions, sphere.vertices.T)
+        targets = T.argmax(cos_sim, axis=-1)
+
+        # Compute probs
+        model_directions = model_output  # Assume model outputs one 3D vector (normed) per sequence element.
+        probs = softmax(T.dot(model_directions, sphere.vertices.T), axis=-1)
+
+        predictions = T.argmax(probs, axis=2)
+        errors = T.neq(predictions, targets)
+        mean_errors_per_sequence = T.sum(errors*mask, axis=1) / T.sum(mask, axis=1)
+
+        return mean_errors_per_sequence
+
+
+class NLLForSequenceWithClassTarget(Loss):
+    def _get_updates(self):
+        return {}  # There is no updates for L2Distance.
+
+    def _compute_losses(self, model_output):
+        mask = self.dataset.symb_mask
+
+        targets = self.dataset.symb_targets
+
+        # Compute NLL
+        probs = model_output  # Assume model outputs a vector of probabilities (i.e. softmax output layer).
+        nlls = -T.log(probs)
+
+        indices = T.cast(targets, dtype="int32")  # Targets are floats.
+        selected_nll = nlls[T.arange(targets.shape[0])[:, None],
+                            T.arange(targets.shape[1])[None, :],
+                            indices[:, :, 0]]
+        selected_nll_seq = T.sum(selected_nll*mask, axis=1) / T.sum(mask, axis=1)
+
+        return selected_nll_seq
+
+
+class ErrorForSequenceWithClassTarget(Loss):
+    """ Computes classfication error for learn2track.
+    """
+    def _get_updates(self):
+        return {}  # There is no updates for ClassificationError.
+
+    def _compute_losses(self, model_output):
+        mask = self.dataset.symb_mask
+
+        targets = self.dataset.symb_targets
+
+        # Compute probs
+        probs = model_output  # Assume model outputs a vector of probabilities (i.e. softmax output layer).
+
+        predictions = T.argmax(probs, axis=2)
+        errors = T.neq(predictions, targets[:, :, 0])
+        mean_errors_per_sequence = T.sum(errors*mask, axis=1) / T.sum(mask, axis=1)
+
+        return mean_errors_per_sequence

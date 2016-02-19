@@ -1,6 +1,7 @@
 import os
 from os.path import join as pjoin
 
+import pickle
 import numpy as np
 import theano
 import theano.tensor as T
@@ -105,10 +106,11 @@ class LayerLSTM(object):
 
 
 class LayerRegression(object):
-    def __init__(self, input_size, output_size, name="Regression"):
+    def __init__(self, input_size, output_size, normed=True, name="Regression"):
 
         self.input_size = input_size
         self.output_size = output_size
+        self.normed = normed
         self.name = name
 
         # Regression output weights and biases
@@ -125,7 +127,9 @@ class LayerRegression(object):
     def fprop(self, X):
         out = T.dot(X, self.W) + self.b
         # Normalize the output vector.
-        out = out / (T.sqrt(T.sum(out**2, axis=1, keepdims=True) + 1e-8))
+        if self.normed:
+            out /= (T.sqrt(T.sum(out**2, axis=1, keepdims=True) + 1e-8))
+
         return out
 
 
@@ -152,6 +156,17 @@ class LayerSoftmax(object):
         # The softmax function, applied to a matrix, computes the softmax values row-wise.
         out = T.nnet.softmax(preactivation)
         return out
+
+
+class Stackable(Model):
+    def __init__(self):
+        self.layers = []
+        self._prev = None
+        self._next = None
+
+    def __add__(self, layer):
+        self._next = layer
+        layer._prev = self
 
 
 class LSTM(Model):
@@ -220,6 +235,11 @@ class LSTM(Model):
 
         return tuple(layers_h) + tuple(layers_m)
 
+    def seq_squeeze(self, tokeep):
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            self.states_h[i].set_value(self.states_h[i].get_value()[tokeep])
+            self.states_m[i].set_value(self.states_m[i].get_value()[tokeep])
+
     def seq_reset(self, batch_size=None):
         """ Start a new batch of sequences. """
         if self._gen is None:
@@ -286,7 +306,7 @@ class LSTM_Softmax(LSTM):
 
     The output of this model is a distribution.
     """
-    def __init__(self, input_size, hidden_sizes, output_size):
+    def __init__(self, input_size, hidden_sizes, output_size, **_):
         """
         Parameters
         ----------
@@ -300,6 +320,11 @@ class LSTM_Softmax(LSTM):
         super().__init__(input_size, hidden_sizes)
         self.output_size = output_size
         self.layer_softmax = LayerSoftmax(self.hidden_sizes[-1], self.output_size)
+
+        from dipy.data import get_sphere
+        # self.directions = sharedX(get_sphere("repulsion" + str(self.output_size)).vertices.astype(theano.config.floatX))
+        self.directions = get_sphere("repulsion" + str(self.output_size)).vertices.astype(theano.config.floatX)
+        self.shared_directions = sharedX(self.directions)
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -337,9 +362,14 @@ class LSTM_Softmax(LSTM):
         self.probs = T.transpose(results[-1], axes=(1, 0, 2))
         return self.probs
 
+    def seq_next(self, input):
+        next_timestep = super().seq_next(input)
+        idx = np.argmax(next_timestep, axis=1)
+        return self.directions[idx]
+
     def use(self, X):
-        idx = T.argmax(self.get_output(X), axis=1)
-        return idx
+        idx = T.argmax(self.get_output(X), axis=2)
+        return self.directions[idx]
 
 
 class LSTM_SoftmaxWithFeaturesExtraction(LSTM_Softmax):
@@ -489,3 +519,103 @@ class LSTM_RegressionWithFeaturesExtraction(LSTM_Regression):
         h0 = self.layer_dense.fprop(Xi)
         outputs = super()._fprop(h0, *args)
         return outputs
+
+
+class LSTM_Hybrid(LSTM):
+    """ A standard LSTM model regression layer stacked on top of it, then a Softmax layer.
+
+    The output of this model is probabilities distribution over the targets.
+    """
+    def __init__(self, input_size, hidden_sizes, output_size, **_):
+        """
+        Parameters
+        ----------
+        input_size : int
+            Number of units each element Xi in the input sequence X has.
+        hidden_sizes : int, list of int
+            Number of hidden units each LSTM should have.
+        output_size : int
+            Number of units the softmax layer should have.
+        """
+        super().__init__(input_size, hidden_sizes)
+        self.output_size = output_size
+        self.layer_regression = LayerRegression(self.hidden_sizes[-1], 3, normed=True)
+
+        from dipy.data import get_sphere
+        self.sphere = get_sphere("repulsion" + str(self.output_size))
+        self.sphere_directions = self.sphere.vertices.astype(theano.config.floatX)
+        # self.shared_directions = sharedX(self.directions)
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        super().initialize(weights_initializer)
+        self.layer_regression.initialize(weights_initializer)
+
+    @property
+    def hyperparameters(self):
+        hyperparameters = super().hyperparameters
+        hyperparameters['output_size'] = self.output_size
+        return hyperparameters
+
+    @property
+    def parameters(self):
+        return super().parameters + self.layer_regression.parameters
+
+    def _fprop_regression(self, Xi, *args):
+        outputs = super()._fprop(Xi, *args)
+        last_layer_h = outputs[len(self.hidden_sizes)-1]
+        regression_out = self.layer_regression.fprop(last_layer_h)
+        return outputs + (regression_out,)
+
+    def _fprop(self, Xi, *args):
+        outputs = self._fprop_regression(Xi, *args)
+        regression_out = outputs[-1]
+
+        # Map regression output to one of the allowed directions, then take the softmax.
+        preactivation = T.dot(regression_out, self.sphere_directions.T)
+        probs = T.nnet.softmax(preactivation)  # The softmax function, applied to a matrix, computes the softmax values row-wise.
+        return outputs + (probs,)
+
+    def get_output(self, X):
+        outputs_info_h = []
+        outputs_info_m = []
+        for hidden_size in self.hidden_sizes:
+            outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
+            outputs_info_m.append(T.zeros((X.shape[0], hidden_size)))
+
+        results, updates = theano.scan(fn=self._fprop,
+                                       outputs_info=outputs_info_h + outputs_info_m + [None, None],
+                                       sequences=[T.transpose(X, axes=(1, 0, 2))])  # We want to scan over sequence elements, not the examples.
+
+        self.graph_updates.update(updates)
+        # Put back the examples so they are in the first dimension.
+        self.directions = T.transpose(results[-2], axes=(1, 0, 2))
+        self.probs = T.transpose(results[-1], axes=(1, 0, 2))
+        return self.probs
+
+    def seq_next(self, input):
+        """ Returns the next *unnormalized* directions. """
+        if self._gen is None:
+            self.seq_reset(batch_size=len(input))
+
+            X = T.TensorVariable(type=T.TensorType("floatX", [False]*input.ndim), name='X')
+            X.tag.test_value = input
+
+            states = self.states_h + self.states_m
+            new_states = self._fprop_regression(X, *states)
+            new_states_h = new_states[:len(self.hidden_sizes)]
+            new_states_m = new_states[len(self.hidden_sizes):-1]
+            output = new_states[-1]
+
+            updates = OrderedDict()
+            for i in range(len(self.hidden_sizes)):
+                updates[self.states_h[i]] = new_states_h[i]
+                updates[self.states_m[i]] = new_states_m[i]
+
+            self._gen = theano.function([X], output, updates=updates)
+
+        return self._gen(input)
+
+    def use(self, X):
+        """ Returns the directions from the sphere. """
+        idx = T.argmax(self.get_output(X), axis=2)
+        return self.directions[idx]
