@@ -169,7 +169,7 @@ class NLLForSequenceWithClassTarget(Loss):
     def _compute_losses(self, model_output):
         mask = self.dataset.symb_mask
 
-        targets = self.dataset.symb_targets
+        targets = self.dataset.symb_targets  # Class IDs.
 
         # Compute NLL
         probs = model_output  # Assume model outputs a vector of probabilities (i.e. softmax output layer).

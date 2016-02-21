@@ -67,9 +67,6 @@ class LayerLSTM(object):
         self.Um = sharedX(value=np.zeros((hidden_size, hidden_size)), name=self.name+'_Um')
 
         # Memory weights (i:input, o:output, f:forget, m:memory)
-        # self.Vi = sharedX(value=np.eye(hidden_size), name=self.name+'_Vi')
-        # self.Vo = sharedX(value=np.eye(hidden_size), name=self.name+'_Vo')
-        # self.Vf = sharedX(value=np.eye(hidden_size), name=self.name+'_Vf')
         self.Vi = sharedX(value=np.ones(hidden_size), name=self.name+'_Vi')
         self.Vo = sharedX(value=np.ones(hidden_size), name=self.name+'_Vo')
         self.Vf = sharedX(value=np.ones(hidden_size), name=self.name+'_Vf')
@@ -90,16 +87,122 @@ class LayerLSTM(object):
 
     def fprop(self, Xi, last_h, last_m):
         # TODO: replace sigmoid by ReLU?
-        gate_i = T.nnet.sigmoid(T.dot(Xi, self.Wi) + T.dot(last_h, self.Ui) + T.dot(last_m, T.diag(self.Vi)) + self.bi)
-        # gate_i = T.nnet.sigmoid(T.dot(Xi, self.Wi) + T.dot(last_h, self.Ui) + T.dot(last_m, self.Vi) + self.bi)
+        gate_i = T.nnet.sigmoid(T.dot(Xi, self.Wi) + T.dot(last_h, self.Ui) + last_m*self.Vi + self.bi)
         mi = T.tanh(T.dot(Xi, self.Wm) + T.dot(last_h, self.Um) + self.bm)
 
-        gate_f = T.nnet.sigmoid(T.dot(Xi, self.Wf) + T.dot(last_h, self.Uf) + T.dot(last_m, T.diag(self.Vf)) + self.bf)
-        # gate_f = T.nnet.sigmoid(T.dot(Xi, self.Wf) + T.dot(last_h, self.Uf) + T.dot(last_m, self.Vf) + self.bf)
+        gate_f = T.nnet.sigmoid(T.dot(Xi, self.Wf) + T.dot(last_h, self.Uf) + last_m*self.Vf + self.bf)
         m = gate_i*mi + gate_f*last_m
 
-        gate_o = T.nnet.sigmoid(T.dot(Xi, self.Wo) + T.dot(last_h, self.Uo) + T.dot(m, T.diag(self.Vo)) + self.bo)
-        # gate_o = T.nnet.sigmoid(T.dot(Xi, self.Wo) + T.dot(last_h, self.Uo) + T.dot(m, self.Vo) + self.bo)
+        gate_o = T.nnet.sigmoid(T.dot(Xi, self.Wo) + T.dot(last_h, self.Uo) + m*self.Vo + self.bo)
+        h = gate_o * self.activation_fct(m)
+
+        return h, m
+
+
+class LayerLSTMFast(object):
+    def __init__(self, input_size, hidden_size, activation="tanh", name="LSTM"):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.name = name
+        self.activation = activation
+        self.activation_fct = factories.make_activation_function(self.activation)
+
+        # Input weights (i:input, o:output, f:forget, m:memory)
+        # Concatenation of the weights in that order: Wi, Wo, Wf, Wm
+        self.W = sharedX(value=np.zeros((input_size, 4*hidden_size)), name=self.name+'_W')
+
+        # Biases (i:input, o:output, f:forget, m:memory)
+        # Concatenation of the biases in that order: bi, bo, bf, bm
+        self.b = sharedX(value=np.zeros(4*hidden_size), name=self.name+'_b')
+
+        # Recurrence weights (i:input, o:output, f:forget, m:memory)
+        # Concatenation of the recurrence weights in that order: Ui, Uo, Uf, Um
+        self.U = sharedX(value=np.zeros((hidden_size, 4*hidden_size)), name=self.name+'_U')
+
+        # Memory weights (i:input, o:output, f:forget, m:memory)
+        self.Vi = sharedX(value=np.ones(hidden_size), name=self.name+'_Vi')
+        self.Vo = sharedX(value=np.ones(hidden_size), name=self.name+'_Vo')
+        self.Vf = sharedX(value=np.ones(hidden_size), name=self.name+'_Vf')
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        weights_initializer(self.W)
+        weights_initializer(self.U)
+
+    @property
+    def parameters(self):
+        return [self.W, self.U, self.b,
+                self.Vi, self.Vo, self.Vf]
+
+    def fprop(self, Xi, last_h, last_m):
+        def slice_(x, no):
+            if type(no) is str:
+                no = ['i', 'o', 'f', 'm'].index(no)
+            return x[:, no*self.hidden_size: (no+1)*self.hidden_size]
+
+        Xi = (T.dot(Xi, self.W) + self.b)  # SPEEDUP: compute this outside for all timestep at once.
+        preactivation = Xi + T.dot(last_h, self.U)
+
+        gate_i = T.nnet.sigmoid(slice_(preactivation, 'i') + last_m*self.Vi)
+        mi = self.activation_fct(slice_(preactivation, 'm'))
+
+        gate_f = T.nnet.sigmoid(slice_(preactivation, 'f') + last_m*self.Vf)
+        m = gate_i*mi + gate_f*last_m
+
+        gate_o = T.nnet.sigmoid(slice_(preactivation, 'o') + m*self.Vo)
+        h = gate_o * self.activation_fct(m)
+
+        return h, m
+
+
+class LayerLSTMFaster(object):
+    def __init__(self, input_size, hidden_size, activation="tanh", name="LSTM"):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.name = name
+        self.activation = activation
+        self.activation_fct = factories.make_activation_function(self.activation)
+
+        # Input weights (i:input, o:output, f:forget, m:memory)
+        # Concatenation of the weights in that order: Wi, Wo, Wf, Wm
+        self.W = sharedX(value=np.zeros((input_size, 4*hidden_size)), name=self.name+'_W')
+
+        # Biases (i:input, o:output, f:forget, m:memory)
+        # Concatenation of the biases in that order: bi, bo, bf, bm
+        self.b = sharedX(value=np.zeros(4*hidden_size), name=self.name+'_b')
+
+        # Recurrence weights (i:input, o:output, f:forget, m:memory)
+        # Concatenation of the recurrence weights in that order: Ui, Uo, Uf, Um
+        self.U = sharedX(value=np.zeros((hidden_size, 4*hidden_size)), name=self.name+'_U')
+
+        # Memory weights (i:input, o:output, f:forget, m:memory)
+        self.Vi = sharedX(value=np.ones(hidden_size), name=self.name+'_Vi')
+        self.Vo = sharedX(value=np.ones(hidden_size), name=self.name+'_Vo')
+        self.Vf = sharedX(value=np.ones(hidden_size), name=self.name+'_Vf')
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        weights_initializer(self.W)
+        weights_initializer(self.U)
+
+    @property
+    def parameters(self):
+        return [self.W, self.U, self.b,
+                self.Vi, self.Vo, self.Vf]
+
+    def fprop(self, Xi, last_h, last_m):
+        def slice_(x, no):
+            if type(no) is str:
+                no = ['i', 'o', 'f', 'm'].index(no)
+            return x[:, no*self.hidden_size: (no+1)*self.hidden_size]
+
+        preactivation = Xi + T.dot(last_h, self.U)
+
+        gate_i = T.nnet.sigmoid(slice_(preactivation, 'i') + last_m*self.Vi)
+        mi = self.activation_fct(slice_(preactivation, 'm'))
+
+        gate_f = T.nnet.sigmoid(slice_(preactivation, 'f') + last_m*self.Vf)
+        m = gate_i*mi + gate_f*last_m
+
+        gate_o = T.nnet.sigmoid(slice_(preactivation, 'o') + m*self.Vo)
         h = gate_o * self.activation_fct(m)
 
         return h, m
@@ -234,6 +337,345 @@ class LSTM(Model):
             input = h
 
         return tuple(layers_h) + tuple(layers_m)
+
+    def get_output(self, X):
+        outputs_info_h = []
+        outputs_info_m = []
+        for hidden_size in self.hidden_sizes:
+            outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
+            outputs_info_m.append(T.zeros((X.shape[0], hidden_size)))
+
+        results, updates = theano.scan(fn=self._fprop,
+                                       outputs_info=outputs_info_h + outputs_info_m,
+                                       sequences=[T.transpose(X, axes=(1, 0, 2))])  # We want to scan over sequence elements, not the examples.
+
+        self.graph_updates.update(updates)
+        # Put back the examples so they are in the first dimension.
+        self.h = T.transpose(results[0], axes=(1, 0, 2))
+        return self.h
+
+    def seq_squeeze(self, tokeep):
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            self.states_h[i].set_value(self.states_h[i].get_value()[tokeep])
+            self.states_m[i].set_value(self.states_m[i].get_value()[tokeep])
+
+    def seq_reset(self, batch_size=None):
+        """ Start a new batch of sequences. """
+        if self._gen is None:
+            self.states_h = []
+            self.states_m = []
+            for i, hidden_size in enumerate(self.hidden_sizes):
+                self.states_h.append(sharedX(np.zeros((batch_size, hidden_size)), name="layer{}_state_h".format(i)))
+                self.states_m.append(sharedX(np.zeros((batch_size, hidden_size)), name="layer{}_state_m".format(i)))
+
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            self.states_h[i].set_value(np.zeros_like(self.states_h[i].get_value()))
+            self.states_m[i].set_value(np.zeros_like(self.states_m[i].get_value()))
+
+    def seq_next(self, input):
+        """ Returns the next element in every sequence of the batch. """
+        if self._gen is None:
+            self.seq_reset(batch_size=len(input))
+
+            X = T.TensorVariable(type=T.TensorType("floatX", [False]*input.ndim), name='X')
+            X.tag.test_value = input
+
+            states = self.states_h + self.states_m
+            new_states = self._fprop(X, *states)
+            new_states_h = new_states[:len(self.hidden_sizes)]
+            new_states_m = new_states[len(self.hidden_sizes):-1]
+            output = new_states[-1]
+
+            updates = OrderedDict()
+            for i in range(len(self.hidden_sizes)):
+                updates[self.states_h[i]] = new_states_h[i]
+                updates[self.states_m[i]] = new_states_m[i]
+
+            self._gen = theano.function([X], output, updates=updates)
+
+        return self._gen(input)
+
+    def save(self, path):
+        savedir = smartutils.create_folder(pjoin(path, type(self).__name__))
+        smartutils.save_dict_to_json_file(pjoin(savedir, "hyperparams.json"), self.hyperparameters)
+
+        params = {param.name: param.get_value() for param in self.parameters}
+        assert len(self.parameters) == len(params)  # Implies names are all unique.
+        np.savez(pjoin(savedir, "params.npz"), **params)
+
+    def load(self, path):
+        loaddir = pjoin(path, type(self).__name__)
+
+        parameters = np.load(pjoin(loaddir, "params.npz"))
+        for param in self.parameters:
+            param.set_value(parameters[param.name])
+
+    @classmethod
+    def create(cls, path):
+        loaddir = pjoin(path, cls.__name__)
+        hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
+
+        model = cls(**hyperparams)
+        model.load(path)
+        return model
+
+class LSTM(Model):
+    """ A standard LSTM model with no output layer.
+
+    See LSTM_softmax or LSTM_regression for implementations with an output layer.
+
+    The output is simply the state of the last hidden layer.
+    """
+    def __init__(self, input_size, hidden_sizes):
+        """
+        Parameters
+        ----------
+        input_size : int
+            Number of units each element Xi in the input sequence X has.
+        hidden_sizes : int, list of int
+            Number of hidden units each LSTM should have.
+        """
+        self.graph_updates = OrderedDict()
+        self._gen = None
+
+        self.input_size = input_size
+        self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
+
+        self.layers_lstm = []
+        last_hidden_size = self.input_size
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            self.layers_lstm.append(LayerLSTMFast(last_hidden_size, hidden_size, name="LSTM{}".format(i)))
+            last_hidden_size = hidden_size
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        for layer_lstm in self.layers_lstm:
+            layer_lstm.initialize(weights_initializer)
+
+    @property
+    def updates(self):
+        return self.graph_updates
+
+    @property
+    def hyperparameters(self):
+        hyperparameters = {'version': 1,
+                           'input_size': self.input_size,
+                           'hidden_sizes': self.hidden_sizes}
+
+        return hyperparameters
+
+    @property
+    def parameters(self):
+        parameters = []
+        for layer_lstm in self.layers_lstm:
+            parameters += layer_lstm.parameters
+
+        return parameters
+
+    def _fprop(self, Xi, *args):
+        layers_h = []
+        layers_m = []
+
+        input = Xi
+        for i, layer_lstm in enumerate(self.layers_lstm):
+            last_h, last_m = args[i], args[len(self.layers_lstm)+i]
+            h, m = layer_lstm.fprop(input, last_h, last_m)
+            layers_h.append(h)
+            layers_m.append(m)
+            input = h
+
+        return tuple(layers_h) + tuple(layers_m)
+
+    def get_output(self, X):
+        outputs_info_h = []
+        outputs_info_m = []
+        for hidden_size in self.hidden_sizes:
+            outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
+            outputs_info_m.append(T.zeros((X.shape[0], hidden_size)))
+
+        results, updates = theano.scan(fn=self._fprop,
+                                       outputs_info=outputs_info_h + outputs_info_m,
+                                       sequences=[T.transpose(X, axes=(1, 0, 2))])  # We want to scan over sequence elements, not the examples.
+
+        self.graph_updates.update(updates)
+        # Put back the examples so they are in the first dimension.
+        self.h = T.transpose(results[0], axes=(1, 0, 2))
+        return self.h
+
+    def seq_squeeze(self, tokeep):
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            self.states_h[i].set_value(self.states_h[i].get_value()[tokeep])
+            self.states_m[i].set_value(self.states_m[i].get_value()[tokeep])
+
+    def seq_reset(self, batch_size=None):
+        """ Start a new batch of sequences. """
+        if self._gen is None:
+            self.states_h = []
+            self.states_m = []
+            for i, hidden_size in enumerate(self.hidden_sizes):
+                self.states_h.append(sharedX(np.zeros((batch_size, hidden_size)), name="layer{}_state_h".format(i)))
+                self.states_m.append(sharedX(np.zeros((batch_size, hidden_size)), name="layer{}_state_m".format(i)))
+
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            self.states_h[i].set_value(np.zeros_like(self.states_h[i].get_value()))
+            self.states_m[i].set_value(np.zeros_like(self.states_m[i].get_value()))
+
+    def seq_next(self, input):
+        """ Returns the next element in every sequence of the batch. """
+        if self._gen is None:
+            self.seq_reset(batch_size=len(input))
+
+            X = T.TensorVariable(type=T.TensorType("floatX", [False]*input.ndim), name='X')
+            X.tag.test_value = input
+
+            states = self.states_h + self.states_m
+            new_states = self._fprop(X, *states)
+            new_states_h = new_states[:len(self.hidden_sizes)]
+            new_states_m = new_states[len(self.hidden_sizes):-1]
+            output = new_states[-1]
+
+            updates = OrderedDict()
+            for i in range(len(self.hidden_sizes)):
+                updates[self.states_h[i]] = new_states_h[i]
+                updates[self.states_m[i]] = new_states_m[i]
+
+            self._gen = theano.function([X], output, updates=updates)
+
+        return self._gen(input)
+
+    def save(self, path):
+        savedir = smartutils.create_folder(pjoin(path, type(self).__name__))
+        smartutils.save_dict_to_json_file(pjoin(savedir, "hyperparams.json"), self.hyperparameters)
+
+        params = {param.name: param.get_value() for param in self.parameters}
+        assert len(self.parameters) == len(params)  # Implies names are all unique.
+        np.savez(pjoin(savedir, "params.npz"), **params)
+
+    def load(self, path):
+        loaddir = pjoin(path, type(self).__name__)
+
+        parameters = np.load(pjoin(loaddir, "params.npz"))
+        for param in self.parameters:
+            param.set_value(parameters[param.name])
+
+    @classmethod
+    def create(cls, path):
+        loaddir = pjoin(path, cls.__name__)
+        hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
+
+        model = cls(**hyperparams)
+        model.load(path)
+        return model
+
+class LSTMFaster(Model):
+    """ A standard LSTM model with no output layer.
+
+    See LSTM_softmax or LSTM_regression for implementations with an output layer.
+
+    The output is simply the state of the last hidden layer.
+    """
+    def __init__(self, input_size, hidden_sizes):
+        """
+        Parameters
+        ----------
+        input_size : int
+            Number of units each element Xi in the input sequence X has.
+        hidden_sizes : int, list of int
+            Number of hidden units each LSTM should have.
+        """
+        self.graph_updates = OrderedDict()
+        self._gen = None
+        self.mask = None
+
+        self.input_size = input_size
+        self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
+
+        self.layers_lstm = []
+        last_hidden_size = self.input_size
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            if i == 0:
+                layer = LayerLSTMFaster(last_hidden_size, hidden_size, name="LSTM{}".format(i))
+            else:
+                layer = LayerLSTMFast(last_hidden_size, hidden_size, name="LSTM{}".format(i))
+
+            self.layers_lstm.append(layer)
+            last_hidden_size = hidden_size
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        for layer_lstm in self.layers_lstm:
+            layer_lstm.initialize(weights_initializer)
+
+    @property
+    def updates(self):
+        return self.graph_updates
+
+    @property
+    def hyperparameters(self):
+        hyperparameters = {'version': 1,
+                           'input_size': self.input_size,
+                           'hidden_sizes': self.hidden_sizes}
+
+        return hyperparameters
+
+    @property
+    def parameters(self):
+        parameters = []
+        for layer_lstm in self.layers_lstm:
+            parameters += layer_lstm.parameters
+
+        return parameters
+
+    def _fprop(self, Xi, *args):
+        input = Xi
+        layers_h, layers_m = [], []
+        for i, layer_lstm in enumerate(self.layers_lstm):
+            last_h, last_m = args[i], args[len(self.layers_lstm)+i]
+            h, m = layer_lstm.fprop(input, last_h, last_m)
+            layers_h.append(h)
+            layers_m.append(m)
+            input = h
+
+        return tuple(layers_h) + tuple(layers_m)
+
+    def _fprop_masked(self, Xi, mask, *args):
+        outs = list(self._fprop(Xi, *args))
+
+        layers_h_masked, layers_m_masked = [], []
+        for i, layer_lstm in enumerate(self.layers_lstm):
+            last_h, last_m = args[i], args[len(self.layers_lstm)+i]
+            h, m = outs[i], outs[len(self.layers_lstm)+i]
+            h = mask[:, None] * h + (1 - mask[:, None]) * last_h
+            m = mask[:, None] * m + (1 - mask[:, None]) * last_m
+            layers_h_masked.append(h)
+            layers_m_masked.append(m)
+
+        return tuple(layers_h_masked) + tuple(layers_m_masked)
+
+    def get_output(self, X):
+        outputs_info_h = []
+        outputs_info_m = []
+        for hidden_size in self.hidden_sizes:
+            outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
+            outputs_info_m.append(T.zeros((X.shape[0], hidden_size)))
+
+        X = T.dot(X, self.layers_lstm[0].W) + self.layers_lstm[0].b
+
+        if self.mask is not None:
+            results, updates = theano.scan(fn=self._fprop_masked,
+                                           outputs_info=outputs_info_h + outputs_info_m,
+                                           # We want to scan over sequence elements not the examples, so we transpose.
+                                           sequences=[T.transpose(X, axes=(1, 0, 2)),
+                                                      self.mask.T])
+
+        else:
+            results, updates = theano.scan(fn=self._fprop,
+                                           outputs_info=outputs_info_h + outputs_info_m,
+                                           # We want to scan over sequence elements not the examples, so we transpose.
+                                           sequences=[T.transpose(X, axes=(1, 0, 2))])
+
+        self.graph_updates.update(updates)
+        # Put back the examples so they are in the first dimension.
+        self.h = T.transpose(results[0], axes=(1, 0, 2))
+        return self.h
 
     def seq_squeeze(self, tokeep):
         for i, hidden_size in enumerate(self.hidden_sizes):
