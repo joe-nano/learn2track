@@ -7,6 +7,7 @@ import sys
 # Hack so you don't have to put the library containing this script in the PYTHONPATH.
 sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
+import pickle
 import shutil
 import numpy as np
 from os.path import join as pjoin
@@ -14,6 +15,9 @@ import argparse
 
 import theano
 import nibabel as nib
+
+import pylab as plt
+from time import sleep
 
 import theano.tensor as T
 
@@ -23,12 +27,13 @@ from smartlearner import stopping_criteria
 from smartlearner import views
 from smartlearner import utils as smartutils
 from smartlearner.optimizers import SGD, AdaGrad, Adam
-from smartlearner.direction_modifiers import ConstantLearningRate
+from smartlearner.direction_modifiers import ConstantLearningRate, DirectionClipping
 
 
 from learn2track import utils
 from learn2track.utils import Timer, load_ismrm2015_challenge, load_ismrm2015_challenge_contiguous
 from learn2track.lstm import LSTM_Regression, LSTM_RegressionWithFeaturesExtraction, LSTM_Softmax, LSTM_Hybrid
+from learn2track.gru import GRU_Regression, GRU_Softmax, GRU_Hybrid
 from learn2track.factories import ACTIVATION_FUNCTIONS
 from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory
 from learn2track.factories import optimizer_factory
@@ -40,7 +45,7 @@ from learn2track.batch_schedulers import BundlesBatchScheduler, SequenceBatchSch
 from learn2track.batch_schedulers import BundlesBatchSchedulerWithClassTarget, SequenceBatchSchedulerWithClassTarget
 
 # DATASETS = ["ismrm2015_challenge"]
-MODELS = ['lstm', 'lstm_hybrid', 'lstm_extraction']
+MODELS = ['lstm', 'gru', 'lstm_hybrid', 'lstm_extraction']
 
 
 def build_train_lstm_argparser(subparser):
@@ -52,6 +57,31 @@ def build_train_lstm_argparser(subparser):
 
     # Model options (LSTM)
     model = p.add_argument_group("LSTM arguments")
+
+    model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
+                       help="Size of the hidden layers. Default: 500")
+
+    model.add_argument('--hidden-activation', type=str, choices=ACTIVATION_FUNCTIONS, default=ACTIVATION_FUNCTIONS[0],
+                       help="Activation functions: {}".format(ACTIVATION_FUNCTIONS),)
+    model.add_argument('--weights-initialization', type=str, default=WEIGHTS_INITIALIZERS[0], choices=WEIGHTS_INITIALIZERS,
+                       help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
+    model.add_argument('--initialization-seed', type=int, default=1234,
+                       help='seed used to generate random numbers. Default=1234')
+
+    # General parameters (optional)
+    general = p.add_argument_group("General arguments")
+    general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+
+
+def build_train_lstm_argparser(subparser):
+    DESCRIPTION = "Train a GRU."
+
+    p = subparser.add_parser("gru", description=DESCRIPTION, help=DESCRIPTION)
+
+    # p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+
+    # Model options (GRU)
+    model = p.add_argument_group("GRU arguments")
 
     model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
                        help="Size of the hidden layers. Default: 500")
@@ -146,13 +176,17 @@ def buildArgsParser():
                           help='size of the batch to use when training the model. Default: 100.', default=100)
     training.add_argument('--sequence-length', type=int,
                           help='size of every training sequence. Default: 10.', default=10)
+    training.add_argument('--clip-gradient', type=float,
+                          help='if provided, gradient norms will be clipped to this value (if it exceed it).')
 
     # Optimizer options
     optimizer = p.add_argument_group("Optimizer (required)")
     optimizer = optimizer.add_mutually_exclusive_group(required=True)
     optimizer.add_argument('--SGD', metavar="LR", type=str, help='use SGD with constant learning rate for training.')
     optimizer.add_argument('--AdaGrad', metavar="LR [EPS=1e-6]", type=str, help='use AdaGrad for training.')
-    optimizer.add_argument('--Adam', action="store_true", help='use Adam for training.')
+    optimizer.add_argument('--Adam', metavar="[LR=0.0001]", type=str, help='use Adam for training.')
+    optimizer.add_argument('--RMSProp', metavar="LR", type=str, help='use RMSProp for training.')
+    optimizer.add_argument('--Adadelta', action="store_true", help='use Adadelta for training.')
 
     # Task
     task = p.add_argument_group("Task (required)")
@@ -172,6 +206,7 @@ def buildArgsParser():
     build_train_lstm_argparser(subparser)
     build_train_lstm_extraction_argparser(subparser)
     build_train_lstm_hybrid_argparser(subparser)
+    build_train_lstm_argparser(subparser)
 
     return p
 
@@ -250,6 +285,8 @@ def main():
                 model = LSTM_Regression(input_size, args.hidden_sizes, output_size)
             elif args.model == "lstm_extraction":
                 model = LSTM_RegressionWithFeaturesExtraction(input_size, args.features_size, args.hidden_sizes, output_size)
+            elif args.model == "gru":
+                model = GRU_Regression(input_size, args.hidden_sizes, output_size)
 
         elif args.classification:
             from dipy.data import get_sphere
@@ -267,9 +304,13 @@ def main():
     with Timer("Building optimizer"):
         if args.regression:
             loss = L2DistanceForSequences(model, trainset)
+
         elif args.classification:
             # loss = NLLForSequenceOfDirections(model, trainset)
             loss = NLLForSequenceWithClassTarget(model, trainset)
+
+        if args.clip_gradient is not None:
+            loss.append_gradient_modifier(DirectionClipping(threshold=args.clip_gradient))
 
         optimizer = optimizer_factory(hyperparams, loss)
 
@@ -286,13 +327,13 @@ def main():
         trainer.append_task(avg_loss)
 
         # Print average training loss.
-        trainer.append_task(tasks.Print("Avg. training loss:     : {}", avg_loss))
+        # trainer.append_task(tasks.Print("Avg. training loss:     : {}", avg_loss))
 
         if args.classification and args.model == "lstm_hybrid":
             mask = trainset.symb_mask
             targets_directions = smartutils.sharedX(sphere.vertices)[T.cast(trainset.symb_targets[:, :, 0], dtype="int32")]
             reconstruction_error = T.sum(((model.directions - targets_directions)**2), axis=2)
-            avg_reconstruction_error_per_sequence = T.sum(reconstruction_error*mask, axis=1) #/ T.sum(mask, axis=1)
+            avg_reconstruction_error_per_sequence = T.sum(reconstruction_error*mask, axis=1)  # / T.sum(mask, axis=1)
             # avg_reconstruction_error_monitor = views.MonitorVariable(T.mean(avg_reconstruction_error_per_sequence))
             avg_reconstruction_error_monitor = views.MonitorVariable(T.sum(avg_reconstruction_error_per_sequence))
             avg_reconstruction_error = tasks.AveragePerEpoch(avg_reconstruction_error_monitor)
@@ -301,16 +342,45 @@ def main():
 
         # Print NLL mean/stderror.
         if args.regression:
+            train_loss = L2DistanceForSequences(model, trainset)
+            train_batch_scheduler = SequenceBatchScheduler(trainset, batch_size=50)
+            train_error = views.LossView(loss=train_loss, batch_scheduler=train_batch_scheduler)
+            trainer.append_task(tasks.Print("Trainset - Error        : {0:.2f} | {1:.2f}", train_error.sum, train_error.mean))
+
             valid_loss = L2DistanceForSequences(model, validset)
             valid_batch_scheduler = SequenceBatchScheduler(validset, batch_size=50)
+            valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
+            trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))
+
+            lookahead_loss = valid_error.sum
+
+            gradient_norm = views.MonitorVariable(T.sqrt(sum(map(lambda d: T.sqr(d).sum(), loss.orig_gradients.values()))))
+            trainer.append_task(tasks.Print("||g|| : {0:.4f}", gradient_norm))
+
+            logger = tasks.Logger(train_error.mean, valid_error.mean, gradient_norm)
+            trainer.append_task(logger)
+
+            # def _plot(*args, **kwargs):
+            #     plt.figure(1)
+            #     plt.clf()
+            #     plt.show(False)
+            #     plt.subplot(121)
+            #     plt.plot(np.array(logger.get_variable_history(0)).flatten(), label="Train")
+            #     plt.plot(np.array(logger.get_variable_history(1)).flatten(), label="Valid")
+            #     plt.legend()
+
+            #     plt.subplot(122)
+            #     plt.plot(np.array(logger.get_variable_history(2)).flatten(), label="||g||")
+            #     plt.draw()
+
+            # trainer.append_task(tasks.Callback(_plot))
+
         elif args.classification:
             valid_loss = ErrorForSequenceWithClassTarget(model, validset)
             valid_batch_scheduler = SequenceBatchSchedulerWithClassTarget(validset, batch_size=50)
-        error = views.LossView(loss=valid_loss,
-                               batch_scheduler=valid_batch_scheduler)
-
-        # Print mean/stderror of loss.
-        trainer.append_task(tasks.Print("Validset - Error        : {0:.2%} ± {1:.2f}", error.mean, error.stderror))
+            error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
+            trainer.append_task(tasks.Print("Validset - Error        : {0:.2%} ± {1:.2f}", error.mean, error.stderror))
+            lookahead_loss = error.mean
 
         # Save training progression
         # def save_model(*args):
@@ -318,7 +388,7 @@ def main():
             print("\n*** Best epoch: {0}".format(obj.best_epoch))
             trainer.save(experiment_path)
 
-        trainer.append_task(stopping_criteria.EarlyStopping(error.mean, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_model))
+        trainer.append_task(stopping_criteria.EarlyStopping(lookahead_loss, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_model))
 
         if args.max_epoch is not None:
             trainer.append_task(stopping_criteria.MaxEpochStopping(args.max_epoch))
@@ -335,6 +405,20 @@ def main():
     trainer.save(experiment_path)
     model.save(experiment_path)
 
+    pickle.dump(logger._history, open(pjoin(experiment_path, "logger.pkl"), 'wb'))
+
+    # # Plot some graphs
+    # plt.figure()
+    # plt.subplot(121)
+    # plt.title("Loss")
+    # plt.plot(logger.get_variable_history(0), label="Train")
+    # plt.plot(logger.get_variable_history(1), label="Valid")
+    # plt.legend()
+
+    # plt.subplot(122)
+    # plt.title("Gradient norm")
+    # plt.plot(logger.get_variable_history(2), label="||g||")
+    # plt.show()
 
 if __name__ == "__main__":
     main()

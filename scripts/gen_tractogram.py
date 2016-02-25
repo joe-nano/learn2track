@@ -129,7 +129,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_t
 
         streamlines_lengths[:] += undone[:]
 
-        if len(undone) == 0:
+        if undone.sum() == 0:
             break
 
     # Add remaining

@@ -13,8 +13,10 @@ class L2DistanceForSequences(Loss):
         mask = self.dataset.symb_mask
 
         regression_outputs = model_output
-        mean_sqr_error_per_item = T.mean(((regression_outputs - self.dataset.symb_targets)**2), axis=2)
-        self.mean_sqr_error = T.sum(mean_sqr_error_per_item*mask, axis=1) / T.sum(mask, axis=1)
+        # sum_sqr_error_per_item = T.sum(((regression_outputs - self.dataset.symb_targets)**2), axis=2)
+        # self.mean_sqr_error = T.sum(sum_sqr_error_per_item*mask, axis=1) / T.sum(mask, axis=1)
+        self.L2_error_per_item = T.sqrt(T.sum(((regression_outputs - self.dataset.symb_targets)**2), axis=2))
+        self.mean_sqr_error = T.sum(self.L2_error_per_item*mask, axis=1) / T.sum(mask, axis=1)
 
         return self.mean_sqr_error
 

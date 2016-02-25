@@ -80,9 +80,9 @@ class SequenceBatchScheduler(BatchScheduler):
             batch_targets[i, :len(y)] = y
 
             # Flip version
-            batch_mask[i+current_batch_size, :len(x)] = 1
+            batch_mask[i+current_batch_size, :len(x)-1] = 1
             batch_inputs[i+current_batch_size, :len(x)-1] = x[::-1][:-1]
-            batch_targets[i+current_batch_size, :len(y)] = y[::-1]
+            batch_targets[i+current_batch_size, :len(y)] = -y[::-1]
 
         return batch_inputs, batch_targets, batch_mask
 
@@ -303,7 +303,7 @@ class SequenceBatchSchedulerWithClassTarget(BatchScheduler):
             batch_targets[i, :len(y)] = y[:, [0]]
 
             # Flip version
-            batch_mask[i+current_batch_size, :len(x)] = 1
+            batch_mask[i+current_batch_size, :len(x)-1] = 1
             batch_inputs[i+current_batch_size, :len(x)-1] = x[::-1][:-1]
             batch_targets[i+current_batch_size, :len(y)] = y[::-1, [1]]
 
