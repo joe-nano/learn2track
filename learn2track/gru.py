@@ -113,7 +113,7 @@ class GRU(Model):
             X = T.TensorVariable(type=T.TensorType("floatX", [False]*input.ndim), name='X')
             X.tag.test_value = input
 
-            states = self.states_h + self.states_m
+            states = self.states_h
             new_states = self._fprop(X, *states)
             new_states_h = new_states[:len(self.hidden_sizes)]
             output = new_states[-1]
@@ -357,7 +357,7 @@ class GRU_Hybrid(GRU):
             X = T.TensorVariable(type=T.TensorType("floatX", [False]*input.ndim), name='X')
             X.tag.test_value = input
 
-            states = self.states_h + self.states_m
+            states = self.states_h
             new_states = self._fprop_regression(X, *states)
             new_states_h = new_states[:len(self.hidden_sizes)]
             output = new_states[-1]

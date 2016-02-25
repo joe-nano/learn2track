@@ -41,6 +41,9 @@ def build_argparser():
     p.add_argument('--step-size', type=float, help="step size between two consecutive points in a streamlines (in mm). Default: 0.5mm", default=0.5)
     p.add_argument('--mask', type=str,
                    help="if provided, streamlines will stop if going outside this mask (.nii|.nii.gz).")
+    p.add_argument('--mask-threshold', type=float, default=0.05,
+                   help="streamlines will be terminating if they pass through a voxel with a value from the mask lower than this value. Default: 0.05")
+
     # p.add_argument('--bvals', type=str, help='text file with the bvalues. Default: same name as the dwi file but with extension .bvals.')
     # p.add_argument('--seeding-mask', type=str, help="streamlines will start from this mask (.nii|.nii.gz).")
 
@@ -172,6 +175,9 @@ def main():
             elif hyperparams["model"] == "lstm_extraction":
                 from learn2track.lstm import LSTM_RegressionWithFeaturesExtraction
                 model_class = LSTM_RegressionWithFeaturesExtraction
+            if hyperparams["model"] == "gru":
+                from learn2track.gru import GRU_Regression
+                model_class = GRU_Regression
 
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path))  # Create new instance
@@ -208,7 +214,7 @@ def main():
         seeds += [s[-1] for s in trk.streamlines]
 
     with Timer("Tracking"):
-        new_streamlines = track(model, weights, seeds, step_size=args.step_size, max_nb_points=args.max_nb_points, mask=mask, affine=dwi.affine)
+        new_streamlines = track(model, weights, seeds, step_size=args.step_size, max_nb_points=args.max_nb_points, mask=mask, mask_threshold=args.mask_threshold, affine=dwi.affine)
 
     with Timer("Saving streamlines"):
         new_streamlines = compress_streamlines(new_streamlines)

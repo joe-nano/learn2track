@@ -140,7 +140,7 @@ def load_ismrm2015_challenge_contiguous(bundles_path, classification=False, batc
     return trainset, validset, testset
 
 
-def save_bundle(file, inputs, targets):
+def save_bundle(file, inputs, targets, indices=[]):
     """ Saves a bundle compatible with the learn2track framework.
 
     Parameters
@@ -161,7 +161,8 @@ def save_bundle(file, inputs, targets):
              inputs_lengths=inputs._lengths,
              targets_data=targets._data,
              targets_offsets=targets._offsets,
-             targets_lengths=targets._lengths
+             targets_lengths=targets._lengths,
+             indices=indices
              )
 
 

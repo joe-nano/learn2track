@@ -23,6 +23,7 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
             random_colors=False,
             length_lt=0, length_gt=np.inf, clusters_lt=0, clusters_gt=np.inf):
 
+    rng = np.random.RandomState(42)
     slicer_opacity = .8
 
     ren = window.Renderer()
@@ -62,7 +63,7 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
                 ren.add(actor.line(streamlines,
                                    opacity=1., lod_points=10 ** 5))
             else:
-                colors = np.random.rand(3)
+                colors = rng.rand(3)
                 ren.add(actor.line(streamlines, colors,
                                    opacity=1., lod_points=10 ** 5))
 
@@ -88,10 +89,15 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
 
         ren.add(fvtk.axes((10, 10, 10)))
 
+        last_value = [10]
         def change_slice(obj, event):
-            z = int(np.round(obj.get_value()))
-            #image_actor.display(None, None, z)
-            image_actor.display(None, z, None)
+            new_value = int(np.round(obj.get_value()))
+            if new_value == image_actor.shape[1] - 1 or new_value == 0:
+                new_value = last_value[0] + np.sign(new_value - last_value[0])
+
+            image_actor.display(None, new_value, None)
+            obj.set_value(new_value)
+            last_value[0] = new_value
 
         slider = widget.slider(show_m.iren, show_m.ren,
                                callback=change_slice,
@@ -104,9 +110,12 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
                                color=(1., 1., 1.),
                                selected_color=(0.86, 0.33, 1.))
 
+        slider.SetAnimationModeToJump()
+
     global size
     size = ren.GetSize()
-    ren.background((1, 0.5, 0))
+    # ren.background((1, 0.5, 0))
+    ren.background((0, 0, 0))
     global picked_actors
     picked_actors = {}
 
@@ -198,7 +207,7 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
             print(f)
             print('\n')
 
-        if f.endswith('.trk'):
+        if f.endswith('.trk') or f.endswith('.tck'):
             streamlines = nib.streamlines.load(f).streamlines
             tractograms.append(streamlines)
 

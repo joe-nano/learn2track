@@ -64,13 +64,16 @@ def main():
 
         save_bundle(bundle[:-4] + "_trainset.npz",
                     inputs=inputs[trainset_indices].copy(),
-                    targets=targets[trainset_indices].copy())
+                    targets=targets[trainset_indices].copy(),
+                    indices=trainset_indices)
         save_bundle(bundle[:-4] + "_validset.npz",
                     inputs=inputs[validset_indices].copy(),
-                    targets=targets[validset_indices].copy())
+                    targets=targets[validset_indices].copy(),
+                    indices=validset_indices)
         save_bundle(bundle[:-4] + "_testset.npz",
                     inputs=inputs[testset_indices].copy(),
-                    targets=targets[testset_indices].copy())
+                    targets=targets[testset_indices].copy(),
+                    indices=testset_indices)
 
         if args.delete:
             os.remove(bundle)

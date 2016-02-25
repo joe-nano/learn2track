@@ -108,18 +108,18 @@ def buildArgsParser():
 
     return p
 
-
 def process_data_for_regression(tractogram, weights, affine):
     """
-    Generates the training data given a list of streamlines and some
-    normalized diffusion weights.
+    Generates the training data for a regression task given a list of
+    streamlines and some diffusion weights (usually normalized by the B0).
 
     The training data consist of a list of $N$ sequences of $M_i$ inputs $x_ij$ and $M_i$
     targets $y_ij$, where $N$ is the number of streamlines and $M_i$ is the number of
-    3D points of streamline $i$. The input $x_ij$ is a vector (32 dimensions) corresponding
-    to the dwi data that have been trilinearly interpolated at the coordinate of the $j$-th
-    point of the $i$-th streamline. The target $y_ij$ corresponds the (x, y, z) direction
-    leading from the 3D point $j$ to the 3D point $j+1$ of streamline $i$.
+    3D points of streamline $i$. The input $x_ij$ is a vector (weights.shape[-1] dimensions,
+    usually it has been resampled to 100) corresponding to the dwi data that have been
+    trilinearly interpolated at the coordinate of the $j$-th point of the $i$-th streamline.
+    The target $y_ij$ corresponds the normed direction leading from the 3D point $j$ to the
+    3D point $j+1$ of streamline $i$.
 
     Parameters
     ----------
@@ -129,59 +129,6 @@ def process_data_for_regression(tractogram, weights, affine):
         normalized diffusion weights
     affine : ndarray shape (4, 4)
         affine vox->RAS+mm
-
-    Returns
-    -------
-    inputs : `nib.streamlines.ArraySequence` object
-        the interpolated dwi data for every 3D point of every streamline found in
-        `tractogram.streamlines`.
-    targets : `nib.streamlines.ArraySequence` object
-        the direction leading from any 3D point to the next in every streamline.
-    """
-
-    inputs = []
-    targets = []
-
-    for i, streamline in enumerate(tractogram.streamlines):
-        # Get diffusion weights for every points along the streamlines (the inputs).
-        # The affine is provided in order to bring the streamlines back to voxel space.
-        weights_interpolated = map_coordinates_3d_4d(weights, streamline, affine=affine)
-
-        # We don't need the last point though (nothing to predict from it).
-        inputs.append(weights_interpolated[:-1])
-        # Also add the flip version of the streamline (except its last point).
-        inputs.append(weights_interpolated[::-1][:-1])
-
-        # Get streamlines directions (the targets)
-        directions = streamline[1:, :] - streamline[:-1, :]
-        targets.append(directions)
-        targets.append(-directions)  # Flip directions
-
-    return ArraySequence(inputs), ArraySequence(targets)
-
-
-def process_data_for_classification(tractogram, weights, affine, sphere):
-    """
-    Generates the training data for classification task given a list of
-    streamlines and some normalized diffusion weights.
-
-    The training data consist of a list of $N$ sequences of $M_i$ inputs $x_ij$ and $M_i$
-    targets $y_ij$, where $N$ is the number of streamlines and $M_i$ is the number of
-    3D points of streamline $i$. The input $x_ij$ is a vector (32 dimensions) corresponding
-    to the dwi data that have been trilinearly interpolated at the coordinate of the $j$-th
-    point of the $i$-th streamline. The target $y_ij$ corresponds the direction ID
-    leading from the 3D point $j$ to the 3D point $j+1$ of streamline $i$.
-
-    Parameters
-    ----------
-    tractogram : `nib.streamlines.Tractogram` object
-        contains the points coordinates of N streamlines
-    weights : 4D array
-        normalized diffusion weights
-    affine : ndarray shape (4, 4)
-        affine vox->RAS+mm
-    sphere : `dipy.core.sphere.Sphere` object
-        Allowed directions streamlines can move along (i.e. classes).
 
     Returns
     -------
@@ -189,7 +136,7 @@ def process_data_for_classification(tractogram, weights, affine, sphere):
         the interpolated dwi data for every 3D point of every streamline found in
         `tractogram.streamlines`.
     targets : `nib.streamlines.ArraySequence` object
-        ID of the direction leading from any 3D point to the next in every streamline.
+        the normed direction leading from any 3D point to the next in every streamline.
     """
 
     inputs = []
@@ -200,26 +147,14 @@ def process_data_for_classification(tractogram, weights, affine, sphere):
         # The affine is provided in order to bring the streamlines back to voxel space.
         weights_interpolated = map_coordinates_3d_4d(weights, streamline, affine=affine).astype(np.float32)
         inputs.append(weights_interpolated)
+
+        # There is one direction less than the number of points.
         directions = (streamline[1:, :] - streamline[:-1, :]).astype(np.float32)
-        directions /= np.sqrt(np.sum(directions**2, axis=1, keepdims=True))
+        directions /= np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Directions have norm of one.
         targets.append(directions)
-        #assert np.all(utils.find_closest(sphere, directions) == utils.find_closest(sphere, -directions))
-
-        ## We don't need the last point though (nothing to predict from it).
-        #inputs.append(weights_interpolated[:-1])
-        ## Also add the flip version of the streamline (except its last point).
-        #inputs.append(weights_interpolated[::-1][:-1])
-
-        ## Get streamlines directions (the targets)
-        #directions = streamline[1:, :] - streamline[:-1, :]
-        #targets.append(directions)
-        #targets.append(-directions)  # Flip directions
-        ##targets.append(utils.find_closest(sphere, directions))
-        ##targets.append(utils.find_closest(sphere, -directions))  # Flip directions
 
     inputs = ArraySequence(inputs)
     targets = ArraySequence(targets)
-    #targets._data = utils.find_closest(sphere, targets._data).astype(np.int16)
 
     return inputs, targets
 
@@ -286,7 +221,7 @@ def main():
             if args.tasks == "regression":
                 inputs, targets = process_data_for_regression(tractogram, weights, dwi.affine)
             elif args.tasks == "classification":
-                inputs, targets = process_data_for_classification(tractogram, weights, dwi.affine, sphere)
+                raise NotImplementedError()
 
             # Dump data as numpy array
             if args.out is None:  # Put training data along the streamlines.
