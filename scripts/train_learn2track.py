@@ -199,6 +199,7 @@ def buildArgsParser():
                          help='name of the experiment. Default: name is generated from arguments.')
 
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+    general.add_argument('--view', action='store_true', help='display learning curves.')
 
     subparser = p.add_subparsers(title="Models", dest="model")
     subparser.required = True   # force 'required' testing
@@ -359,20 +360,23 @@ def main():
             logger = tasks.Logger(train_error.mean, valid_error.mean, gradient_norm)
             trainer.append_task(logger)
 
-            # def _plot(*args, **kwargs):
-            #     plt.figure(1)
-            #     plt.clf()
-            #     plt.show(False)
-            #     plt.subplot(121)
-            #     plt.plot(np.array(logger.get_variable_history(0)).flatten(), label="Train")
-            #     plt.plot(np.array(logger.get_variable_history(1)).flatten(), label="Valid")
-            #     plt.legend()
+            if args.view:
+                import pylab as plt
 
-            #     plt.subplot(122)
-            #     plt.plot(np.array(logger.get_variable_history(2)).flatten(), label="||g||")
-            #     plt.draw()
+                def _plot(*args, **kwargs):
+                    plt.figure(1)
+                    plt.clf()
+                    plt.show(False)
+                    plt.subplot(121)
+                    plt.plot(np.array(logger.get_variable_history(0)).flatten(), label="Train")
+                    plt.plot(np.array(logger.get_variable_history(1)).flatten(), label="Valid")
+                    plt.legend()
 
-            # trainer.append_task(tasks.Callback(_plot))
+                    plt.subplot(122)
+                    plt.plot(np.array(logger.get_variable_history(2)).flatten(), label="||g||")
+                    plt.draw()
+
+                trainer.append_task(tasks.Callback(_plot))
 
         elif args.classification:
             valid_loss = ErrorForSequenceWithClassTarget(model, validset)
@@ -406,18 +410,21 @@ def main():
 
     pickle.dump(logger._history, open(pjoin(experiment_path, "logger.pkl"), 'wb'))
 
-    # # Plot some graphs
-    # plt.figure()
-    # plt.subplot(121)
-    # plt.title("Loss")
-    # plt.plot(logger.get_variable_history(0), label="Train")
-    # plt.plot(logger.get_variable_history(1), label="Valid")
-    # plt.legend()
+    if args.view:
+        import pylab as plt
 
-    # plt.subplot(122)
-    # plt.title("Gradient norm")
-    # plt.plot(logger.get_variable_history(2), label="||g||")
-    # plt.show()
+        # Plot some graphs
+        plt.figure()
+        plt.subplot(121)
+        plt.title("Loss")
+        plt.plot(logger.get_variable_history(0), label="Train")
+        plt.plot(logger.get_variable_history(1), label="Valid")
+        plt.legend()
+
+        plt.subplot(122)
+        plt.title("Gradient norm")
+        plt.plot(logger.get_variable_history(2), label="||g||")
+        plt.show()
 
 if __name__ == "__main__":
     main()

@@ -12,6 +12,7 @@ from os.path import join as pjoin
 import argparse
 import itertools
 import theano
+import nibabel as nib
 from nibabel.streamlines import ArraySequence
 
 from smartlearner import utils as smartutils
@@ -35,23 +36,38 @@ def buildArgsParser():
     return p
 
 
-def get_regression_results(model, dataset):
+def generate_tractogram_of_error(model, dataset):
     loss = L2DistanceForSequences(model, dataset)
     loss.losses  # Hack to generate update dict in loss :(
     batch_scheduler = SequenceBatchScheduler(dataset, batch_size=50)
-    losses, masks = log_variables(batch_scheduler, loss.L2_error_per_item, dataset.symb_mask*1)
+
+    predict, losses, targets, masks = log_variables(batch_scheduler, model.regression_out, loss.L2_error_per_item, dataset.symb_targets*1, dataset.symb_mask*1)
 
     timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(losses, masks)])
-    sequences_mean_loss = np.array([l.mean() for l in timesteps_loss])
+    timesteps_prediction = ArraySequence([p[:int(m.sum())] for p, m in zip(predict, masks)])
+    timesteps_targets = ArraySequence([t[:int(m.sum())] for t, m in zip(targets, masks)])
 
-    results = {"type": "L2",
-               "timesteps_loss_sum": float(timesteps_loss._data.sum()),
-               "timesteps_loss_avg": float(timesteps_loss._data.mean()),
-               "timesteps_loss_std": float(timesteps_loss._data.std()),
-               "sequences_mean_loss_avg": float(sequences_mean_loss.mean()),
-               "sequences_mean_loss_stderr": float(sequences_mean_loss.std(ddof=1)/np.sqrt(len(sequences_mean_loss)))}
+    streamlines = []
+    colors = []
+    for d, p, l in zip(timesteps_targets, timesteps_prediction, timesteps_loss):
+        d = np.r_[[(0, 0, 0)], d]
+        pts = np.cumsum(d, axis=0)
+        pts -= pts.mean(0)
 
-    return results
+        streamline = np.zeros(((len(pts)-1)*3+1, 3))
+        streamline[::3] = pts
+        streamline[1:-1:3] = pts[:-1] + p
+        streamline[2:-1:3] = pts[:-1]
+        streamlines.append(streamline)
+
+        color = np.zeros_like(streamline)
+        color[:] = (0, 0, 255.)
+        color[1:-1:3, 0] = l/2.*255.
+        color[1:-1:3, 2] = (1-l/2.)*255.
+        colors.append(color)
+
+    tractogram = nib.streamlines.Tractogram(streamlines, data_per_point={"colors": colors})
+    return tractogram
 
 
 def main():
@@ -100,23 +116,13 @@ def main():
         model.load(pjoin(experiment_path))  # Restore state.
         print(str(model))
 
-    results_file = pjoin(experiment_path, "results.json")
-
-    if not os.path.isfile(results_file) or args.force:
-        if hyperparams['regression']:
-            results = {}
-            results['trainset'] = get_regression_results(model, trainset)
-            results['validset'] = get_regression_results(model, validset)
-            results['testset'] = get_regression_results(model, testset)
-
-        smartutils.save_dict_to_json_file(results_file, results)
-    else:
-        print("Loading saved results... (use --force to re-run evaluation)")
-        results = smartutils.load_dict_from_json_file(results_file)
-
-    for dataset in ['trainset', 'validset', 'testset']:
-        print("L2 error on {} (per timestep): {:.2f} ± {:.2f}".format(dataset, results[dataset]['timesteps_loss_avg'], results[dataset]['timesteps_loss_std']))
-        print("L2 error on {} : {:.2f} ± {:.2f}".format(dataset, results[dataset]['sequences_mean_loss_avg'], results[dataset]['sequences_mean_loss_stderr']))
+    tractogram_file = pjoin(experiment_path, "tractogram_{}.trk")
+    for name, dataset in [("trainset", trainset), ("validset", validset), ("testset", testset)]:
+        if not os.path.isfile(tractogram_file.format(name)) or args.force:
+            tractogram = generate_tractogram_of_error(model, dataset)
+            nib.streamlines.save(tractogram, tractogram_file.format(name))
+        else:
+            print("Tractogram already exists. (use --force to generate it again)")
 
 
 if __name__ == "__main__":

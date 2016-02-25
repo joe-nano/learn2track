@@ -5,6 +5,7 @@ import sys
 import numpy as np
 import theano
 import theano.tensor as T
+import itertools
 import string
 import hashlib
 from time import time
@@ -446,3 +447,19 @@ def logsumexp(x, axis=None, keepdims=False):
 
 def softmax(x, axis=None):
     return T.exp(x - logsumexp(x, axis=axis, keepdims=True))
+
+
+def log_variables(batch_scheduler, *symb_vars):
+    # Gather updates from the optimizer and the batch scheduler.
+    f = theano.function([],
+                        symb_vars,
+                        givens=batch_scheduler.givens,
+                        name="compute_loss",
+                        on_unused_input='ignore')
+
+    log = [[] for _ in range(len(symb_vars))]
+    for _ in batch_scheduler:
+        for i, e in enumerate(f()):
+            log[i].append(e.copy())
+
+    return [list(itertools.chain(*l)) for l in log]
