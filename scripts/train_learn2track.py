@@ -16,7 +16,6 @@ import argparse
 import theano
 import nibabel as nib
 
-import pylab as plt
 from time import sleep
 
 import theano.tensor as T
