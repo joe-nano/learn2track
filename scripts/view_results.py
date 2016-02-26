@@ -66,10 +66,12 @@ def get_optimizer(e):
             return "SGD"
         elif e.hyperparams.get("AdaGrad") is not None:
             return "AdaGrad"
-        elif e.hyperparams.get("ADAGRAD") is not None:
-            return "ADAGRAD"
         elif e.hyperparams.get("Adam") is not None:
             return "Adam"
+        elif e.hyperparams.get("RMSprop") is not None:
+            return "RMSprop"
+        elif e.hyperparams.get("Adadelta") is not None:
+            return "Adadelta"
 
         return ""
 
