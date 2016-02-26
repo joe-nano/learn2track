@@ -88,6 +88,7 @@ def extract_result_from_experiment(e):
     entry["Batch Size"] = e.hyperparams.get("batch_size", "")
     entry["Optimizer"] = get_optimizer(e)
     entry["Optimizer params"] = e.hyperparams.get(get_optimizer(e), "")
+    entry["Clip Gradient"] = e.early_stopping.get("clip_gradient", "")
     entry["Best Epoch"] = e.early_stopping.get("best_epoch", "")
     entry["Max Epoch"] = e.status.get("current_epoch", "")
 
