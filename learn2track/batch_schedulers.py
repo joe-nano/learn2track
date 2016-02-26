@@ -13,7 +13,7 @@ floatX = theano.config.floatX
 class SequenceBatchScheduler(BatchScheduler):
     """ Batch of padded examples.
     """
-    def __init__(self, dataset, batch_size, seed=1234):
+    def __init__(self, dataset, batch_size, append_previous_direction=False, seed=1234):
         """
         Parameters
         ----------
@@ -29,6 +29,8 @@ class SequenceBatchScheduler(BatchScheduler):
         super().__init__(dataset)
         self._shared_batch_size = theano.shared(np.array(0, dtype='i4'))
         self.batch_size = batch_size
+        self.append_previous_direction = append_previous_direction
+        self._input_size = self.dataset.input_shape[1] + 3*self.append_previous_direction
 
         # Test value
         batch_inputs, batch_targets, batch_mask = self._next_batch(0)
@@ -36,7 +38,7 @@ class SequenceBatchScheduler(BatchScheduler):
         self.dataset.symb_targets.tag.test_value = batch_targets
         self.dataset.symb_mask.tag.test_value = batch_mask
 
-        self._shared_batch_inputs = sharedX(np.zeros((self.batch_size, 1, self.dataset.input_shape[1])))
+        self._shared_batch_inputs = sharedX(np.zeros((self.batch_size, 1, self._input_size)))
         self._shared_batch_targets = sharedX(np.zeros((self.batch_size, 1, self.dataset.target_shape[1])))
         self._shared_batch_mask = sharedX(np.zeros((self.batch_size, 1)))
 
@@ -70,19 +72,29 @@ class SequenceBatchScheduler(BatchScheduler):
         # Pad sequences so that they have all the same length.
         current_batch_size = len(inputs)
         batch_mask = np.zeros((2*current_batch_size, max_sequence_length), dtype=floatX)
-        batch_inputs = np.zeros((2*current_batch_size, max_sequence_length) + inputs[0].shape[1:], dtype=floatX)
-        batch_targets = np.zeros((2*current_batch_size, max_sequence_length) + targets[0].shape[1:], dtype=floatX)
+        batch_inputs = np.zeros((2*current_batch_size, max_sequence_length, self._input_size), dtype=floatX)
+        batch_targets = np.zeros((2*current_batch_size, max_sequence_length, targets[0].shape[1]), dtype=floatX)
 
         for i, (x, y) in enumerate(zip(inputs, targets)):
             # No direction to predict for the last point, so we omit it.
             batch_mask[i, :len(x)-1] = 1
-            batch_inputs[i, :len(x)-1] = x[:-1]
             batch_targets[i, :len(y)] = y
+            if self.append_previous_direction:
+                batch_inputs[i, :len(x)-1, :-3] = x[:-1]
+                batch_inputs[i, 1:len(x)-1, -3:] = y[:-1]  # Direction of the previous timestep.
+                batch_inputs[i, 0, -3:] = (0, 0, 0)  # No previous direction for the first timestep.
+            else:
+                batch_inputs[i, :len(x)-1] = x[:-1]
 
             # Flip version
             batch_mask[i+current_batch_size, :len(x)-1] = 1
-            batch_inputs[i+current_batch_size, :len(x)-1] = x[::-1][:-1]
             batch_targets[i+current_batch_size, :len(y)] = -y[::-1]
+            if self.append_previous_direction:
+                batch_inputs[i+current_batch_size, :len(x)-1, :-3] = x[::-1][:-1]
+                batch_inputs[i+current_batch_size, 1:len(x)-1, -3:] = -y[::-1][:-1]  # Direction of the previous timestep.
+                batch_inputs[i+current_batch_size, 0, -3:] = (0, 0, 0)  # No previous direction for the first timestep.
+            else:
+                batch_inputs[i+current_batch_size, :len(x)-1] = x[::-1][:-1]
 
         return batch_inputs, batch_targets, batch_mask
 
@@ -96,8 +108,9 @@ class SequenceBatchScheduler(BatchScheduler):
             yield batch_count + 1
 
     def save(self, savedir):
-        state = {"version": 1,
+        state = {"version": 2,
                  "batch_size": self.batch_size,
+                 "append_previous_direction": self.append_previous_direction,
                  }
 
         np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)

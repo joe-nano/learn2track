@@ -72,7 +72,7 @@ def build_train_lstm_argparser(subparser):
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
 
 
-def build_train_lstm_argparser(subparser):
+def build_train_gru_argparser(subparser):
     DESCRIPTION = "Train a GRU."
 
     p = subparser.add_parser("gru", description=DESCRIPTION, help=DESCRIPTION)
@@ -161,6 +161,8 @@ def buildArgsParser():
     dataset.add_argument('--nb-updates-per-epoch', type=int,
                          help=('If specified, a batch will be composed of streamlines drawn from each different bundle (similar amount) each update.'
                                ' Default: go through all streamlines in the trainset exactly sonce.'))
+    dataset.add_argument('--append-previous-direction', action="store_true",
+                         help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
 
     duration = p.add_argument_group("Training duration options")
     duration.add_argument('--max-epoch', type=int, metavar='N', help='if specified, train for a maximum of N epochs.')
@@ -206,7 +208,7 @@ def buildArgsParser():
     build_train_lstm_argparser(subparser)
     build_train_lstm_extraction_argparser(subparser)
     build_train_lstm_hybrid_argparser(subparser)
-    build_train_lstm_argparser(subparser)
+    build_train_gru_argparser(subparser)
 
     return p
 
@@ -265,7 +267,7 @@ def main():
             if args.classification:
                 batch_scheduler = SequenceBatchSchedulerWithClassTarget(trainset, args.batch_size)
             elif args.regression:
-                batch_scheduler = SequenceBatchScheduler(trainset, args.batch_size)
+                batch_scheduler = SequenceBatchScheduler(trainset, args.batch_size, args.append_previous_direction)
 
         else:
             trainset, validset, testset = load_ismrm2015_challenge(args.dataset, args.classification)
@@ -278,7 +280,7 @@ def main():
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
 
     with Timer("Creating model"):
-        input_size = trainset.input_shape[-1]
+        input_size = trainset.input_shape[-1] + 3*args.append_previous_direction
         output_size = trainset.target_shape[-1]
         if args.regression:
             if args.model == "lstm":
@@ -343,12 +345,12 @@ def main():
         # Print NLL mean/stderror.
         if args.regression:
             train_loss = L2DistanceForSequences(model, trainset)
-            train_batch_scheduler = SequenceBatchScheduler(trainset, batch_size=50)
+            train_batch_scheduler = SequenceBatchScheduler(trainset, batch_size=50, append_previous_direction=args.append_previous_direction)
             train_error = views.LossView(loss=train_loss, batch_scheduler=train_batch_scheduler)
             trainer.append_task(tasks.Print("Trainset - Error        : {0:.2f} | {1:.2f}", train_error.sum, train_error.mean))
 
             valid_loss = L2DistanceForSequences(model, validset)
-            valid_batch_scheduler = SequenceBatchScheduler(validset, batch_size=50)
+            valid_batch_scheduler = SequenceBatchScheduler(validset, batch_size=50, append_previous_direction=args.append_previous_direction)
             valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
             trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))
 
@@ -357,7 +359,10 @@ def main():
             gradient_norm = views.MonitorVariable(T.sqrt(sum(map(lambda d: T.sqr(d).sum(), loss.orig_gradients.values()))))
             trainer.append_task(tasks.Print("||g|| : {0:.4f}", gradient_norm))
 
-            logger = tasks.Logger(train_error.mean, valid_error.mean, gradient_norm)
+            gradient_norm_clipped = views.MonitorVariable(T.sqrt(sum(map(lambda d: T.sqr(d).sum(), loss.gradients.values()))))
+            trainer.append_task(tasks.Print("||g'|| : {0:.4f}", gradient_norm_clipped))
+
+            logger = tasks.Logger(train_error.mean, valid_error.mean, gradient_norm, gradient_norm_clipped)
             trainer.append_task(logger)
 
             if args.view:
@@ -374,6 +379,7 @@ def main():
 
                     plt.subplot(122)
                     plt.plot(np.array(logger.get_variable_history(2)).flatten(), label="||g||")
+                    plt.plot(np.array(logger.get_variable_history(3)).flatten(), label="||g'||")
                     plt.draw()
 
                 trainer.append_task(tasks.Callback(_plot))

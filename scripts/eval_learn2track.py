@@ -74,10 +74,6 @@ def main():
     except FileNotFoundError:
         hyperparams = smartutils.load_dict_from_json_file(pjoin(experiment_path, "..", "hyperparams.json"))
 
-    with Timer("Loading dataset"):
-        trainset, validset, testset = load_ismrm2015_challenge_contiguous(args.dataset, hyperparams['classification'])
-        print("Datasets:", len(trainset), len(validset), len(testset))
-
     with Timer("Loading model"):
         if hyperparams["classification"]:
             if hyperparams["model"] == "lstm":
@@ -99,6 +95,10 @@ def main():
         model = model_class.create(pjoin(experiment_path))  # Create new instance
         model.load(pjoin(experiment_path))  # Restore state.
         print(str(model))
+
+    with Timer("Loading dataset"):
+        trainset, validset, testset = load_ismrm2015_challenge_contiguous(args.dataset, hyperparams['classification'])
+        print("Datasets:", len(trainset), len(validset), len(testset))
 
     results_file = pjoin(experiment_path, "results.json")
 

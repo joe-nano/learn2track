@@ -31,15 +31,17 @@ def buildArgsParser():
     # General options (optional)
     p.add_argument('name', type=str, help='name/path of the experiment.')
     p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+    p.add_argument('--append-previous-direction', action="store_true",
+                   help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
 
 
-def generate_tractogram_of_error(model, dataset):
+def generate_tractogram_of_error(model, dataset, append_previous_direction=False):
     loss = L2DistanceForSequences(model, dataset)
     loss.losses  # Hack to generate update dict in loss :(
-    batch_scheduler = SequenceBatchScheduler(dataset, batch_size=50)
+    batch_scheduler = SequenceBatchScheduler(dataset, batch_size=50, append_previous_direction=append_previous_direction)
 
     predict, losses, targets, masks = log_variables(batch_scheduler, model.regression_out, loss.L2_error_per_item, dataset.symb_targets*1, dataset.symb_mask*1)
 
@@ -119,7 +121,7 @@ def main():
     tractogram_file = pjoin(experiment_path, "tractogram_{}.trk")
     for name, dataset in [("trainset", trainset), ("validset", validset), ("testset", testset)]:
         if not os.path.isfile(tractogram_file.format(name)) or args.force:
-            tractogram = generate_tractogram_of_error(model, dataset)
+            tractogram = generate_tractogram_of_error(model, dataset, args.append_previous_direction)
             nib.streamlines.save(tractogram, tractogram_file.format(name))
         else:
             print("Tractogram already exists. (use --force to generate it again)")

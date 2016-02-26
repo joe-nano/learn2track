@@ -36,13 +36,17 @@ def build_argparser():
     p.add_argument('--out', type=str, default="tractogram.tck",
                    help="output tractogram (.tck|.trk). Default: tractogram.tck")
 
-    p.add_argument('--seeds', type=str, help="use extermities of the streamlines in this tractogram (.trk|.tck) as seed points.", required=True)
+    p.add_argument('--seeds', type=str, nargs="+", required=True,
+                   help="use extermities of the streamlines in these tractograms (.trk|.tck) as seed points.")
     p.add_argument('--max-nb-points', type=int, help="maximum number of points for a streamline. Default: 1000", default=1000)
     p.add_argument('--step-size', type=float, help="step size between two consecutive points in a streamlines (in mm). Default: 0.5mm", default=0.5)
     p.add_argument('--mask', type=str,
                    help="if provided, streamlines will stop if going outside this mask (.nii|.nii.gz).")
     p.add_argument('--mask-threshold', type=float, default=0.05,
                    help="streamlines will be terminating if they pass through a voxel with a value from the mask lower than this value. Default: 0.05")
+
+    p.add_argument('--append-previous-direction', action="store_true",
+                   help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
 
     # p.add_argument('--bvals', type=str, help='text file with the bvalues. Default: same name as the dwi file but with extension .bvals.')
     # p.add_argument('--seeding-mask', type=str, help="streamlines will start from this mask (.nii|.nii.gz).")
@@ -105,7 +109,7 @@ def track_slower(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None,
     return streamlines
 
 
-def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_threshold=0.05, affine=None):
+def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_threshold=0.05, affine=None, append_previous_direction=False):
     streamlines = []
     sequences = np.asarray(seeds)[:, None, :]
     streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
@@ -119,7 +123,10 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_t
             print("{}/{}".format(i+1, max_nb_points))
 
         streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :], affine)
-        directions[undone] = model.seq_next(streamlines_dwi[undone])
+        if append_previous_direction:
+            directions[undone] = model.seq_next(np.c_[streamlines_dwi[undone], directions[undone]])
+        else:
+            directions[undone] = model.seq_next(streamlines_dwi[undone])
         directions *= step_size
 
         sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
@@ -201,20 +208,24 @@ def main():
             mask = nib.load(args.mask).get_data()
 
     with Timer("Generating seeds"):
-        trk = nib.streamlines.load(args.seeds)
-        # trk.tractogram.apply_affine(np.linalg.inv(trk.affine))  # We track in voxel space.
-        # # step_size = np.mean([np.mean(np.sqrt(np.sum((pts[1:]-pts[:-1])**2, axis=1))) for pts in streamlines.points])
-        # # seeds = [s[0] for s in streamlines.points[::10]]
-        # assert np.all(np.min(trk.tractogram.streamlines._data, axis=0) >= 0)
-        # max_coords = np.max(trk.tractogram.streamlines._data, axis=0)
-        # assert max_coords[0] < dwi.shape[0]
-        # assert max_coords[1] < dwi.shape[1]
-        # assert max_coords[2] < dwi.shape[2]
-        seeds = [s[0] for s in trk.streamlines]
-        seeds += [s[-1] for s in trk.streamlines]
+        seeds = []
+        for filename in args.seeds:
+            trk = nib.streamlines.load(filename)
+            # trk.tractogram.apply_affine(np.linalg.inv(trk.affine))  # We track in voxel space.
+            # # step_size = np.mean([np.mean(np.sqrt(np.sum((pts[1:]-pts[:-1])**2, axis=1))) for pts in streamlines.points])
+            # # seeds = [s[0] for s in streamlines.points[::10]]
+            # assert np.all(np.min(trk.tractogram.streamlines._data, axis=0) >= 0)
+            # max_coords = np.max(trk.tractogram.streamlines._data, axis=0)
+            # assert max_coords[0] < dwi.shape[0]
+            # assert max_coords[1] < dwi.shape[1]
+            # assert max_coords[2] < dwi.shape[2]
+            seeds += [s[0] for s in trk.streamlines]
+            seeds += [s[-1] for s in trk.streamlines]
 
     with Timer("Tracking"):
-        new_streamlines = track(model, weights, seeds, step_size=args.step_size, max_nb_points=args.max_nb_points, mask=mask, mask_threshold=args.mask_threshold, affine=dwi.affine)
+        new_streamlines = track(model, weights, seeds, step_size=args.step_size, max_nb_points=args.max_nb_points,
+                                mask=mask, mask_threshold=args.mask_threshold, affine=dwi.affine,
+                                append_previous_direction=args.append_previous_direction)
 
     with Timer("Saving streamlines"):
         new_streamlines = compress_streamlines(new_streamlines)

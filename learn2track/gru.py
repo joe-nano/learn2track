@@ -236,7 +236,6 @@ class GRU_Regression(GRU):
         output_size : int
             Number of units the regression layer should have.
         """
-        # super().__init__(input_size, hidden_sizes)
         super().__init__(input_size, hidden_sizes)
         self.output_size = output_size
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
