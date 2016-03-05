@@ -261,15 +261,23 @@ def load_text8():
 
 
 class Timer():
-    def __init__(self, txt):
+    """ Times code within a `with` statement. """
+    def __init__(self, txt, newline=False):
         self.txt = txt
+        self.newline = newline
 
     def __enter__(self):
         self.start = time()
-        print(self.txt + "... ", end="")
-        sys.stdout.flush()
+        if not self.newline:
+            print(self.txt + "... ", end="")
+            sys.stdout.flush()
+        else:
+            print(self.txt + "... ")
 
     def __exit__(self, type, value, tb):
+        if self.newline:
+            print(self.txt + " done in ", end="")
+
         print("{:.2f} sec.".format(time()-self.start))
 
 
@@ -338,6 +346,8 @@ def normalize_dwi(dwi, bvals):
     dwi_weights = dwi.get_data().astype("float32")
 
     # Get the first b0.
+    from ipdb import set_trace as dbg
+    dbg()
     b0 = dwi_weights[..., [sorted_bvals_idx[0]]]
     # Keep only b-value greater than 0
     weights = dwi_weights[..., sorted_bvals_idx[nb_b0s:]]
