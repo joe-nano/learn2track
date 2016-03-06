@@ -1,5 +1,7 @@
 from __future__ import division
 
+import numpy as np
+
 import theano
 import theano.tensor as T
 
@@ -158,6 +160,18 @@ class MaskedSequenceDataset(SequenceDataset):
         self.symb_mask = T.TensorVariable(type=T.TensorType("floatX", [False]*inputs[0].ndim),
                                           name=self.name+'_symb_mask')
         self.symb_mask.tag.test_value = (inputs[0][:, 0] > 0.5).astype(floatX)[None, ...]  # For debugging Theano graphs.
+
+
+class StreamlinesDataset(MaskedSequenceDataset):
+    def __init__(self, volume, streamlines_data, name="dataset"):
+        self.volume = volume
+        self.streamlines = streamlines_data.streamlines
+        self.bundle_ids = streamlines_data.bundle_ids
+        self.bundle_names = streamlines_data.bundle_names
+        self.bundle_counts = np.bincount(self.bundle_ids)
+        self.bundle_indices = [np.where(self.bundle_ids == i)[0] for i in range(len(self.bundle_names))]
+
+        super().__init__(self.streamlines, targets=None, name=name)
 
 
 class BundlesDataset(MaskedSequenceDataset):

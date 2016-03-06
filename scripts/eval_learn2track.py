@@ -35,10 +35,10 @@ def buildArgsParser():
     return p
 
 
-def get_regression_results(model, dataset):
+def get_regression_results(model, dataset, append_previous_direction=False):
     loss = L2DistanceForSequences(model, dataset)
     loss.losses  # Hack to generate update dict in loss :(
-    batch_scheduler = SequenceBatchScheduler(dataset, batch_size=50)
+    batch_scheduler = SequenceBatchScheduler(dataset, batch_size=50, append_previous_direction=append_previous_direction)
     losses, masks = log_variables(batch_scheduler, loss.L2_error_per_item, dataset.symb_mask*1)
 
     timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(losses, masks)])
@@ -105,9 +105,9 @@ def main():
     if not os.path.isfile(results_file) or args.force:
         if hyperparams['regression']:
             results = {}
-            results['trainset'] = get_regression_results(model, trainset)
-            results['validset'] = get_regression_results(model, validset)
-            results['testset'] = get_regression_results(model, testset)
+            results['trainset'] = get_regression_results(model, trainset, hyperparams.get("append_previous_direction", False))
+            results['validset'] = get_regression_results(model, validset, hyperparams.get("append_previous_direction", False))
+            results['testset'] = get_regression_results(model, testset, hyperparams.get("append_previous_direction", False))
 
         smartutils.save_dict_to_json_file(results_file, results)
     else:

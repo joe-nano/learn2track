@@ -5,12 +5,13 @@ import theano
 import theano.tensor as T
 from collections import OrderedDict
 
-from learn2track.layers import LayerGRU, LayerRegression, LayerSoftmax
-
 from smartlearner.interfaces import Model
 from smartlearner import utils as smartutils
 from smartlearner.utils import sharedX
 import smartlearner.initializers as initer
+
+from learn2track.layers import LayerGRU, LayerRegression, LayerSoftmax
+from learn2track.tasks import DecayingVariable
 
 
 class GRU(Model):
@@ -103,7 +104,7 @@ class GRU(Model):
                 self.states_h.append(sharedX(np.zeros((batch_size, hidden_size)), name="layer{}_state_h".format(i)))
 
         for i, hidden_size in enumerate(self.hidden_sizes):
-            self.states_h[i].set_value(np.zeros_like(self.states_h[i].get_value()))
+            self.states_h[i].set_value(np.zeros((batch_size, hidden_size), dtype=theano.config.floatX))
 
     def seq_next(self, input):
         """ Returns the next element in every sequence of the batch. """
@@ -277,6 +278,124 @@ class GRU_Regression(GRU):
     def use(self, X):
         directions = self.get_output(X)
         return directions
+
+
+class GRU_RegressionWithScheduledSampling(GRU):
+    """ A standard GRU model regression layer stacked on top of it.
+
+    The output of this model is normalized vector.
+    """
+    def __init__(self, input_size, hidden_sizes, output_size, **_):
+        """
+        Parameters
+        ----------
+        input_size : int
+            Number of units each element Xi in the input sequence X has.
+        hidden_sizes : int, list of int
+            Number of hidden units each GRU should have.
+        output_size : int
+            Number of units the regression layer should have.
+        """
+        super().__init__(input_size, hidden_sizes)
+        self.output_size = output_size
+        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
+        self.scheduled_sampling_rate = DecayingVariable(name="scheduled_sampling_rate")
+
+    @property
+    def tasks(self):
+        return [self.scheduled_sampling_rate]
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        super().initialize(weights_initializer)
+        self.layer_regression.initialize(weights_initializer)
+
+    @property
+    def hyperparameters(self):
+        hyperparameters = super().hyperparameters
+        hyperparameters['output_size'] = self.output_size
+        return hyperparameters
+
+    @property
+    def parameters(self):
+        return super().parameters + self.layer_regression.parameters
+
+    def _fprop(self, Xi, *args):
+        # We assumed that the last 3 values of Xi are the target direction at the previous
+        # timestep (i.e. --append-previous-direction as been used)
+        last_direction = args[-1]  # Predicted direction at last timestep
+        rate = self.scheduled_sampling_rate.var
+        Xi = T.set_subtensor(Xi[:, -3:],
+                             rate*Xi[:, -3:] + (1-rate)*last_direction)
+
+        outputs = super()._fprop(Xi, *args)
+        last_layer_h = outputs[len(self.hidden_sizes)-1]
+        regression_out = self.layer_regression.fprop(last_layer_h)
+        return outputs + (regression_out,)
+
+    def get_output(self, X):
+        outputs_info_h = []
+        for hidden_size in self.hidden_sizes:
+            outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
+
+        last_direction = T.zeros((X.shape[0], 3))
+
+        results, updates = theano.scan(fn=self._fprop,
+                                       outputs_info=outputs_info_h + [last_direction],
+                                       sequences=[T.transpose(X, axes=(1, 0, 2))])  # We want to scan over sequence elements, not the examples.
+
+        self.graph_updates = updates
+        # Put back the examples so they are in the first dimension.
+        self.regression_out = T.transpose(results[-1], axes=(1, 0, 2))
+        return self.regression_out
+
+    def seq_next(self, input):
+        """ Returns the next element in every sequence of the batch. """
+        if self._gen is None:
+            self.seq_reset(batch_size=len(input))
+
+            X = T.TensorVariable(type=T.TensorType("floatX", [False]*input.ndim), name='X')
+            X.tag.test_value = input
+
+            states = self.states_h + [0]
+            new_states = self._fprop(X, *states)
+            new_states_h = new_states[:len(self.hidden_sizes)]
+            output = new_states[-1]
+
+            updates = OrderedDict()
+            for i in range(len(self.hidden_sizes)):
+                updates[self.states_h[i]] = new_states_h[i]
+
+            self._gen = theano.function([X], output, updates=updates)
+
+        return self._gen(input)
+
+    def use(self, X):
+        directions = self.get_output(X)
+        return directions
+
+    def save(self, path):
+        savedir = smartutils.create_folder(pjoin(path, type(self).__name__))
+        smartutils.save_dict_to_json_file(pjoin(savedir, "hyperparams.json"), self.hyperparameters)
+
+        params = {param.name: param.get_value() for param in self.parameters}
+        assert len(self.parameters) == len(params)  # Implies names are all unique.
+        np.savez(pjoin(savedir, "params.npz"), **params)
+
+    def load(self, path):
+        loaddir = pjoin(path, type(self).__name__)
+
+        parameters = np.load(pjoin(loaddir, "params.npz"))
+        for param in self.parameters:
+            param.set_value(parameters[param.name])
+
+    @classmethod
+    def create(cls, path):
+        loaddir = pjoin(path, cls.__name__)
+        hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
+
+        model = cls(**hyperparams)
+        model.load(path)
+        return model
 
 
 class GRU_Hybrid(GRU):

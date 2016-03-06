@@ -12,7 +12,7 @@ import numpy as np
 
 import nibabel as nib
 
-from learn2track.utils import Timer
+from learn2track.utils import Timer, StreamlinesData
 
 
 def buildArgsParser():
@@ -30,50 +30,24 @@ def buildArgsParser():
     return p
 
 
-class Dataset(object):
-    def __init__(self, bundle_names):
-        self.streamlines = nib.streamlines.ArraySequence()
-        self.bundle_ids = np.zeros((0,), dtype=np.int16)
-        self.bundle_names = bundle_names
-
-    def add(self, streamlines, bundle_ids):
-        self.streamlines.extend(streamlines)
-        size = len(self.bundle_ids)
-        new_size = size + len(bundle_ids)
-        self.bundle_ids.resize((new_size,))
-        self.bundle_ids[size:new_size] = bundle_ids
-
-    def save(self, filename):
-        np.savez(filename,
-                 coords=self.streamlines._data.astype(np.float32),
-                 offsets=self.streamlines._offsets,
-                 lengths=self.streamlines._lengths.astype(np.int16),
-                 bundle_ids=self.bundle_ids,
-                 bundle_names=self.bundle_names)
-
-
 def main():
     parser = buildArgsParser()
     args = parser.parse_args()
 
     rng = np.random.RandomState(args.seed)
 
-    dataset = np.load(args.dataset)
-    streamlines = nib.streamlines.ArraySequence()
-    streamlines._data = dataset['coords']
-    streamlines._offsets = dataset['offsets']
-    streamlines._lengths = dataset['lengths']
-
-    trainset = Dataset(dataset['bundle_names'])
-    validset = Dataset(dataset['bundle_names'])
-    testset = Dataset(dataset['bundle_names'])
+    data = StreamlinesData.load(args.dataset)
+    streamlines = data.streamlines
+    train_data = StreamlinesData(data.bundle_names)
+    valid_data = StreamlinesData(data.bundle_names)
+    test_data = StreamlinesData(data.bundle_names)
 
     with Timer("Splitting {} as follow {} using {}".format(args.dataset, args.split, args.split_type), newline=args.verbose):
-        for i, name in enumerate(dataset['bundle_names']):
+        for i, name in enumerate(data.bundle_names):
             if args.verbose:
                 print("Splitting bundle {}...".format(name))
 
-            indices = np.where(dataset['bundle_ids'] == i)[0]
+            indices = np.where(data.bundle_ids == i)[0]
             nb_examples = len(indices)
             rng.shuffle(indices)
 
@@ -92,14 +66,14 @@ def main():
             validset_indices = indices[trainset_size:-testset_size]
             testset_indices = indices[-testset_size:]
 
-            trainset.add(streamlines[trainset_indices], dataset['bundle_ids'][trainset_indices])
-            validset.add(streamlines[validset_indices], dataset['bundle_ids'][validset_indices])
-            testset.add(streamlines[testset_indices], dataset['bundle_ids'][testset_indices])
+            train_data.add(streamlines[trainset_indices], data.bundle_ids[trainset_indices])
+            valid_data.add(streamlines[validset_indices], data.bundle_ids[validset_indices])
+            test_data.add(streamlines[testset_indices], data.bundle_ids[testset_indices])
 
     with Timer("Saving"):
-        trainset.save(args.dataset[:-4] + "_trainset.npz")
-        validset.save(args.dataset[:-4] + "_validset.npz")
-        testset.save(args.dataset[:-4] + "_testset.npz")
+        train_data.save(args.dataset[:-4] + "_trainset.npz")
+        valid_data.save(args.dataset[:-4] + "_validset.npz")
+        test_data.save(args.dataset[:-4] + "_testset.npz")
 
     if args.delete:
         os.remove(args.dataset)

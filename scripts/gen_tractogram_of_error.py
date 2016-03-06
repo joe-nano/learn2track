@@ -113,6 +113,10 @@ def main():
                 from learn2track.gru import GRU_Regression
                 model_class = GRU_Regression
 
+                if args.append_previous_direction:
+                    from learn2track.gru import GRU_RegressionWithScheduledSampling
+                    model_class = GRU_RegressionWithScheduledSampling
+
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path))  # Create new instance
         model.load(pjoin(experiment_path))  # Restore state.

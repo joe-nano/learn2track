@@ -13,15 +13,73 @@ from os.path import join as pjoin
 from scipy.ndimage import map_coordinates
 from itertools import chain
 
+import nibabel as nib
 from nibabel.streamlines import ArraySequence
 
 from smartlearner import Dataset
-from .dataset import ReconstructionDataset, MaskedSequenceDataset, SequenceDataset, BundlesDataset
+from .dataset import ReconstructionDataset, MaskedSequenceDataset, SequenceDataset, BundlesDataset, StreamlinesDataset
 
 
 DATASETS_ENV = "DATASETS"
 
 floatX = theano.config.floatX
+
+
+class StreamlinesData(object):
+    def __init__(self, bundle_names):
+        self.streamlines = nib.streamlines.ArraySequence()
+        self.bundle_ids = np.zeros((0,), dtype=np.int16)
+        self.bundle_names = bundle_names
+
+    def add(self, streamlines, bundle_ids):
+        self.streamlines.extend(streamlines)
+        size = len(self.bundle_ids)
+        new_size = size + len(bundle_ids)
+        self.bundle_ids.resize((new_size,))
+        self.bundle_ids[size:new_size] = bundle_ids
+
+    @classmethod
+    def load(cls, filename):
+        data = np.load(filename)
+        streamlines_data = cls(data['bundle_names'])
+        streamlines_data.streamlines._data = data['coords']
+        streamlines_data.streamlines._offsets = data['offsets']
+        streamlines_data.streamlines._lengths = data['lengths']
+        streamlines_data.bundle_ids = data['bundle_ids']
+        return streamlines_data
+
+    def save(self, filename):
+        np.savez(filename,
+                 coords=self.streamlines._data.astype(np.float32),
+                 offsets=self.streamlines._offsets,
+                 lengths=self.streamlines._lengths.astype(np.int16),
+                 bundle_ids=self.bundle_ids,
+                 bundle_names=self.bundle_names)
+
+
+def load_streamlines_dataset(dwi_filename, streamlines_filename, name="ISMRM15_Challenge"):
+    import nibabel as nib
+    from dipy.io.gradients import read_bvals_bvecs
+
+    with Timer("Loading DWIs"):
+        # Load gradients table
+        bvals_filename = dwi_filename.split('.')[0] + ".bvals"
+        bvecs_filename = dwi_filename.split('.')[0] + ".bvecs"
+        bvals, bvecs = read_bvals_bvecs(bvals_filename, bvecs_filename)
+
+        dwi = nib.load(dwi_filename)
+        volume = resample_dwi(dwi, bvals, bvecs).astype(np.float32)  # Resample to 100 directions
+
+    with Timer("Loading streamlines"):
+        basename = streamlines_filename[:-len('.npz')]
+        if basename.endswith("_trainset"):
+            basename = basename[:-len("_trainset")]
+
+        trainset = StreamlinesDataset(volume, StreamlinesData.load(basename + "_trainset.npz"), name=name+"_trainset")
+        validset = StreamlinesDataset(volume, StreamlinesData.load(basename + "_validset.npz"), name=name+"_validset")
+        testset = StreamlinesDataset(volume, StreamlinesData.load(basename + "_testset.npz"), name=name+"_testset")
+
+    return trainset, validset, testset
 
 
 def load_ismrm2015_challenge(bundles_path, classification=False):
@@ -324,6 +382,37 @@ def map_coordinates_3d_4d(input_array, indices, affine=None):
         return np.ascontiguousarray(np.array(values_4d).T)
 
 
+def eval_volume_at_3d_coordinates(volume, coords):
+    """ Evaluates the volume data at the given coordinates using trilinear interpolation.
+
+    Parameters
+    ----------
+    volume : 3D array or 4D array
+        Data volume.
+    coords : ndarray of shape (N, 3)
+        3D coordinates where to evaluate the volume data.
+
+    Returns
+    -------
+    output : 2D array
+        Values from volume.
+    """
+
+    if volume.ndim <= 2 or volume.ndim >= 5:
+        raise ValueError("Volume must be 3D or 4D!")
+
+    if volume.ndim == 3:
+        return map_coordinates(volume, coords.T, order=1, mode="nearest")
+
+    if volume.ndim == 4:
+        values_4d = []
+        for i in range(volume.shape[-1]):
+            values_tmp = map_coordinates(volume[..., i],
+                                         coords.T, order=1, mode="nearest")
+            values_4d.append(values_tmp)
+        return np.ascontiguousarray(np.array(values_4d).T)
+
+
 def normalize_dwi(dwi, bvals):
     """ Normalize dwi by the first b0.
 
@@ -346,8 +435,6 @@ def normalize_dwi(dwi, bvals):
     dwi_weights = dwi.get_data().astype("float32")
 
     # Get the first b0.
-    from ipdb import set_trace as dbg
-    dbg()
     b0 = dwi_weights[..., [sorted_bvals_idx[0]]]
     # Keep only b-value greater than 0
     weights = dwi_weights[..., sorted_bvals_idx[nb_b0s:]]

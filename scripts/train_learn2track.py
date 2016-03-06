@@ -32,7 +32,6 @@ from smartlearner.direction_modifiers import ConstantLearningRate, DirectionClip
 from learn2track import utils
 from learn2track.utils import Timer, load_ismrm2015_challenge, load_ismrm2015_challenge_contiguous
 from learn2track.lstm import LSTM_Regression, LSTM_RegressionWithFeaturesExtraction, LSTM_Softmax, LSTM_Hybrid
-from learn2track.gru import GRU_Regression, GRU_Softmax, GRU_Hybrid
 from learn2track.factories import ACTIVATION_FUNCTIONS
 from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory
 from learn2track.factories import optimizer_factory
@@ -163,6 +162,8 @@ def buildArgsParser():
                                ' Default: go through all streamlines in the trainset exactly sonce.'))
     dataset.add_argument('--append-previous-direction', action="store_true",
                          help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
+    dataset.add_argument('--scheduled-sampling', action="store_true",
+                         help="if specified, scheduled sampling is used (forces --append-previous-direction).")
 
     duration = p.add_argument_group("Training duration options")
     duration.add_argument('--max-epoch', type=int, metavar='N', help='if specified, train for a maximum of N epochs.')
@@ -267,7 +268,7 @@ def main():
             if args.classification:
                 batch_scheduler = SequenceBatchSchedulerWithClassTarget(trainset, args.batch_size)
             elif args.regression:
-                batch_scheduler = SequenceBatchScheduler(trainset, args.batch_size, args.append_previous_direction)
+                batch_scheduler = SequenceBatchScheduler(trainset, args.batch_size, args.append_previous_direction or args.scheduled_sampling)
 
         else:
             trainset, validset, testset = load_ismrm2015_challenge(args.dataset, args.classification)
@@ -276,11 +277,13 @@ def main():
             elif args.regression:
                 batch_scheduler = BundlesBatchScheduler(trainset, args.batch_size)
 
+            batch_scheduler.nb_updates_per_epoch = args.nb_updates_per_epoch
+
         print("Datasets:", len(trainset), len(validset), len(testset))
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
 
     with Timer("Creating model"):
-        input_size = trainset.input_shape[-1] + 3*args.append_previous_direction
+        input_size = trainset.input_shape[-1] + 3*(args.append_previous_direction or args.scheduled_sampling)
         output_size = trainset.target_shape[-1]
         if args.regression:
             if args.model == "lstm":
@@ -288,7 +291,12 @@ def main():
             elif args.model == "lstm_extraction":
                 model = LSTM_RegressionWithFeaturesExtraction(input_size, args.features_size, args.hidden_sizes, output_size)
             elif args.model == "gru":
-                model = GRU_Regression(input_size, args.hidden_sizes, output_size)
+                if args.scheduled_sampling:
+                    from learn2track.gru import GRU_RegressionWithScheduledSampling
+                    model = GRU_RegressionWithScheduledSampling(input_size, args.hidden_sizes, output_size)
+                else:
+                    from learn2track.gru import GRU_Regression
+                    model = GRU_Regression(input_size, args.hidden_sizes, output_size)
 
         elif args.classification:
             from dipy.data import get_sphere
@@ -344,13 +352,13 @@ def main():
 
         # Print NLL mean/stderror.
         if args.regression:
-            train_loss = L2DistanceForSequences(model, trainset)
-            train_batch_scheduler = SequenceBatchScheduler(trainset, batch_size=50, append_previous_direction=args.append_previous_direction)
-            train_error = views.LossView(loss=train_loss, batch_scheduler=train_batch_scheduler)
-            trainer.append_task(tasks.Print("Trainset - Error        : {0:.2f} | {1:.2f}", train_error.sum, train_error.mean))
+            # train_loss = L2DistanceForSequences(model, trainset)
+            # train_batch_scheduler = SequenceBatchScheduler(trainset, batch_size=50, append_previous_direction=args.append_previous_direction or args.scheduled_sampling)
+            # train_error = views.LossView(loss=train_loss, batch_scheduler=train_batch_scheduler)
+            # trainer.append_task(tasks.Print("Trainset - Error        : {0:.2f} | {1:.2f}", train_error.sum, train_error.mean))
 
             valid_loss = L2DistanceForSequences(model, validset)
-            valid_batch_scheduler = SequenceBatchScheduler(validset, batch_size=50, append_previous_direction=args.append_previous_direction)
+            valid_batch_scheduler = SequenceBatchScheduler(validset, batch_size=50, append_previous_direction=args.append_previous_direction or args.scheduled_sampling)
             valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
             trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))
 
@@ -362,7 +370,8 @@ def main():
             gradient_norm_clipped = views.MonitorVariable(T.sqrt(sum(map(lambda d: T.sqr(d).sum(), loss.gradients.values()))))
             trainer.append_task(tasks.Print("||g'|| : {0:.4f}", gradient_norm_clipped))
 
-            logger = tasks.Logger(train_error.mean, valid_error.mean, gradient_norm, gradient_norm_clipped)
+            # logger = tasks.Logger(train_error.mean, valid_error.mean, gradient_norm, gradient_norm_clipped)
+            logger = tasks.Logger(valid_error.mean, gradient_norm, gradient_norm_clipped)
             trainer.append_task(logger)
 
             if args.view:
