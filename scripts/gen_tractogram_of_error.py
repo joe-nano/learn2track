@@ -17,10 +17,11 @@ from nibabel.streamlines import ArraySequence
 
 from smartlearner import utils as smartutils
 
+from learn2track import utils
 from learn2track.utils import Timer, load_ismrm2015_challenge_contiguous, log_variables
 
 from learn2track.losses import L2DistanceForSequences
-from learn2track.batch_schedulers import SequenceBatchScheduler
+from learn2track.batch_schedulers import SequenceBatchScheduler, StreamlinesBatchScheduler
 
 
 def buildArgsParser():
@@ -31,6 +32,7 @@ def buildArgsParser():
     # General options (optional)
     p.add_argument('name', type=str, help='name/path of the experiment.')
     p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+    p.add_argument('--dwi', help='file containing a diffusion weighted image (.nii|.nii.gz).')
     p.add_argument('--append-previous-direction', action="store_true",
                    help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
 
@@ -38,11 +40,18 @@ def buildArgsParser():
     return p
 
 
-def generate_tractogram_of_error(model, dataset, append_previous_direction=False):
+def generate_tractogram_of_error(model, dataset, append_previous_direction=False, use_streamlines_batch_scheduler=False):
     loss = L2DistanceForSequences(model, dataset)
-    loss.losses  # Hack to generate update dict in loss :(
-    batch_scheduler = SequenceBatchScheduler(dataset, batch_size=50, append_previous_direction=append_previous_direction)
+    if use_streamlines_batch_scheduler:
+        batch_scheduler = StreamlinesBatchScheduler(dataset, batch_size=1000,
+                                                    #patch_shape=3,
+                                                    noisy_streamlines_sigma=None,
+                                                    nb_updates_per_epoch=None,
+                                                    seed=1234)
+    else:
+        batch_scheduler = SequenceBatchScheduler(dataset, batch_size=50, append_previous_direction=append_previous_direction)
 
+    loss.losses  # Hack to generate update dict in loss :(
     predict, losses, targets, masks = log_variables(batch_scheduler, model.regression_out, loss.L2_error_per_item, dataset.symb_targets*1, dataset.symb_mask*1)
 
     timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(losses, masks)])
@@ -93,11 +102,15 @@ def main():
         hyperparams = smartutils.load_dict_from_json_file(pjoin(experiment_path, "..", "hyperparams.json"))
 
     with Timer("Loading dataset"):
-        trainset, validset, testset = load_ismrm2015_challenge_contiguous(args.dataset, hyperparams['classification'])
+        if "classification" in hyperparams:
+            trainset, validset, testset = load_ismrm2015_challenge_contiguous(args.dataset, hyperparams['classification'])
+        else:
+            trainset, validset, testset = utils.load_streamlines_dataset(args.dwi, args.dataset)
         print("Datasets:", len(trainset), len(validset), len(testset))
 
     with Timer("Loading model"):
-        if hyperparams["classification"]:
+        use_streamlines_batch_scheduler = False
+        if "classification" in hyperparams and hyperparams["classification"]:
             if hyperparams["model"] == "lstm":
                 from learn2track.lstm import LSTM_Softmax
                 model_class = LSTM_Softmax
@@ -105,7 +118,7 @@ def main():
                 from learn2track.lstm import LSTM_Hybrid
                 model_class = LSTM_Hybrid
 
-        else:
+        elif "regression" in hyperparams and hyperparams["regression"]:
             if hyperparams["model"] == "lstm":
                 from learn2track.lstm import LSTM_Regression
                 model_class = LSTM_Regression
@@ -117,6 +130,11 @@ def main():
                     from learn2track.gru import GRU_RegressionWithScheduledSampling
                     model_class = GRU_RegressionWithScheduledSampling
 
+        else:
+            from learn2track.gru import GRU_Regression
+            model_class = GRU_Regression
+            use_streamlines_batch_scheduler = True
+
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path))  # Create new instance
         model.load(pjoin(experiment_path))  # Restore state.
@@ -125,7 +143,7 @@ def main():
     tractogram_file = pjoin(experiment_path, "tractogram_{}.trk")
     for name, dataset in [("trainset", trainset), ("validset", validset), ("testset", testset)]:
         if not os.path.isfile(tractogram_file.format(name)) or args.force:
-            tractogram = generate_tractogram_of_error(model, dataset, args.append_previous_direction)
+            tractogram = generate_tractogram_of_error(model, dataset, args.append_previous_direction, use_streamlines_batch_scheduler)
             nib.streamlines.save(tractogram, tractogram_file.format(name))
         else:
             print("Tractogram already exists. (use --force to generate it again)")

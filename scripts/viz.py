@@ -176,10 +176,19 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
     show_m.start()
 
 
+def add_noise_to_streamlines(streamlines, sigma, rng=np.random.RandomState(42)):
+    # Add gaussian noise, N(0, self.sigma).
+    noisy_streamlines = streamlines.copy()
+    shape = noisy_streamlines._data.shape
+    noisy_streamlines._data += sigma * rng.randn(*shape)
+    return noisy_streamlines
+
+
 def horizon_flow(input_files, cluster=False, cluster_thr=15.,
                  random_colors=False, verbose=True,
                  length_lt=0, length_gt=1000,
-                 clusters_lt=0, clusters_gt=10**8):
+                 clusters_lt=0, clusters_gt=10**8,
+                 noisy_streamlines_sigma=0.):
     """ Horizon
 
     Parameters
@@ -193,6 +202,7 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
     length_gt : float, optional
     clusters_lt : int, optional
     clusters_gt : int, optional
+    noisy_streamlines_sigma : float, optional
     """
 
     filenames = input_files
@@ -201,14 +211,18 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
 
     data = None
     affine = None
-    for f in filenames:
+    for i, f in enumerate(filenames):
         if verbose:
             print('Loading file ...')
             print(f)
             print('\n')
 
         if f.endswith('.trk') or f.endswith('.tck'):
-            streamlines = nib.streamlines.load(f).streamlines
+            streamlines = nib.streamlines.load(f).streamlines#[::100]
+
+            if noisy_streamlines_sigma > 0. and i > 0:
+                streamlines = add_noise_to_streamlines(streamlines, noisy_streamlines_sigma)
+
             tractograms.append(streamlines)
 
         if f.endswith('.nii.gz') or f.endswith('.nii'):

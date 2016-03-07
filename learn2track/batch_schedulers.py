@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 import theano.tensor as T
 from os.path import join as pjoin
+import itertools
 
 from smartlearner.interfaces import BatchScheduler
 from smartlearner.utils import sharedX
@@ -14,9 +15,14 @@ floatX = theano.config.floatX
 
 class StreamlinesBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines dataset. """
-    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, nb_updates_per_epoch=None, seed=1234):
+    def __init__(self, dataset, batch_size, patch_shape=None, noisy_streamlines_sigma=None, nb_updates_per_epoch=None, seed=1234):
         self.dataset = dataset
         self.batch_size = batch_size
+
+        self.patch_shape = patch_shape
+        self.use_neighborhood_patch = self.patch_shape is not None
+        if self.use_neighborhood_patch:
+            self._patch_offset_idx = np.array(list(itertools.product(*[range(-(self.patch_shape//2), (self.patch_shape//2)+1)]*3)))
 
         self.use_augment_by_flipping = True
 
@@ -49,6 +55,9 @@ class StreamlinesBatchScheduler(BatchScheduler):
 
     @property
     def input_size(self):
+        if self.use_neighborhood_patch:
+            return self.dataset.volume.shape[-1] * int(self.patch_shape**3)
+
         return self.dataset.volume.shape[-1]  # Number of diffusion directions
 
     @property
@@ -94,11 +103,19 @@ class StreamlinesBatchScheduler(BatchScheduler):
         noisy_streamlines._data += self.noisy_streamlines_sigma * self.rng_noise.randn(*shape)
         return noisy_streamlines
 
+    def _add_neighborhood_patch(self, inputs, streamlines_pts):
+        pts = (streamlines_pts[:, None] + self._patch_offset_idx).reshape((-1, 3))
+        inputs = utils.eval_volume_at_3d_coordinates(self.dataset.volume, pts).reshape((len(streamlines_pts), -1))
+        return inputs
+
     def _prepare_batch(self, indices):
         orig_streamlines = self.dataset.streamlines[indices].copy()
         streamlines = self._add_noise_to_streamlines(orig_streamlines)
 
         inputs = utils.eval_volume_at_3d_coordinates(self.dataset.volume, streamlines._data)
+        if self.use_neighborhood_patch:
+            inputs = self._add_neighborhood_patch(inputs, streamlines._data)
+
         targets = streamlines._data[1:] - streamlines._data[:-1]
         targets = targets / np.sqrt(np.sum(targets**2, axis=1, keepdims=True))
 

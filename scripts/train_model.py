@@ -93,6 +93,8 @@ def build_argparser():
     training.add_argument('--nb-updates-per-epoch', type=int,
                           help=('If specified, a batch will be composed of streamlines drawn from each different bundle (similar amount) at each update.'
                                 ' Default: go through all streamlines in the trainset exactly once.'))
+    training.add_argument('--neighborhood-patch', type=int, metavar='N',
+                          help='if specified, patch (as a cube, i.e. NxNxN) around each streamlines coordinates will be concatenated to the input.')
     training.add_argument('--noisy-streamlines-sigma', type=float,
                           help='if specified, it is the standard deviation of the gaussian noise added independently to every point of every streamlines at each batch.')
     training.add_argument('--clip-gradient', type=float,
@@ -174,6 +176,7 @@ def main():
         print("Datasets:", len(trainset), len(validset), len(testset))
 
         batch_scheduler = StreamlinesBatchScheduler(trainset, batch_size=args.batch_size,
+                                                    patch_shape=args.neighborhood_patch,
                                                     noisy_streamlines_sigma=args.noisy_streamlines_sigma,
                                                     nb_updates_per_epoch=args.nb_updates_per_epoch,
                                                     seed=args.seed)
@@ -181,6 +184,7 @@ def main():
 
     with Timer("Creating model"):
         from learn2track.gru import GRU_Regression
+        print (batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
         model = GRU_Regression(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
@@ -220,6 +224,7 @@ def main():
 
         valid_loss = L2DistanceForSequences(model, validset)
         valid_batch_scheduler = StreamlinesBatchScheduler(validset, batch_size=1000,
+                                                          patch_shape=args.neighborhood_patch,
                                                           noisy_streamlines_sigma=None,
                                                           nb_updates_per_epoch=None,
                                                           seed=1234)

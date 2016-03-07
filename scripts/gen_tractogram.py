@@ -112,14 +112,26 @@ def track_slower(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None,
 
 def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_threshold=0.05, affine=None, append_previous_direction=False, first_directions=None):
     streamlines = []
-    sequences = np.asarray(seeds)[:, None, :]
+    seeds = np.asarray(seeds)
+    if seeds.ndim == 2:
+        seeds = seeds[:, None, :]
+
+    sequences = seeds.copy()
     streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
-    directions = first_directions.copy()#np.zeros((len(sequences), 3), dtype=np.float32)
+    if append_previous_direction:
+        directions = first_directions.copy()
+    else:
+        directions = np.zeros((len(sequences), 3), dtype=np.float32)
 
     streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
     undone = np.ones(len(sequences), dtype=bool)
 
     model.seq_reset(batch_size=len(seeds))
+
+    for i in range(seeds.shape[1]-1):
+        print(i)
+        streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, i, :], affine)
+        model.seq_next(streamlines_dwi[undone])
 
     for i in range(max_nb_points):
         if (i+1) % 10 == 0:
@@ -130,7 +142,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_t
             directions[undone] = model.seq_next(np.c_[streamlines_dwi[undone], directions[undone]/step_size])
         else:
             directions[undone] = model.seq_next(streamlines_dwi[undone])
-        directions = directions * step_size
+        directions[undone] = directions[undone] * step_size * np.array((1, 1, 1))
 
         sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
 
@@ -209,7 +221,7 @@ def main():
         hyperparams = smartutils.load_dict_from_json_file(pjoin(experiment_path, "..", "hyperparams.json"))
 
     with Timer("Loading model"):
-        if hyperparams["classification"]:
+        if "classification" in hyperparams and hyperparams["classification"]:
             if hyperparams["model"] == "lstm":
                 from learn2track.lstm import LSTM_Softmax
                 model_class = LSTM_Softmax
@@ -217,7 +229,7 @@ def main():
                 from learn2track.lstm import LSTM_Hybrid
                 model_class = LSTM_Hybrid
 
-        else:
+        elif "regression" in hyperparams and hyperparams["regression"]:
             if hyperparams["model"] == "lstm":
                 from learn2track.lstm import LSTM_Regression
                 model_class = LSTM_Regression
@@ -231,6 +243,10 @@ def main():
                 if args.append_previous_direction:
                     from learn2track.gru import GRU_RegressionWithScheduledSampling
                     model_class = GRU_RegressionWithScheduledSampling
+
+        else:
+            from learn2track.gru import GRU_Regression
+            model_class = GRU_Regression
 
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path))  # Create new instance
@@ -251,9 +267,6 @@ def main():
         dwi = nib.load(args.dwi)
         weights = utils.resample_dwi(dwi, bvals, bvecs).astype(np.float32)  # Resample to 100 directions
 
-    from ipdb import set_trace as dbg
-    dbg()
-
     mask = None
     if args.mask is not None:
         with Timer("Loading mask"):
@@ -273,21 +286,29 @@ def main():
                 # assert max_coords[0] < dwi.shape[0]
                 # assert max_coords[1] < dwi.shape[1]
                 # assert max_coords[2] < dwi.shape[2]
-                seeds += [s[0] for s in tfile.streamlines]
-                seeds += [s[-1] for s in tfile.streamlines]
-                first_directions += [s[1] - s[0] for s in tfile.streamlines]
-                first_directions += [s[-2] - s[-1] for s in tfile.streamlines]
+
+                # TMP
+                # seeds += [s[0] for s in tfile.streamlines]
+                # seeds += [s[-1] for s in tfile.streamlines]
+                # first_directions += [s[1] - s[0] for s in tfile.streamlines]
+                # first_directions += [s[-2] - s[-1] for s in tfile.streamlines]
+
+                first_k_points = 10
+                seeds += [s[:first_k_points] for s in tfile.streamlines]
+                seeds += [s[-first_k_points:] for s in tfile.streamlines]
+
             else:
                 # Assume it is a binary mask.
                 nii_seeds = nib.load(filename)
                 indices = np.where(nii_seeds.get_data())
                 vox_pts = np.array(indices).T
                 seeds += [p for p in nib.affines.apply_affine(dwi.affine, vox_pts)]
-                first_directions += [np.array([0,0,0])]*len(vox_pts)
+                # first_directions += [np.array([0,0,0])]*len(vox_pts)
 
         # Normalize first directions
-        first_directions = np.asarray(first_directions)
-        first_directions /= np.sqrt(np.sum(first_directions**2, axis=1, keepdims=True))
+        if args.append_previous_direction:
+            first_directions = np.asarray(first_directions)
+            first_directions /= np.sqrt(np.sum(first_directions**2, axis=1, keepdims=True))
 
     with Timer("Tracking"):
         tractogram = batch_track(model, weights, seeds,
