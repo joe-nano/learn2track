@@ -142,7 +142,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_t
             directions[undone] = model.seq_next(np.c_[streamlines_dwi[undone], directions[undone]/step_size])
         else:
             directions[undone] = model.seq_next(streamlines_dwi[undone])
-        directions[undone] = directions[undone] * step_size * np.array((1, 1, 1))
+        directions[undone] = directions[undone] * step_size * np.array((-1, -1, 1))
 
         sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
 
@@ -288,14 +288,14 @@ def main():
                 # assert max_coords[2] < dwi.shape[2]
 
                 # TMP
-                # seeds += [s[0] for s in tfile.streamlines]
-                # seeds += [s[-1] for s in tfile.streamlines]
+                seeds += [s[0] for s in tfile.streamlines]
+                seeds += [s[-1] for s in tfile.streamlines]
                 # first_directions += [s[1] - s[0] for s in tfile.streamlines]
                 # first_directions += [s[-2] - s[-1] for s in tfile.streamlines]
 
-                first_k_points = 10
-                seeds += [s[:first_k_points] for s in tfile.streamlines]
-                seeds += [s[-first_k_points:] for s in tfile.streamlines]
+                # first_k_points = 10
+                # seeds += [s[:first_k_points] for s in tfile.streamlines]
+                # seeds += [s[-first_k_points:] for s in tfile.streamlines]
 
             else:
                 # Assume it is a binary mask.

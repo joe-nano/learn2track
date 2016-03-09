@@ -259,9 +259,9 @@ class SequenceBatchScheduler(BatchScheduler):
 
         # Pad sequences so that they have all the same length.
         current_batch_size = len(inputs)
-        batch_mask = np.zeros((2*current_batch_size, max_sequence_length), dtype=floatX)
-        batch_inputs = np.zeros((2*current_batch_size, max_sequence_length, self._input_size), dtype=floatX)
-        batch_targets = np.zeros((2*current_batch_size, max_sequence_length, targets[0].shape[1]), dtype=floatX)
+        batch_mask = np.zeros((2*current_batch_size, max_sequence_length-1), dtype=floatX)
+        batch_inputs = np.zeros((2*current_batch_size, max_sequence_length-1, self._input_size), dtype=floatX)
+        batch_targets = np.zeros((2*current_batch_size, max_sequence_length-1, targets[0].shape[1]), dtype=floatX)
 
         for i, (x, y) in enumerate(zip(inputs, targets)):
             # No direction to predict for the last point, so we omit it.
