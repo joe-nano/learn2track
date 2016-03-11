@@ -91,7 +91,7 @@ def batch_get_regression_results(model, dataset, batch_size=None):
                 raise e
 
         except RuntimeError as e:
-            if "out of memory" in e.args[0]:
+            if "out of memory" in e.args[0] or "allocation failed" in e.args[0]:
                 print("{:,} streamlines is too much!".format(batch_size))
                 batch_size //= 2
                 if batch_size < 0:
