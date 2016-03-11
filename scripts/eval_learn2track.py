@@ -35,6 +35,8 @@ def buildArgsParser():
                    help='if specified, file containing a diffusion weighted image (.nii|.nii.gz). Otherwise, information is obtained from hyperparams.json')
     p.add_argument('--dataset', type=str,
                    help='if specified, folder containing training data (.npz files). Otherwise, information is obtained from hyperparams.json.')
+    p.add_argument('--batch_size', type=int,
+                   help='if specified, will use try this batch_size first and will reduce it if needed.')
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
@@ -166,12 +168,12 @@ def main():
     if not os.path.isfile(results_file) or args.force:
         results = {}
 
-        with Timer("Evaluating trainset"):
-            results['trainset'], batch_size = batch_get_regression_results(model, trainset)
+        with Timer("Evaluating testset"):
+            results['testset'], batch_size = batch_get_regression_results(model, testset, batch_size=args.batch_size)
         with Timer("Evaluating validset"):
             results['validset'], _ = batch_get_regression_results(model, validset, batch_size=batch_size)
-        with Timer("Evaluating testset"):
-            results['testset'], _ = batch_get_regression_results(model, testset, batch_size=batch_size)
+        with Timer("Evaluating trainset"):
+            results['trainset'], _ = batch_get_regression_results(model, trainset, batch_size=batch_size)
 
         smartutils.save_dict_to_json_file(results_file, results)
     else:
