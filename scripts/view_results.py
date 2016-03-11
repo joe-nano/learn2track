@@ -88,22 +88,24 @@ def extract_result_from_experiment(e):
     entry["Batch Size"] = e.hyperparams.get("batch_size", "")
     entry["Optimizer"] = get_optimizer(e)
     entry["Optimizer params"] = e.hyperparams.get(get_optimizer(e), "")
+    entry["Nb. updates/epoch"] = e.hyperparams.get("nb_updates_per_epoch", "")
+    entry["Noise sigma"] = e.hyperparams.get("noisy_streamlines_sigma", "")
     entry["Clip Gradient"] = e.hyperparams.get("clip_gradient", "")
     entry["Best Epoch"] = e.early_stopping.get("best_epoch", "")
     entry["Max Epoch"] = e.status.get("current_epoch", "")
 
     # Results
     entry["Train L2 error"] = e.results["trainset"]["sequences_mean_loss_avg"]
-    entry["Train L2 error std"] = e.results["trainset"]["sequences_mean_loss_stderr"]
     entry["Valid L2 error"] = e.results["validset"]["sequences_mean_loss_avg"]
-    entry["Valid L2 error std"] = e.results["validset"]["sequences_mean_loss_stderr"]
     entry["Test L2 error"] = e.results["testset"]["sequences_mean_loss_avg"]
+    entry["Train L2 error std"] = e.results["trainset"]["sequences_mean_loss_stderr"]
+    entry["Valid L2 error std"] = e.results["validset"]["sequences_mean_loss_stderr"]
     entry["Test L2 error std"] = e.results["testset"]["sequences_mean_loss_stderr"]
     entry["Train L2 error (per timestep)"] = e.results["trainset"]["timesteps_loss_avg"]
-    entry["Train L2 error (per timestep) std"] = e.results["trainset"]["timesteps_loss_std"]
     entry["Valid L2 error (per timestep)"] = e.results["validset"]["timesteps_loss_avg"]
-    entry["Valid L2 error (per timestep) std"] = e.results["validset"]["timesteps_loss_std"]
     entry["Test L2 error (per timestep)"] = e.results["testset"]["timesteps_loss_avg"]
+    entry["Train L2 error (per timestep) std"] = e.results["trainset"]["timesteps_loss_std"]
+    entry["Valid L2 error (per timestep) std"] = e.results["validset"]["timesteps_loss_std"]
     entry["Test L2 error (per timestep) std"] = e.results["testset"]["timesteps_loss_std"]
 
     entry["Training Time"] = e.status.get("training_time", "")

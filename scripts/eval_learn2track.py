@@ -12,6 +12,7 @@ from os.path import join as pjoin
 import argparse
 import itertools
 import theano
+import time
 from nibabel.streamlines import ArraySequence
 
 from smartlearner import utils as smartutils
@@ -30,16 +31,16 @@ def buildArgsParser():
 
     # General options (optional)
     p.add_argument('dwi', help='file containing a diffusion weighted image (.nii|.nii.gz).')
-    p.add_argument('name', type=str, help='name/path of the experiment.')
     p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+    p.add_argument('name', type=str, help='name/path of the experiment.')
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
 
 
-def get_regression_results(model, dataset, append_previous_direction=False):
+def get_regression_results(model, dataset, batch_size):
     loss = L2DistanceForSequences(model, dataset)
-    batch_scheduler = StreamlinesBatchScheduler(dataset, batch_size=1024*5,
+    batch_scheduler = StreamlinesBatchScheduler(dataset, batch_size=batch_size,
                                                 # patch_shape=args.neighborhood_patch,
                                                 noisy_streamlines_sigma=None,
                                                 nb_updates_per_epoch=None,
@@ -59,6 +60,33 @@ def get_regression_results(model, dataset, append_previous_direction=False):
                "sequences_mean_loss_stderr": float(sequences_mean_loss.std(ddof=1)/np.sqrt(len(sequences_mean_loss)))}
 
     return results
+
+
+def batch_get_regression_results(model, dataset, batch_size=None):
+    if batch_size is None:
+        batch_size = len(dataset)
+
+    while True:
+        try:
+            time.sleep(1)
+            print("Trying to evaluate {:,} streamlines at the same time.".format(batch_size))
+            return get_regression_results(model, dataset, batch_size), batch_size
+
+        except MemoryError:
+            print("{:,} streamlines is too much!".format(batch_size))
+            batch_size //= 2
+            if batch_size < 0:
+                raise MemoryError("Might needs a bigger graphic card!")
+
+        except RuntimeError as e:
+            if "out of memory" in e.args[0]:
+                print("{:,} streamlines is too much!".format(batch_size))
+                batch_size //= 2
+                if batch_size < 0:
+                    raise MemoryError("Might needs a bigger graphic card!")
+
+            else:
+                raise e
 
 
 def main():
@@ -125,11 +153,11 @@ def main():
         results = {}
 
         with Timer("Evaluating trainset"):
-            results['trainset'] = get_regression_results(model, trainset, hyperparams.get("append_previous_direction", False))
+            results['trainset'], batch_size = batch_get_regression_results(model, trainset)
         with Timer("Evaluating validset"):
-            results['validset'] = get_regression_results(model, validset, hyperparams.get("append_previous_direction", False))
+            results['validset'], _ = batch_get_regression_results(model, validset, batch_size=batch_size)
         with Timer("Evaluating testset"):
-            results['testset'] = get_regression_results(model, testset, hyperparams.get("append_previous_direction", False))
+            results['testset'], _ = batch_get_regression_results(model, testset, batch_size=batch_size)
 
         smartutils.save_dict_to_json_file(results_file, results)
     else:
