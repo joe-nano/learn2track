@@ -80,6 +80,16 @@ def batch_get_regression_results(model, dataset, batch_size=None):
             if batch_size < 0:
                 raise MemoryError("Might needs a bigger graphic card!")
 
+        except OSError as e:
+            if "allocate memory" in e.args[0]:
+                print("{:,} streamlines is too much!".format(batch_size))
+                batch_size //= 2
+                if batch_size < 0:
+                    raise MemoryError("Might needs a bigger graphic card!")
+
+            else:
+                raise e
+
         except RuntimeError as e:
             if "out of memory" in e.args[0]:
                 print("{:,} streamlines is too much!".format(batch_size))
