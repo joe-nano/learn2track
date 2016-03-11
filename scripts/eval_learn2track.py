@@ -30,9 +30,11 @@ def buildArgsParser():
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
     # General options (optional)
-    p.add_argument('dwi', help='file containing a diffusion weighted image (.nii|.nii.gz).')
-    p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
     p.add_argument('name', type=str, help='name/path of the experiment.')
+    p.add_argument('--dwi',
+                   help='if specified, file containing a diffusion weighted image (.nii|.nii.gz). Otherwise, information is obtained from hyperparams.json')
+    p.add_argument('--dataset', type=str,
+                   help='if specified, folder containing training data (.npz files). Otherwise, information is obtained from hyperparams.json.')
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
@@ -144,7 +146,9 @@ def main():
         print(str(model))
 
     with Timer("Loading dataset"):
-        trainset, validset, testset = utils.load_streamlines_dataset(args.dwi, args.dataset)
+        dataset_file = args.dataset if args.dataset is not None else hyperparams['dataset']
+        dwi_file = args.dwi if args.dwi is not None else hyperparams['dwi']
+        trainset, validset, testset = utils.load_streamlines_dataset(dwi_file, dataset_file)
         print("Datasets:", len(trainset), len(validset), len(testset))
 
     results_file = pjoin(experiment_path, "results.json")
