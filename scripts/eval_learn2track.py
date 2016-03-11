@@ -18,8 +18,9 @@ from smartlearner import utils as smartutils
 
 from learn2track.utils import Timer, load_ismrm2015_challenge_contiguous, log_variables
 
+from learn2track import utils
 from learn2track.losses import L2DistanceForSequences
-from learn2track.batch_schedulers import SequenceBatchScheduler
+from learn2track.batch_schedulers import SequenceBatchScheduler, StreamlinesBatchScheduler
 
 
 def buildArgsParser():
@@ -28,6 +29,7 @@ def buildArgsParser():
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
     # General options (optional)
+    p.add_argument('dwi', help='file containing a diffusion weighted image (.nii|.nii.gz).')
     p.add_argument('name', type=str, help='name/path of the experiment.')
     p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
 
@@ -37,8 +39,13 @@ def buildArgsParser():
 
 def get_regression_results(model, dataset, append_previous_direction=False):
     loss = L2DistanceForSequences(model, dataset)
+    batch_scheduler = StreamlinesBatchScheduler(dataset, batch_size=1024*5,
+                                                # patch_shape=args.neighborhood_patch,
+                                                noisy_streamlines_sigma=None,
+                                                nb_updates_per_epoch=None,
+                                                seed=1234)
+
     loss.losses  # Hack to generate update dict in loss :(
-    batch_scheduler = SequenceBatchScheduler(dataset, batch_size=50, append_previous_direction=append_previous_direction)
     losses, masks = log_variables(batch_scheduler, loss.L2_error_per_item, dataset.symb_mask*1)
 
     timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(losses, masks)])
@@ -75,7 +82,7 @@ def main():
         hyperparams = smartutils.load_dict_from_json_file(pjoin(experiment_path, "..", "hyperparams.json"))
 
     with Timer("Loading model"):
-        if hyperparams["classification"]:
+        if "classification" in hyperparams and hyperparams["classification"]:
             if hyperparams["model"] == "lstm":
                 from learn2track.lstm import LSTM_Softmax
                 model_class = LSTM_Softmax
@@ -83,13 +90,25 @@ def main():
                 from learn2track.lstm import LSTM_Hybrid
                 model_class = LSTM_Hybrid
 
-        else:
+        elif "regression" in hyperparams and hyperparams["regression"]:
             if hyperparams["model"] == "lstm":
                 from learn2track.lstm import LSTM_Regression
                 model_class = LSTM_Regression
-            elif hyperparams["model"] == "gru":
+            elif hyperparams["model"] == "lstm_extraction":
+                from learn2track.lstm import LSTM_RegressionWithFeaturesExtraction
+                model_class = LSTM_RegressionWithFeaturesExtraction
+            if hyperparams["model"] == "gru":
                 from learn2track.gru import GRU_Regression
                 model_class = GRU_Regression
+
+                if args.append_previous_direction:
+                    raise NameError("Not implemented")
+                    from learn2track.gru import GRU_RegressionWithScheduledSampling
+                    model_class = GRU_RegressionWithScheduledSampling
+
+        else:
+            from learn2track.gru import GRU_Regression
+            model_class = GRU_Regression
 
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path))  # Create new instance
@@ -97,16 +116,19 @@ def main():
         print(str(model))
 
     with Timer("Loading dataset"):
-        trainset, validset, testset = load_ismrm2015_challenge_contiguous(args.dataset, hyperparams['classification'])
+        trainset, validset, testset = utils.load_streamlines_dataset(args.dwi, args.dataset)
         print("Datasets:", len(trainset), len(validset), len(testset))
 
     results_file = pjoin(experiment_path, "results.json")
 
     if not os.path.isfile(results_file) or args.force:
-        if hyperparams['regression']:
-            results = {}
+        results = {}
+
+        with Timer("Evaluating trainset"):
             results['trainset'] = get_regression_results(model, trainset, hyperparams.get("append_previous_direction", False))
+        with Timer("Evaluating validset"):
             results['validset'] = get_regression_results(model, validset, hyperparams.get("append_previous_direction", False))
+        with Timer("Evaluating testset"):
             results['testset'] = get_regression_results(model, testset, hyperparams.get("append_previous_direction", False))
 
         smartutils.save_dict_to_json_file(results_file, results)
