@@ -169,6 +169,7 @@ class StreamlinesBatchScheduler(BatchScheduler):
             self._shared_batch_targets.set_value(batch_targets)
             self._shared_batch_mask.set_value(batch_mask)
 
+
             yield batch_count + 1
 
     @property

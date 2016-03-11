@@ -11,6 +11,38 @@ import os.path as path
 from glob import glob
 
 
+class StreamlinesData(object):
+    def __init__(self, bundle_names):
+        self.streamlines = nib.streamlines.ArraySequence()
+        self.bundle_ids = np.zeros((0,), dtype=np.int16)
+        self.bundle_names = bundle_names
+
+    def add(self, streamlines, bundle_ids):
+        self.streamlines.extend(streamlines)
+        size = len(self.bundle_ids)
+        new_size = size + len(bundle_ids)
+        self.bundle_ids.resize((new_size,))
+        self.bundle_ids[size:new_size] = bundle_ids
+
+    @classmethod
+    def load(cls, filename):
+        data = np.load(filename)
+        streamlines_data = cls(data['bundle_names'])
+        streamlines_data.streamlines._data = data['coords']
+        streamlines_data.streamlines._offsets = data['offsets']
+        streamlines_data.streamlines._lengths = data['lengths']
+        streamlines_data.bundle_ids = data['bundle_ids']
+        return streamlines_data
+
+    def save(self, filename):
+        np.savez(filename,
+                 coords=self.streamlines._data.astype(np.float32),
+                 offsets=self.streamlines._offsets,
+                 lengths=self.streamlines._lengths.astype(np.int16),
+                 bundle_ids=self.bundle_ids,
+                 bundle_names=self.bundle_names)
+
+
 def check_range(streamline, lt, gt):
     length_s = length(streamline)
     if (length_s < gt) & (length_s > lt):
@@ -225,6 +257,10 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
 
             tractograms.append(streamlines)
 
+        if f.endswith('.npz'):
+            streamlines_data = StreamlinesData.load(f)
+            tractograms.append(streamlines_data.streamlines)
+
         if f.endswith('.nii.gz') or f.endswith('.nii'):
 
             img = nib.load(f)
@@ -232,6 +268,12 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
             affine = img.get_affine()
             if verbose:
                 print(affine)
+
+    # tmp save
+    tractogram = nib.streamlines.Tractogram(tractograms[0])
+    tractogram.apply_affine(img.affine)
+    nib.streamlines.save(tractogram, "tmp.tck")
+    exit()
 
     horizon(tractograms, data, affine, cluster, cluster_thr, random_colors,
             length_lt, length_gt, clusters_lt, clusters_gt)

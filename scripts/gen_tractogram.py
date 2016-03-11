@@ -18,7 +18,6 @@ import time
 import dipy
 import nibabel as nib
 from dipy.tracking.streamline import compress_streamlines
-from dipy.tracking.streamline import values_from_volume
 
 from smartlearner import Dataset
 from smartlearner import utils as smartutils
@@ -39,18 +38,31 @@ def build_argparser():
 
     p.add_argument('--seeds', type=str, nargs="+", required=True,
                    help="use extermities of the streamlines in these tractograms (.trk|.tck) as seed points.")
-    p.add_argument('--max-nb-points', type=int, help="maximum number of points for a streamline. Default: 1000", default=1000)
+    p.add_argument('--nb-seeds-per-voxel', type=int, default=1,
+                   help="number of seeds per voxel, only if --seeds is a seeding mask (i.e. a nifti file). Default: 1")
+    p.add_argument('--seeding-rng-seed', type=int, default=1234,
+                   help="seed for the random generator responsible of generating the seeds in the voxels. Default: 1234")
+
+    deviation_angle = p.add_mutually_exclusive_group()
+    deviation_angle.add_argument('--theta', metavar='ANGLE', type=float,
+                                 help="Maximum angle between 2 steps (in degree). [45]")
+    deviation_angle.add_argument('--curvature', metavar='RADIUS', type=float,
+                                 help='Minimum radius of curvature R in mm. Replaces --theta.')
+
+    p.add_argument('--min-length', type=int, help="minimum length (in mm) for a streamline. Default: 10 mm", default=10)
+    p.add_argument('--max-length', type=int, help="maximum length (in mm) for a streamline. Default: 300 mm", default=300)
     p.add_argument('--step-size', type=float, help="step size between two consecutive points in a streamlines (in mm). Default: 0.5mm", default=0.5)
     p.add_argument('--mask', type=str,
                    help="if provided, streamlines will stop if going outside this mask (.nii|.nii.gz).")
     p.add_argument('--mask-threshold', type=float, default=0.05,
                    help="streamlines will be terminating if they pass through a voxel with a value from the mask lower than this value. Default: 0.05")
 
+    p.add_argument('--enable-backward-tracking', action="store_true",
+                   help="if specified, both senses of the direction obtained from the seed point will be explored.")
+
+
     p.add_argument('--append-previous-direction', action="store_true",
                    help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
-
-    # p.add_argument('--bvals', type=str, help='text file with the bvalues. Default: same name as the dwi file but with extension .bvals.')
-    # p.add_argument('--seeding-mask', type=str, help="streamlines will start from this mask (.nii|.nii.gz).")
 
     # Optional parameters
     p.add_argument('-f', '--force',  action='store_true', help='overwrite existing tractogram')
@@ -60,110 +72,117 @@ def build_argparser():
 floatX = theano.config.floatX
 
 
-def track_slower(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_threshold=0.05, affine=None):
-    inputs = T.tensor3('inputs')
-    inputs.tag.test_value = map_coordinates_3d_4d(dwi, np.concatenate((np.asarray(seeds)[:, None, :],
-                                                                       np.asarray(seeds)[:, None, :]), axis=1),
-                                                  affine=affine)
-    next_directions = model.use(inputs)
-    track_step = theano.function([inputs], next_directions[:, -1])
+def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask=None, mask_threshold=0.05, enable_backward_tracking=False):
+    streamlines_dwi = np.zeros((len(seeds), dwi.shape[-1]), dtype=np.float32)
 
-    streamlines = []
-    sequences = np.asarray(seeds)[:, None, :]
-    streamlines_dwi = values_from_volume(dwi, sequences[:, [-1]], affine).astype(np.float32)
-
-    for i in range(max_nb_points):
-        if (i+1) % 10 == 0:
-            print("{}/{}".format(i+1, max_nb_points))
-
-        directions = track_step(streamlines_dwi)
-        directions *= step_size
-
-        done = []
-        undone = np.arange(len(directions))
-
-        # If a streamline goes outside the wm mask, mark is as done.
-        if mask is not None:
-            next_points = sequences[undone, -1] + directions[undone]
-            values = values_from_volume(mask, next_points.reshape((-1, 1, 3)), affine)[:, 0]
-
-            done.extend(undone[values < mask_threshold])
-            undone = undone[values >= mask_threshold]
-            assert len(undone) + len(done) == len(directions)
-
-        streamlines.extend([s for s in sequences[done]])
-
-        if len(undone) == 0:
-            break
-
-        sequences = sequences[undone]
-        points = sequences[:, [-1]] + directions[undone, None, :]
-        sequences = np.concatenate([sequences, points], axis=1)
-
-        streamlines_dwi = np.concatenate([streamlines_dwi[undone],
-                                          values_from_volume(dwi, sequences[:, [-1]], affine).astype(np.float32)
-                                          # map_coordinates_3d_4d(dwi, sequences[:, [-1]])],
-                                          ], axis=1)
-
-    # Add remaining
-    streamlines.extend([s for s in sequences])
-    return streamlines
-
-
-def track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_threshold=0.05, affine=None, append_previous_direction=False, first_directions=None):
-    streamlines = []
-    seeds = np.asarray(seeds)
-    if seeds.ndim == 2:
-        seeds = seeds[:, None, :]
-
+    # Forward tracking
+    # Prepare some data container and reset the model.
     sequences = seeds.copy()
-    streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
-    if append_previous_direction:
-        directions = first_directions.copy()
-    else:
-        directions = np.zeros((len(sequences), 3), dtype=np.float32)
+    if sequences.ndim == 2:
+        sequences = sequences[:, None, :]
+
+    directions = np.zeros((len(sequences), 3), dtype=np.float32)
+    last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
 
     streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
     undone = np.ones(len(sequences), dtype=bool)
 
     model.seq_reset(batch_size=len(seeds))
 
-    for i in range(seeds.shape[1]-1):
-        print(i)
-        streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, i, :], affine)
-        model.seq_next(streamlines_dwi[undone])
-
+    # Tracking
     for i in range(max_nb_points):
-        if (i+1) % 10 == 0:
-            print("{}/{}".format(i+1, max_nb_points))
+        if (i+1) % 100 == 0:
+            print("pts: {}/{}".format(i+1, max_nb_points))
 
-        streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :], affine)
-        if append_previous_direction:
-            directions[undone] = model.seq_next(np.c_[streamlines_dwi[undone], directions[undone]/step_size])
-        else:
-            directions[undone] = model.seq_next(streamlines_dwi[undone])
-        directions[undone] = directions[undone] * step_size * np.array((-1, -1, 1))
+        streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
+        directions[undone] = model.seq_next(streamlines_dwi[undone])
 
+        # If a streamline makes a turn to tight, stop it.
+        if sequences.shape[1] > 1:
+            angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
+            model.seq_squeeze(tokeep=angles[undone] <= theta)
+            undone = np.logical_and(undone, angles <= theta)
+
+        last_directions[undone] = directions[undone].copy()
+
+        # Make a step
+        directions[undone] = directions[undone] * step_size
         sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
+        streamlines_lengths[:] += undone[:]
 
         # If a streamline goes outside the wm mask, mark is as done.
         if mask is not None:
-            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine)
+            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :])
             model.seq_squeeze(tokeep=last_point_values[undone] >= mask_threshold)
             undone = np.logical_and(undone, last_point_values >= mask_threshold)
-
-        streamlines_lengths[:] += undone[:]
 
         if undone.sum() == 0:
             break
 
-    # Add remaining
+    # Trim sequences to obtain the streamlines.
     streamlines = [s[:l] for s, l in zip(sequences, streamlines_lengths)]
+
+    if not enable_backward_tracking:
+        return streamlines
+
+    # Backward tracking
+    # Reset everything
+    streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
+
+    sequences = seeds.copy()
+    if sequences.ndim == 2:
+        sequences = sequences[:, None, :]
+
+    directions = np.zeros((len(sequences), 3), dtype=np.float32)
+    last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
+
+    streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
+    undone = np.ones(len(sequences), dtype=bool)
+
+    model.seq_reset(batch_size=len(seeds))
+
+    # Tracking
+    print("Tracking backward...")
+    for i in range(max_nb_points):
+        if (i+1) % 100 == 0:
+            print("pts: {}/{}".format(i+1, max_nb_points))
+
+        streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
+        directions[undone] = model.seq_next(streamlines_dwi[undone])
+        directions[undone] = directions[undone] * step_size
+
+        if i == 0:
+            # Follow the opposite direction obtained from the seed points (and only for that point).
+            directions[undone] *= -1
+
+        # If a streamline makes a turn to tight, stop it.
+        if sequences.shape[1] > 1:
+            angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
+            model.seq_squeeze(tokeep=angles[undone] <= theta)
+            undone = np.logical_and(undone, angles <= theta)
+
+        last_directions[undone] = directions[undone]
+
+        # Make a step
+        directions[undone] = directions[undone] * step_size
+        sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
+        streamlines_lengths[:] += undone[:]
+
+        # If a streamline goes outside the wm mask, mark is as done.
+        if mask is not None:
+            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :])
+            model.seq_squeeze(tokeep=last_point_values[undone] >= mask_threshold)
+            undone = np.logical_and(undone, last_point_values >= mask_threshold)
+
+        if undone.sum() == 0:
+            break
+
+    # Trim sequences to obtain the streamlines.
+    streamlines = [np.r_[s[::-1], seq[1:l]] for s, seq, l in zip(streamlines, sequences, streamlines_lengths)]
     return streamlines
 
 
-def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, mask_threshold=0.05, affine=None, append_previous_direction=False, first_directions=None):
-
+def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78, mask=None, mask_threshold=0.05, enable_backward_tracking=False):
     batch_size = len(seeds)
     while True:
         try:
@@ -174,10 +193,10 @@ def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, 
             for start in range(0, len(seeds), batch_size):
                 print("{:,} / {:,}".format(start, len(seeds)))
                 end = start+batch_size
-                new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, max_nb_points=max_nb_points,
-                                        mask=mask, mask_threshold=mask_threshold, affine=affine,
-                                        append_previous_direction=append_previous_direction,
-                                        first_directions=first_directions[start:end])
+                new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
+                                        max_nb_points=max_nb_points, theta=theta,
+                                        mask=mask, mask_threshold=mask_threshold,
+                                        enable_backward_tracking=enable_backward_tracking)
                 new_streamlines = compress_streamlines(new_streamlines)
                 tractogram.streamlines.extend(new_streamlines)
 
@@ -198,6 +217,27 @@ def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, mask=None, 
 
             else:
                 raise e
+
+
+def get_max_angle_from_curvature(curvature, step_size):
+    """
+    Parameters
+    ----------
+    curvature: float
+        Minimum radius of curvature in mm.
+    step_size: float
+        The tracking step size in mm.
+
+    Return
+    ------
+    theta: float
+        The maximum deviation angle in radian,
+        given the radius curvature and the step size.
+    """
+    theta = 2. * np.arcsin(step_size / (2. * curvature))
+    if np.isnan(theta) or theta > np.pi / 2 or theta <= 0:
+        theta = np.pi / 2.0
+    return theta
 
 
 
@@ -241,6 +281,7 @@ def main():
                 model_class = GRU_Regression
 
                 if args.append_previous_direction:
+                    raise NameError("Not implemented")
                     from learn2track.gru import GRU_RegressionWithScheduledSampling
                     model_class = GRU_RegressionWithScheduledSampling
 
@@ -274,104 +315,64 @@ def main():
 
     with Timer("Generating seeds"):
         seeds = []
-        first_directions = []
         for filename in args.seeds:
             if filename.endswith('.trk') or filename.endswith('.tck'):
                 tfile = nib.streamlines.load(filename)
-                # trk.tractogram.apply_affine(np.linalg.inv(trk.affine))  # We track in voxel space.
-                # # step_size = np.mean([np.mean(np.sqrt(np.sum((pts[1:]-pts[:-1])**2, axis=1))) for pts in streamlines.points])
-                # # seeds = [s[0] for s in streamlines.points[::10]]
-                # assert np.all(np.min(trk.tractogram.streamlines._data, axis=0) >= 0)
-                # max_coords = np.max(trk.tractogram.streamlines._data, axis=0)
-                # assert max_coords[0] < dwi.shape[0]
-                # assert max_coords[1] < dwi.shape[1]
-                # assert max_coords[2] < dwi.shape[2]
+                # Send the streamlines to voxel since that's where we'll track.
+                tfile.tractoram.apply_affine(np.linalg.inv(dwi.affine))
 
-                # TMP
+                # Use extremities of the streamlines as seeding points.
                 seeds += [s[0] for s in tfile.streamlines]
                 seeds += [s[-1] for s in tfile.streamlines]
-                # first_directions += [s[1] - s[0] for s in tfile.streamlines]
-                # first_directions += [s[-2] - s[-1] for s in tfile.streamlines]
-
-                # first_k_points = 10
-                # seeds += [s[:first_k_points] for s in tfile.streamlines]
-                # seeds += [s[-first_k_points:] for s in tfile.streamlines]
 
             else:
                 # Assume it is a binary mask.
+                rng = np.random.RandomState(args.seeding_rng_seed)
                 nii_seeds = nib.load(filename)
-                indices = np.where(nii_seeds.get_data())
-                vox_pts = np.array(indices).T
-                seeds += [p for p in nib.affines.apply_affine(dwi.affine, vox_pts)]
-                # first_directions += [np.array([0,0,0])]*len(vox_pts)
+                indices = np.array(np.where(nii_seeds.get_data())).T
+                for idx in indices:
+                    seeds.extend(idx + rng.rand(args.nb_seeds_per_voxel, 3))
 
-        # Normalize first directions
-        if args.append_previous_direction:
-            first_directions = np.asarray(first_directions)
-            first_directions /= np.sqrt(np.sum(first_directions**2, axis=1, keepdims=True))
+        seeds = np.array(seeds)
 
     with Timer("Tracking"):
+        voxel_sizes = np.asarray(dwi.header.get_zooms()[:3])
+        if not np.all(voxel_sizes == dwi.header.get_zooms()[0]):
+            print("* Careful voxel are anisotropic {}!".format(tuple(voxel_sizes)))
+        # Since we are tracking in voxel space, convert step_size (in mm) to voxel.
+        step_size = np.float32(args.step_size / voxel_sizes.max())
+        # Also convert max length (in mm) to voxel.
+        max_nb_points = int(args.max_length / step_size)
+
+        if args.theta is not None:
+            theta = np.deg2rad(args.theta)
+        elif args.curvature is not None and args.curvature > 0:
+            theta = get_max_angle_from_curvature(args.curvature, step_size)
+        else:
+            theta = np.deg2rad(45)
+
+        print("Angle: {}".format(theta))
+
         tractogram = batch_track(model, weights, seeds,
-                                 step_size=args.step_size, max_nb_points=args.max_nb_points,
-                                 mask=mask, mask_threshold=args.mask_threshold, affine=dwi.affine,
-                                 append_previous_direction=args.append_previous_direction,
-                                 first_directions=first_directions)
+                                 step_size=step_size,
+                                 max_nb_points=max_nb_points,
+                                 theta=theta,
+                                 mask=mask,
+                                 mask_threshold=args.mask_threshold,
+                                 enable_backward_tracking=args.enable_backward_tracking)
 
     with Timer("Saving streamlines"):
-        # Flush streamlines with no points.
+        # Flush streamlines that has no points.
         tractogram = tractogram[np.array(list(map(len, tractogram))) > 0]
+        tractogram.apply_affine(dwi.affine)  # Streamlines were generated in voxel space.
+        # Remove small streamlines
+        lengths = dipy.tracking.streamline.length(tractogram.streamlines)
+        tractogram = tractogram[lengths >= args.min_length]
 
-        # tractogram.apply_affine(trk.affine)  # Streamlines were generated in voxel space.
-        # new_trk = nib.streamlines.TrkFile(tractogram, trk.header)
         save_path = pjoin(experiment_path, args.out)
         nib.streamlines.save(tractogram, save_path)
 
+    print("{:,} streamlines (compressed) were generated with an average length of {:.2f} mm.".format(len(tractogram), lengths.mean()))
+
 if __name__ == "__main__":
     main()
-
-# def track(model, dwi, seeds, step_size=0.5, allowed_voxels=None, max_nb_points=500):
-#     inputs = T.tensor3('inputs')
-#     inputs.tag.test_value = map_coordinates_3d_4d(dwi, np.asarray(seeds)[:, None, :])
-#     next_directions, stoppings = model.use(inputs)
-#     track_step = theano.function([inputs], [next_directions[:, -1], stoppings[:, -1, 0]])
-
-#     streamlines = []
-#     sequences = np.asarray(seeds)[:, None, :]
-#     streamlines_dwi = map_coordinates_3d_4d(dwi, sequences[:, [-1]])
-
-#     for i in range(max_nb_points):
-#         if (i+1) % 10 == 0:
-#             print("{}/{}".format(i+1, max_nb_points))
-
-#         directions, prob_stoppings = track_step(streamlines_dwi)
-#         directions *= step_size
-
-#         done = list(np.where(prob_stoppings > 0.5)[0])
-#         undone = list(np.where(prob_stoppings <= 0.5)[0])
-
-#         # If a streamline goes outside the wm mask, mark is as done.
-#         if allowed_voxels is not None:
-#             next_points = sequences[undone, -1] + directions[undone]
-#             next_points_voxel = np.round(next_points)
-#             for idx, voxel in zip(undone, next_points_voxel):
-#                 if tuple(voxel) not in allowed_voxels:
-#                     done += [idx]
-#                     undone.remove(idx)
-
-#         streamlines.extend([s for s in sequences[done]])
-
-#         if len(undone) == 0:
-#             break
-
-#         sequences = sequences[undone]
-#         points = sequences[:, [-1]] + directions[undone, None, :]
-#         sequences = np.concatenate([sequences, points], axis=1)
-
-#         streamlines_dwi = np.concatenate([streamlines_dwi[undone],
-#                                           map_coordinates_3d_4d(dwi, sequences[:, [-1]])],
-#                                          axis=1)
-
-#     # Add remaining
-#     streamlines.extend([s for s in sequences])
-#     return streamlines
-
