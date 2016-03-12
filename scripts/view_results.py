@@ -13,6 +13,7 @@ import numpy as np
 import argparse
 import csv
 import re
+import pickle
 from collections import OrderedDict
 # from texttable import Texttable
 
@@ -36,8 +37,9 @@ class Experiment(object):
     def __init__(self, experiment_path):
         self.experiment_path = experiment_path
         self.name = os.path.basename(self.experiment_path)
-        self.logger_file = pjoin(self.experiment_path, "logger.pkl")
+        # self.logger_file = pjoin(self.experiment_path, "logger.pkl")
         self.results_file = pjoin(self.experiment_path, "results.json")
+        self.tractometer_scores_file = pjoin(self.experiment_path, "tractometer", "scores", "wm.pkl")
         self.hyperparams_file = pjoin(self.experiment_path, "hyperparams.json")
         # self.model_hyperparams_file = pjoin(self.experiment_path, "GRU_Regression", "hyperparams.json")
         self.status_file = pjoin(self.experiment_path, "training", "status.json")
@@ -47,6 +49,12 @@ class Experiment(object):
         self.hyperparams = load_dict_from_json_file(self.hyperparams_file)
         # self.model_hyperparams = load_dict_from_json_file(self.model_hyperparams_file)
         self.status = load_dict_from_json_file(self.status_file)
+
+        self.tractometer_scores = {}
+        if os.path.isfile(self.tractometer_scores_file):
+            self.tractometer_scores = pickle.load(open(self.tractometer_scores_file))
+        else:
+            print("No tractometer results yet for: {}".format(self.tractometer_scores))
 
         self.early_stopping = {}
         if os.path.isfile(self.early_stopping_file):
@@ -98,6 +106,19 @@ def extract_result_from_experiment(e):
     entry["Train L2 error"] = e.results["trainset"]["sequences_mean_loss_avg"]
     entry["Valid L2 error"] = e.results["validset"]["sequences_mean_loss_avg"]
     entry["Test L2 error"] = e.results["testset"]["sequences_mean_loss_avg"]
+
+    # Tractometer results
+    entry["VC"] = str(e.tractometer_scores.get("VC", ""))
+    entry["IC"] = str(e.tractometer_scores.get("IC", ""))
+    entry["NC"] = str(e.tractometer_scores.get("NC", ""))
+    entry["VB"] = str(e.tractometer_scores.get("VB", ""))
+    entry["IB"] = str(e.tractometer_scores.get("IB", ""))
+    entry["count"] = str(e.tractometer_scores.get("total_streamlines_count", ""))
+    entry["VCCR"] = ""
+    if len(e.tractometer_scores) > 0:
+        entry["VCCR"] = str(float(entry["VC"])/(float(entry["VC"])+float(entry["IC"])))
+
+    # Other results
     entry["Train L2 error std"] = e.results["trainset"]["sequences_mean_loss_stderr"]
     entry["Valid L2 error std"] = e.results["validset"]["sequences_mean_loss_stderr"]
     entry["Test L2 error std"] = e.results["testset"]["sequences_mean_loss_stderr"]
