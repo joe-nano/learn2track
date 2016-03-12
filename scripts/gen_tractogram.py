@@ -60,6 +60,8 @@ def build_argparser():
     p.add_argument('--enable-backward-tracking', action="store_true",
                    help="if specified, both senses of the direction obtained from the seed point will be explored.")
 
+    p.add_argument('--batch-size', type=int, help="number of streamlines to process at the same time. Default: the biggest possible")
+
 
     p.add_argument('--append-previous-direction', action="store_true",
                    help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
@@ -181,8 +183,10 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
     return streamlines
 
 
-def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, enable_backward_tracking=False):
-    batch_size = len(seeds)
+def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, enable_backward_tracking=False, batch_size=None):
+    if batch_size is None:
+        batch_size = len(seeds)
+
     while True:
         try:
             time.sleep(1)
@@ -369,7 +373,8 @@ def main():
                                  theta=theta,
                                  mask=mask, mask_affine=mask_affine,
                                  mask_threshold=args.mask_threshold,
-                                 enable_backward_tracking=args.enable_backward_tracking)
+                                 enable_backward_tracking=args.enable_backward_tracking,
+                                 batch_size=args.batch_size)
 
     with Timer("Saving streamlines"):
         # Flush streamlines that has no points.
