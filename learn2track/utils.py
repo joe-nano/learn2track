@@ -344,7 +344,7 @@ def generate_uid_from_string(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def map_coordinates_3d_4d(input_array, indices, affine=None):
+def map_coordinates_3d_4d(input_array, indices, affine=None, order=1):
     """ Evaluate the input_array data at the given indices
     using trilinear interpolation
 
@@ -371,13 +371,13 @@ def map_coordinates_3d_4d(input_array, indices, affine=None):
         raise ValueError("Input array can only be 3d or 4d")
 
     if input_array.ndim == 3:
-        return map_coordinates(input_array, indices.T, order=1)
+        return map_coordinates(input_array, indices.T, order=order)
 
     if input_array.ndim == 4:
         values_4d = []
         for i in range(input_array.shape[-1]):
             values_tmp = map_coordinates(input_array[..., i],
-                                         indices.T, order=1)
+                                         indices.T, order=order)
             values_4d.append(values_tmp)
         return np.ascontiguousarray(np.array(values_4d).T)
 

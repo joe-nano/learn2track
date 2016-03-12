@@ -80,11 +80,14 @@ class StreamlinesBatchScheduler(BatchScheduler):
         self._batch_size = value
 
         # Compute the number of streamlines from each bundle that should be present in a batch.
-        nb_bundles = len(self.dataset.bundle_names)
-        self._nb_streamlines_from_each_bundle = (value//nb_bundles) * np.ones(nb_bundles, dtype=int)
+        nb_bundles = int(np.sum(self.dataset.bundle_counts > 0))  # Keep only bundles that are present.
+        nb_streamlines_from_each_bundle = (value//nb_bundles) * np.ones(nb_bundles, dtype=int)
 
         # Make sure the splits sum to `batch_size`.
-        self._nb_streamlines_from_each_bundle[:(value % nb_bundles)] += 1
+        nb_streamlines_from_each_bundle[:(value % nb_bundles)] += 1
+
+        self._nb_streamlines_from_each_bundle = np.zeros(len(self.dataset.bundle_names), dtype=int)
+        self._nb_streamlines_from_each_bundle[self.dataset.bundle_counts > 0] = nb_streamlines_from_each_bundle
         assert sum(self._nb_streamlines_from_each_bundle) == self.batch_size
 
         # Pre-allocated memory for indices (speedup)
@@ -150,6 +153,9 @@ class StreamlinesBatchScheduler(BatchScheduler):
         # Batch is a stratified sample of streamlines from the different bundles.
         start = 0
         for bundle_indices, nb_streamlines in zip(self.dataset.bundle_indices, self._nb_streamlines_from_each_bundle):
+            if nb_streamlines == 0:
+                continue
+
             end = start + nb_streamlines
             self._indices[start:end] = self.rng.choice(bundle_indices, size=(nb_streamlines,), replace=False)
             start = end

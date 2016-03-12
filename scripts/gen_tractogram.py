@@ -72,7 +72,7 @@ def build_argparser():
 floatX = theano.config.floatX
 
 
-def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask=None, mask_threshold=0.05, enable_backward_tracking=False):
+def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, enable_backward_tracking=False):
     streamlines_dwi = np.zeros((len(seeds), dwi.shape[-1]), dtype=np.float32)
 
     # Forward tracking
@@ -97,6 +97,9 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
         streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
         directions[undone] = model.seq_next(streamlines_dwi[undone])
 
+        if i == 0:
+            tmp = directions[undone].copy()
+
         # If a streamline makes a turn to tight, stop it.
         if sequences.shape[1] > 1:
             angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
@@ -112,9 +115,9 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
         # If a streamline goes outside the wm mask, mark is as done.
         if mask is not None:
-            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :])
-            model.seq_squeeze(tokeep=last_point_values[undone] >= mask_threshold)
-            undone = np.logical_and(undone, last_point_values >= mask_threshold)
+            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
+            model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
+            undone = np.logical_and(undone, last_point_values > mask_threshold)
 
         if undone.sum() == 0:
             break
@@ -149,9 +152,9 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
         streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
         directions[undone] = model.seq_next(streamlines_dwi[undone])
-        directions[undone] = directions[undone] * step_size
 
         if i == 0:
+            assert np.all(directions == tmp)
             # Follow the opposite direction obtained from the seed points (and only for that point).
             directions[undone] *= -1
 
@@ -170,9 +173,9 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
         # If a streamline goes outside the wm mask, mark is as done.
         if mask is not None:
-            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :])
-            model.seq_squeeze(tokeep=last_point_values[undone] >= mask_threshold)
-            undone = np.logical_and(undone, last_point_values >= mask_threshold)
+            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
+            model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
+            undone = np.logical_and(undone, last_point_values > mask_threshold)
 
         if undone.sum() == 0:
             break
@@ -182,7 +185,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
     return streamlines
 
 
-def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78, mask=None, mask_threshold=0.05, enable_backward_tracking=False):
+def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, enable_backward_tracking=False):
     batch_size = len(seeds)
     while True:
         try:
@@ -195,7 +198,7 @@ def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78,
                 end = start+batch_size
                 new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
                                         max_nb_points=max_nb_points, theta=theta,
-                                        mask=mask, mask_threshold=mask_threshold,
+                                        mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
                                         enable_backward_tracking=enable_backward_tracking)
                 new_streamlines = compress_streamlines(new_streamlines)
                 tractogram.streamlines.extend(new_streamlines)
@@ -307,19 +310,25 @@ def main():
 
         dwi = nib.load(args.dwi)
         weights = utils.resample_dwi(dwi, bvals, bvecs).astype(np.float32)  # Resample to 100 directions
+        affine_rasmm2dwivox = np.linalg.inv(dwi.affine)
 
     mask = None
     if args.mask is not None:
         with Timer("Loading mask"):
-            mask = nib.load(args.mask).get_data()
+            mask_nii = nib.load(args.mask)
+            mask = mask_nii.get_data()
+            # Compute the affine allowing to evaluate the mask at some coordinates correctly.
+            mask_affine = np.dot(affine_rasmm2dwivox, mask_nii.affine)
+            mask_affine[range(3), -1] = 0#-0.5
 
     with Timer("Generating seeds"):
         seeds = []
+
         for filename in args.seeds:
             if filename.endswith('.trk') or filename.endswith('.tck'):
                 tfile = nib.streamlines.load(filename)
                 # Send the streamlines to voxel since that's where we'll track.
-                tfile.tractoram.apply_affine(np.linalg.inv(dwi.affine))
+                tfile.tractoram.apply_affine(affine_rasmm2dwivox)
 
                 # Use extremities of the streamlines as seeding points.
                 seeds += [s[0] for s in tfile.streamlines]
@@ -331,15 +340,17 @@ def main():
                 nii_seeds = nib.load(filename)
                 indices = np.array(np.where(nii_seeds.get_data())).T
                 for idx in indices:
-                    seeds.extend(idx + rng.rand(args.nb_seeds_per_voxel, 3))
+                    seeds_in_voxel = idx + rng.rand(args.nb_seeds_per_voxel, 3)
+                    seeds_in_voxel = nib.affines.apply_affine(np.dot(affine_rasmm2dwivox, nii_seeds.affine), seeds_in_voxel)
+                    seeds.extend(seeds_in_voxel)
 
         seeds = np.array(seeds)
 
-    with Timer("Tracking"):
+    with Timer("Tracking in the diffusion voxel space"):
         voxel_sizes = np.asarray(dwi.header.get_zooms()[:3])
         if not np.all(voxel_sizes == dwi.header.get_zooms()[0]):
             print("* Careful voxel are anisotropic {}!".format(tuple(voxel_sizes)))
-        # Since we are tracking in voxel space, convert step_size (in mm) to voxel.
+        # Since we are tracking in diffusion voxel space, convert step_size (in mm) to voxel.
         step_size = np.float32(args.step_size / voxel_sizes.max())
         # Also convert max length (in mm) to voxel.
         max_nb_points = int(args.max_length / step_size)
@@ -357,22 +368,25 @@ def main():
                                  step_size=step_size,
                                  max_nb_points=max_nb_points,
                                  theta=theta,
-                                 mask=mask,
+                                 mask=mask, mask_affine=mask_affine,
                                  mask_threshold=args.mask_threshold,
                                  enable_backward_tracking=args.enable_backward_tracking)
 
     with Timer("Saving streamlines"):
         # Flush streamlines that has no points.
         tractogram = tractogram[np.array(list(map(len, tractogram))) > 0]
-        tractogram.apply_affine(dwi.affine)  # Streamlines were generated in voxel space.
+        tractogram.apply_affine(dwi.affine)  # Streamlines were generated in diffusion voxel space.
         # Remove small streamlines
         lengths = dipy.tracking.streamline.length(tractogram.streamlines)
         tractogram = tractogram[lengths >= args.min_length]
+        lengths = lengths[lengths >= args.min_length]
 
         save_path = pjoin(experiment_path, args.out)
         nib.streamlines.save(tractogram, save_path)
 
-    print("{:,} streamlines (compressed) were generated with an average length of {:.2f} mm.".format(len(tractogram), lengths.mean()))
+    print("{:,} streamlines (compressed) were generated.".format(len(tractogram)))
+    print("Average length: {:.2f} mm.".format(lengths.mean()))
+    print("Minimum length: {:.2f} mm. Maximum length: {:.2f}".format(lengths.min(), lengths.max()))
 
 if __name__ == "__main__":
     main()

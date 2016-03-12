@@ -270,10 +270,10 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
                 print(affine)
 
     # tmp save
-    tractogram = nib.streamlines.Tractogram(tractograms[0])
-    tractogram.apply_affine(img.affine)
-    nib.streamlines.save(tractogram, "tmp.tck")
-    exit()
+    # tractogram = nib.streamlines.Tractogram(tractograms[0])
+    # tractogram.apply_affine(img.affine)
+    # nib.streamlines.save(tractogram, "tmp.tck")
+    # exit()
 
     horizon(tractograms, data, affine, cluster, cluster_thr, random_colors,
             length_lt, length_gt, clusters_lt, clusters_gt)
