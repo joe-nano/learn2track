@@ -386,6 +386,11 @@ def main():
         lengths = lengths[lengths >= args.min_length]
 
         save_path = pjoin(experiment_path, args.out)
+        try:  # Create dirs, if needed.
+            os.makedirs(os.path.dirname(save_path))
+        except:
+            pass
+
         nib.streamlines.save(tractogram, save_path)
 
     print("{:,} streamlines (compressed) were generated.".format(len(tractogram)))
