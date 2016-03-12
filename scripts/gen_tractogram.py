@@ -97,9 +97,6 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
         streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
         directions[undone] = model.seq_next(streamlines_dwi[undone])
 
-        if i == 0:
-            tmp = directions[undone].copy()
-
         # If a streamline makes a turn to tight, stop it.
         if sequences.shape[1] > 1:
             angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
@@ -154,7 +151,6 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
         directions[undone] = model.seq_next(streamlines_dwi[undone])
 
         if i == 0:
-            assert np.all(directions == tmp)
             # Follow the opposite direction obtained from the seed points (and only for that point).
             directions[undone] *= -1
 
@@ -319,7 +315,8 @@ def main():
             mask = mask_nii.get_data()
             # Compute the affine allowing to evaluate the mask at some coordinates correctly.
             mask_affine = np.dot(affine_rasmm2dwivox, mask_nii.affine)
-            mask_affine[range(3), -1] = 0#-0.5
+            import scipy
+            mask = scipy.ndimage.morphology.binary_dilation(mask).astype(mask.dtype)
 
     with Timer("Generating seeds"):
         seeds = []
@@ -338,10 +335,12 @@ def main():
                 # Assume it is a binary mask.
                 rng = np.random.RandomState(args.seeding_rng_seed)
                 nii_seeds = nib.load(filename)
+                seeds_affine = np.dot(affine_rasmm2dwivox, nii_seeds.affine)
+
                 indices = np.array(np.where(nii_seeds.get_data())).T
                 for idx in indices:
-                    seeds_in_voxel = idx + rng.rand(args.nb_seeds_per_voxel, 3)
-                    seeds_in_voxel = nib.affines.apply_affine(np.dot(affine_rasmm2dwivox, nii_seeds.affine), seeds_in_voxel)
+                    seeds_in_voxel = idx + rng.uniform(-0.5, 0.5, size=(args.nb_seeds_per_voxel, 3))
+                    seeds_in_voxel = nib.affines.apply_affine(seeds_affine, seeds_in_voxel)
                     seeds.extend(seeds_in_voxel)
 
         seeds = np.array(seeds)
