@@ -52,7 +52,7 @@ class Experiment(object):
 
         self.tractometer_scores = {}
         if os.path.isfile(self.tractometer_scores_file):
-            self.tractometer_scores = pickle.load(open(self.tractometer_scores_file))
+            self.tractometer_scores = pickle.load(open(self.tractometer_scores_file, 'rb'))
         else:
             print("No tractometer results yet for: {}".format(self.tractometer_scores))
 
