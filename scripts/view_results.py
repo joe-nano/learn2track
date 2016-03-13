@@ -131,6 +131,8 @@ def extract_result_from_experiment(e):
 
     entry["Training Time"] = e.status.get("training_time", "")
     entry["Experiment"] = e.name
+    entry["Dataset"] = os.path.basename(e.hyperparams.get("dataset", ""))
+
     return entry
 
 
