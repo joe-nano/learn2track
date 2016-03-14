@@ -28,18 +28,20 @@ DESCRIPTION = 'Gather experiments results and save them in a CSV file.'
 def buildArgsParser():
     p = argparse.ArgumentParser(description=DESCRIPTION)
     p.add_argument('names', type=str, nargs='+', help='name/path of the experiments.')
+    p.add_argument('--tractography-names', type=str, nargs='+', help='name of the tractography scores results. Default: wm', default=['wm'])
     p.add_argument('--out', default="results.csv", help='save table in a CSV file. Default: results.csv')
     p.add_argument('-v', '--verbose', action="store_true", help='verbose mode')
     return p
 
 
 class Experiment(object):
-    def __init__(self, experiment_path):
+    def __init__(self, experiment_path, tractography_name="wm"):
+        self.description = tractography_name
         self.experiment_path = experiment_path
         self.name = os.path.basename(self.experiment_path)
         # self.logger_file = pjoin(self.experiment_path, "logger.pkl")
         self.results_file = pjoin(self.experiment_path, "results.json")
-        self.tractometer_scores_file = pjoin(self.experiment_path, "tractometer", "scores", "wm.pkl")
+        self.tractometer_scores_file = pjoin(self.experiment_path, "tractometer", "scores", "{}.pkl".format(tractography_name))
         self.hyperparams_file = pjoin(self.experiment_path, "hyperparams.json")
         # self.model_hyperparams_file = pjoin(self.experiment_path, "GRU_Regression", "hyperparams.json")
         self.status_file = pjoin(self.experiment_path, "training", "status.json")
@@ -132,6 +134,7 @@ def extract_result_from_experiment(e):
     entry["Training Time"] = e.status.get("training_time", "")
     entry["Experiment"] = e.name
     entry["Dataset"] = os.path.basename(e.hyperparams.get("dataset", ""))
+    entry["Description"] = e.description
 
     return entry
 
@@ -143,14 +146,15 @@ def main():
     experiments_results = []
 
     for experiment_path in args.names:
-        try:
-            experiment = Experiment(experiment_path)
-            experiments_results.append(extract_result_from_experiment(experiment))
-        except IOError as e:
-            if args.verbose:
-                print(str(e))
+        for tractography_name in args.tractography_names:
+            try:
+                experiment = Experiment(experiment_path, tractography_name)
+                experiments_results.append(extract_result_from_experiment(experiment))
+            except IOError as e:
+                if args.verbose:
+                    print(str(e))
 
-            print("Skipping: '{}'".format(experiment_path))
+                print("Skipping: '{}' for {}".format(experiment_path, tractography_name))
 
     list_of_dict_to_csv_file(args.out, experiments_results)
 

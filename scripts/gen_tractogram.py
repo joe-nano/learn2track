@@ -62,6 +62,8 @@ def build_argparser():
 
     p.add_argument('--batch-size', type=int, help="number of streamlines to process at the same time. Default: the biggest possible")
 
+    p.add_argument('--no-dilatation', action="store_true",
+                   help="if specified, do not dilate tracking mask.")
 
     p.add_argument('--append-previous-direction', action="store_true",
                    help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
@@ -319,8 +321,9 @@ def main():
             mask = mask_nii.get_data()
             # Compute the affine allowing to evaluate the mask at some coordinates correctly.
             mask_affine = np.dot(affine_rasmm2dwivox, mask_nii.affine)
-            import scipy
-            mask = scipy.ndimage.morphology.binary_dilation(mask).astype(mask.dtype)
+            if not args.no_dilatation:
+                import scipy
+                mask = scipy.ndimage.morphology.binary_dilation(mask).astype(mask.dtype)
 
     with Timer("Generating seeds"):
         seeds = []
