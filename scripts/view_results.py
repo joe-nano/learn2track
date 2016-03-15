@@ -56,7 +56,7 @@ class Experiment(object):
         if os.path.isfile(self.tractometer_scores_file):
             self.tractometer_scores = pickle.load(open(self.tractometer_scores_file, 'rb'))
         else:
-            print("No tractometer results yet for: {}".format(self.tractometer_scores))
+            print("No tractometer results yet for: {}".format(self.tractometer_scores_file))
 
         self.early_stopping = {}
         if os.path.isfile(self.early_stopping_file):
@@ -119,6 +119,33 @@ def extract_result_from_experiment(e):
     entry["VCCR"] = ""
     if len(e.tractometer_scores) > 0:
         entry["VCCR"] = str(float(entry["VC"])/(float(entry["VC"])+float(entry["IC"])))
+
+    streamlines_per_bundle = e.tractometer_scores.get("streamlines_per_bundle", {})
+    entry['CA'] = str(streamlines_per_bundle.get("CA", ""))
+    entry['CC'] = str(streamlines_per_bundle.get("CC", ""))
+    entry['CP'] = str(streamlines_per_bundle.get("CP", ""))
+    entry['CST_left'] = str(streamlines_per_bundle.get("CST_left", ""))
+    entry['CST_right'] = str(streamlines_per_bundle.get("CST_right", ""))
+    entry['Cingulum_left'] = str(streamlines_per_bundle.get("Cingulum_left", ""))
+    entry['Cingulum_right'] = str(streamlines_per_bundle.get("Cingulum_right", ""))
+    entry['FPT_left'] = str(streamlines_per_bundle.get("FPT_left", ""))
+    entry['FPT_right'] = str(streamlines_per_bundle.get("FPT_right", ""))
+    entry['Fornix'] = str(streamlines_per_bundle.get("Fornix", ""))
+    entry['ICP_left'] = str(streamlines_per_bundle.get("ICP_left", ""))
+    entry['ICP_right'] = str(streamlines_per_bundle.get("ICP_right", ""))
+    entry['IOFF_left'] = str(streamlines_per_bundle.get("IOFF_left", ""))
+    entry['IOFF_right'] = str(streamlines_per_bundle.get("IOFF_right", ""))
+    entry['MCP'] = str(streamlines_per_bundle.get("MCP", ""))
+    entry['OR_left'] = str(streamlines_per_bundle.get("OR_left", ""))
+    entry['OR_right'] = str(streamlines_per_bundle.get("OR_right", ""))
+    entry['POPT_left'] = str(streamlines_per_bundle.get("POPT_left", ""))
+    entry['POPT_right'] = str(streamlines_per_bundle.get("POPT_right", ""))
+    entry['SCP_left'] = str(streamlines_per_bundle.get("SCP_left", ""))
+    entry['SCP_right'] = str(streamlines_per_bundle.get("SCP_right", ""))
+    entry['SLF_left'] = str(streamlines_per_bundle.get("SLF_left", ""))
+    entry['SLF_right'] = str(streamlines_per_bundle.get("SLF_right", ""))
+    entry['UF_left'] = str(streamlines_per_bundle.get("UF_left", ""))
+    entry['UF_right'] = str(streamlines_per_bundle.get("UF_right", ""))
 
     # Other results
     entry["Train L2 error std"] = e.results["trainset"]["sequences_mean_loss_stderr"]
