@@ -120,6 +120,13 @@ def extract_result_from_experiment(e):
     if len(e.tractometer_scores) > 0:
         entry["VCCR"] = str(float(entry["VC"])/(float(entry["VC"])+float(entry["IC"])))
 
+    overlap_per_bundle = e.tractometer_scores.get("overlap_per_bundle", {})
+    overreach_per_bundle = e.tractometer_scores.get("overreach_norm_gt_per_bundle", {})
+    entry["Avg. Overlap"] = np.mean(map(float, overlap_per_bundle.values()))
+    entry["Avg. Overreach"] = np.mean(map(float, overreach_per_bundle.values()))
+    entry["Std. Overlap"] = np.std(map(float, overlap_per_bundle.values()))
+    entry["Std. Overreach"] = np.std(map(float, overreach_per_bundle.values()))
+
     streamlines_per_bundle = e.tractometer_scores.get("streamlines_per_bundle", {})
     entry['CA'] = str(streamlines_per_bundle.get("CA", ""))
     entry['CC'] = str(streamlines_per_bundle.get("CC", ""))
@@ -159,8 +166,8 @@ def extract_result_from_experiment(e):
     entry["Test L2 error (per timestep) std"] = e.results["testset"]["timesteps_loss_std"]
 
     entry["Training Time"] = e.status.get("training_time", "")
-    entry["Experiment"] = e.name
     entry["Dataset"] = os.path.basename(e.hyperparams.get("dataset", ""))
+    entry["Experiment"] = e.name
     entry["Description"] = e.description
 
     return entry
