@@ -54,7 +54,11 @@ class Experiment(object):
 
         self.tractometer_scores = {}
         if os.path.isfile(self.tractometer_scores_file):
-            self.tractometer_scores = pickle.load(open(self.tractometer_scores_file, 'rb'))
+            try:
+                self.tractometer_scores = pickle.load(open(self.tractometer_scores_file, 'rb'))
+            except UnicodeDecodeError:
+                self.tractometer_scores = pickle.load(open(self.tractometer_scores_file, 'r'))
+
         else:
             print("No tractometer results yet for: {}".format(self.tractometer_scores_file))
 
@@ -122,10 +126,10 @@ def extract_result_from_experiment(e):
 
     overlap_per_bundle = e.tractometer_scores.get("overlap_per_bundle", {})
     overreach_per_bundle = e.tractometer_scores.get("overreach_norm_gt_per_bundle", {})
-    entry["Avg. Overlap"] = np.mean(map(float, overlap_per_bundle.values()))
-    entry["Avg. Overreach"] = np.mean(map(float, overreach_per_bundle.values()))
-    entry["Std. Overlap"] = np.std(map(float, overlap_per_bundle.values()))
-    entry["Std. Overreach"] = np.std(map(float, overreach_per_bundle.values()))
+    entry["Avg. Overlap"] = str(np.mean(list(map(float, overlap_per_bundle.values()))))
+    entry["Avg. Overreach"] = str(np.mean(list(map(float, overreach_per_bundle.values()))))
+    entry["Std. Overlap"] = str(np.std(list(map(float, overlap_per_bundle.values()))))
+    entry["Std. Overreach"] = str(np.std(list(map(float, overreach_per_bundle.values()))))
 
     streamlines_per_bundle = e.tractometer_scores.get("streamlines_per_bundle", {})
     entry['CA'] = str(streamlines_per_bundle.get("CA", ""))
