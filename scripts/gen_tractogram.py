@@ -57,8 +57,8 @@ def build_argparser():
     p.add_argument('--mask-threshold', type=float, default=0.05,
                    help="streamlines will be terminating if they pass through a voxel with a value from the mask lower than this value. Default: 0.05")
 
-    p.add_argument('--enable-backward-tracking', action="store_true",
-                   help="if specified, both senses of the direction obtained from the seed point will be explored.")
+    p.add_argument('--backward-tracking-algo', type=int,
+                   help="if specified, both senses of the direction obtained from the seed point will be explored. Default: 0, (i.e. only do tracking one direction) ", default=0)
 
     p.add_argument('--batch-size', type=int, help="number of streamlines to process at the same time. Default: the biggest possible")
 
@@ -76,7 +76,7 @@ def build_argparser():
 floatX = theano.config.floatX
 
 
-def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, enable_backward_tracking=False):
+def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0):
     streamlines_dwi = np.zeros((len(seeds), dwi.shape[-1]), dtype=np.float32)
 
     # Forward tracking
@@ -86,6 +86,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
         sequences = sequences[:, None, :]
 
     directions = np.zeros((len(sequences), 3), dtype=np.float32)
+    all_directions = np.zeros((len(sequences), 0, 3), dtype=np.float32)
     last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
 
     streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
@@ -100,6 +101,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
         streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
         directions[undone] = model.seq_next(streamlines_dwi[undone])
+        all_directions = np.concatenate([all_directions, directions[:, None, :]], axis=1)
 
         # If a streamline makes a turn to tight, stop it.
         if sequences.shape[1] > 1:
@@ -111,6 +113,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
         # Make a step
         directions[undone] = directions[undone] * step_size
+        # directions[np.logical_not(undone)] = np.nan
         sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
         streamlines_lengths[:] += undone[:]
 
@@ -119,6 +122,8 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
             last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
             model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
             undone = np.logical_and(undone, last_point_values > mask_threshold)
+
+        # sequences[np.logical_not(undone), i+1] = np.nan
 
         if undone.sum() == 0:
             break
@@ -126,66 +131,129 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
     # Trim sequences to obtain the streamlines.
     streamlines = [s[:l] for s, l in zip(sequences, streamlines_lengths)]
 
-    if not enable_backward_tracking:
+    if backward_tracking_algo == 0:
         return streamlines
 
-    # Backward tracking
-    # Reset everything
-    streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
+    if backward_tracking_algo == 1:
+        # Reset everything and start tracking from the opposite direction.
+        streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
 
-    sequences = seeds.copy()
-    if sequences.ndim == 2:
-        sequences = sequences[:, None, :]
+        sequences = seeds.copy()
+        if sequences.ndim == 2:
+            sequences = sequences[:, None, :]
 
-    directions = np.zeros((len(sequences), 3), dtype=np.float32)
-    last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
+        directions = np.zeros((len(sequences), 3), dtype=np.float32)
+        last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
 
-    streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
-    undone = np.ones(len(sequences), dtype=bool)
+        streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
+        undone = np.ones(len(sequences), dtype=bool)
 
-    model.seq_reset(batch_size=len(seeds))
+        model.seq_reset(batch_size=len(seeds))
 
-    # Tracking
-    print("Tracking backward...")
-    for i in range(max_nb_points):
-        if (i+1) % 100 == 0:
-            print("pts: {}/{}".format(i+1, max_nb_points))
+        # Tracking
+        print("Tracking backward...")
+        for i in range(max_nb_points):
+            if (i+1) % 100 == 0:
+                print("pts: {}/{}".format(i+1, max_nb_points))
 
-        streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
-        directions[undone] = model.seq_next(streamlines_dwi[undone])
+            streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
+            directions[undone] = model.seq_next(streamlines_dwi[undone])
 
-        if i == 0:
-            # Follow the opposite direction obtained from the seed points (and only for that point).
-            directions[undone] *= -1
+            if i == 0:
+                # Follow the opposite direction obtained from the seed points (and only for that point).
+                directions[undone] *= -1
 
-        # If a streamline makes a turn to tight, stop it.
-        if sequences.shape[1] > 1:
-            angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
-            model.seq_squeeze(tokeep=angles[undone] <= theta)
-            undone = np.logical_and(undone, angles <= theta)
+            # If a streamline makes a turn to tight, stop it.
+            if sequences.shape[1] > 1:
+                angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
+                model.seq_squeeze(tokeep=angles[undone] <= theta)
+                undone = np.logical_and(undone, angles <= theta)
 
-        last_directions[undone] = directions[undone]
+            last_directions[undone] = directions[undone]
 
-        # Make a step
-        directions[undone] = directions[undone] * step_size
-        sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
-        streamlines_lengths[:] += undone[:]
+            # Make a step
+            directions[undone] = directions[undone] * step_size
+            sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
+            streamlines_lengths[:] += undone[:]
 
-        # If a streamline goes outside the wm mask, mark is as done.
-        if mask is not None:
-            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
-            model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
-            undone = np.logical_and(undone, last_point_values > mask_threshold)
+            # If a streamline goes outside the wm mask, mark is as done.
+            if mask is not None:
+                last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
+                model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
+                undone = np.logical_and(undone, last_point_values > mask_threshold)
 
-        if undone.sum() == 0:
-            break
+            if undone.sum() == 0:
+                break
 
-    # Trim sequences to obtain the streamlines.
-    streamlines = [np.r_[s[::-1], seq[1:l]] for s, seq, l in zip(streamlines, sequences, streamlines_lengths)]
-    return streamlines
+        # Trim sequences to obtain the streamlines.
+        streamlines = [np.r_[s[::-1], seq[1:l]] for s, seq, l in zip(streamlines, sequences, streamlines_lengths)]
+        return streamlines
+
+    elif backward_tracking_algo == 2:
+        # Reset everything, kickstart the model with the first half of the streamline and resume tracking.
+        streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
+
+        # Reverse streamline
+        forward_streamlines_lengths = streamlines_lengths.copy()
+        r_directions = np.zeros((len(sequences), streamlines_lengths.max(), 3), dtype=sequences.dtype)
+        for i, l in enumerate(streamlines_lengths):
+            r_directions[i, :l-1] = -all_directions[i, :l-1][::-1]
+
+        # old_streamlines_lengths = streamlines_lengths  # DEBUG
+        # old_sequences = sequences  # DEBUG
+        new_sequences = sequences[range(len(sequences)), streamlines_lengths-1].copy()
+        sequences = new_sequences[:, None, :]
+
+        directions = np.zeros((len(sequences), 3), dtype=np.float32)
+        last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
+
+        streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
+        undone = np.ones(len(sequences), dtype=bool)
+
+        model.seq_reset(batch_size=len(seeds))
+
+        # Tracking
+        print("Tracking backward...")
+        for i in range(max_nb_points):
+            if (i+1) % 100 == 0:
+                print("pts: {}/{}".format(i+1, max_nb_points))
+
+            resuming = i < forward_streamlines_lengths-1
+
+            streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
+            directions[undone] = model.seq_next(streamlines_dwi[undone])
+
+            # Overwrite directions for all streamlines still being kickstarted (resumed).
+            directions[resuming] = r_directions[resuming, i, :]
+
+            # If a streamline makes a turn to tight, stop it.
+            if sequences.shape[1] > 1:
+                angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
+                model.seq_squeeze(tokeep=np.logical_or(angles[undone] <= theta, resuming[undone]))
+                undone = np.logical_or(np.logical_and(undone, angles <= theta), resuming)
+
+            last_directions[undone] = directions[undone]
+
+            # Make a step
+            directions[undone] = directions[undone] * step_size
+            sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
+            streamlines_lengths[:] += undone[:]
+
+            # If a streamline goes outside the wm mask, mark is as done.
+            if mask is not None:
+                last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
+                model.seq_squeeze(tokeep=np.logical_or(last_point_values[undone] > mask_threshold, resuming[undone]))
+                undone = np.logical_or(np.logical_and(undone, last_point_values > mask_threshold), resuming)
+
+            if undone.sum() == 0:
+                break
+
+        # Trim sequences to obtain the streamlines.
+        streamlines = [s[:l] for s, l in zip(sequences, streamlines_lengths)]
+        return streamlines
 
 
-def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, enable_backward_tracking=False, batch_size=None):
+def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0, batch_size=None):
     if batch_size is None:
         batch_size = len(seeds)
 
@@ -201,7 +269,7 @@ def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78,
                 new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
                                         max_nb_points=max_nb_points, theta=theta,
                                         mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
-                                        enable_backward_tracking=enable_backward_tracking)
+                                        backward_tracking_algo=backward_tracking_algo)
                 new_streamlines = compress_streamlines(new_streamlines)
                 tractogram.streamlines.extend(new_streamlines)
 
@@ -376,7 +444,7 @@ def main():
                                  theta=theta,
                                  mask=mask, mask_affine=mask_affine,
                                  mask_threshold=args.mask_threshold,
-                                 enable_backward_tracking=args.enable_backward_tracking,
+                                 backward_tracking_algo=args.backward_tracking_algo,
                                  batch_size=args.batch_size)
 
     with Timer("Saving streamlines"):

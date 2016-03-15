@@ -55,6 +55,8 @@ class Experiment(object):
         self.tractometer_scores = {}
         if os.path.isfile(self.tractometer_scores_file):
             self.tractometer_scores = load_dict_from_json_file(self.tractometer_scores_file)
+        elif os.path.isfile(self.tractometer_scores_file[:-5] + '.pkl'):
+            self.tractometer_scores = pickle.load(open(self.tractometer_scores_file[:-5] + '.pkl', 'rb'))
         else:
             print("No tractometer results yet for: {}".format(self.tractometer_scores_file))
 
