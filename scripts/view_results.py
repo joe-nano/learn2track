@@ -41,7 +41,7 @@ class Experiment(object):
         self.name = os.path.basename(self.experiment_path)
         # self.logger_file = pjoin(self.experiment_path, "logger.pkl")
         self.results_file = pjoin(self.experiment_path, "results.json")
-        self.tractometer_scores_file = pjoin(self.experiment_path, "tractometer", "scores", "{}.pkl".format(tractography_name))
+        self.tractometer_scores_file = pjoin(self.experiment_path, "tractometer", "scores", "{}.json".format(tractography_name))
         self.hyperparams_file = pjoin(self.experiment_path, "hyperparams.json")
         # self.model_hyperparams_file = pjoin(self.experiment_path, "GRU_Regression", "hyperparams.json")
         self.status_file = pjoin(self.experiment_path, "training", "status.json")
@@ -54,11 +54,7 @@ class Experiment(object):
 
         self.tractometer_scores = {}
         if os.path.isfile(self.tractometer_scores_file):
-            try:
-                self.tractometer_scores = pickle.load(open(self.tractometer_scores_file, 'rb'))
-            except UnicodeDecodeError:
-                self.tractometer_scores = pickle.load(open(self.tractometer_scores_file, 'r'))
-
+            self.tractometer_scores = load_dict_from_json_file(self.tractometer_scores_file)
         else:
             print("No tractometer results yet for: {}".format(self.tractometer_scores_file))
 
