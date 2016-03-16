@@ -123,7 +123,7 @@ def extract_result_from_experiment(e):
         entry["VCCR"] = str(float(entry["VC"])/(float(entry["VC"])+float(entry["IC"])))
 
     overlap_per_bundle = e.tractometer_scores.get("overlap_per_bundle", {})
-    overreach_per_bundle = e.tractometer_scores.get("overreach_norm_gt_per_bundle", {})
+    overreach_per_bundle = e.tractometer_scores.get("overreach_per_bundle", {})
     entry["Avg. Overlap"] = str(np.mean(list(map(float, overlap_per_bundle.values()))))
     entry["Avg. Overreach"] = str(np.mean(list(map(float, overreach_per_bundle.values()))))
     entry["Std. Overlap"] = str(np.std(list(map(float, overlap_per_bundle.values()))))
@@ -171,6 +171,21 @@ def extract_result_from_experiment(e):
     entry["Dataset"] = os.path.basename(e.hyperparams.get("dataset", ""))
     entry["Experiment"] = e.name
     entry["Description"] = e.description
+
+    if "missing" in entry["Dataset"]:
+        bundle_name = entry["Dataset"][:-4].split("_")[-1]
+        missing_bundle_count = 0
+        missing_bundle_overlap = []
+        missing_bundle_overreach = []
+        for k, v in streamlines_per_bundle.items():
+            if k.startswith("_" + bundle_name):
+                missing_bundle_count += int(v)
+                missing_bundle_overlap.append(overlap_per_bundle[k])
+                missing_bundle_overreach.append(overreach_per_bundle[k])
+
+        entry["Missing Bundle Count"] = str(missing_bundle_count)
+        entry["Missing Bundle Overlap"] = str(np.mean(missing_bundle_overlap))
+        entry["Missing Bundle Overreach"] = str(np.mean(missing_bundle_overreach))
 
     return entry
 
