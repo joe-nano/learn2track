@@ -33,6 +33,8 @@ def build_argparser():
 
     p.add_argument('name', type=str, help='name/path of the experiment.')
     p.add_argument('dwi', type=str, help="diffusion weighted images (.nii|.nii.gz).")
+    p.add_argument('--ref-dwi', type=str, help="[Experimental] will be used to normalized the diffusion weighted images (.nii|.nii.gz).")
+    p.add_argument('--ref-dwi2', type=str, help="[Experimental] will be used to normalized the diffusion weighted images (.nii|.nii.gz).")
     p.add_argument('--out', type=str, default="tractogram.tck",
                    help="name of the output tractogram (.tck|.trk). Default: tractogram.tck")
 
@@ -93,6 +95,8 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
     undone = np.ones(len(sequences), dtype=bool)
 
     model.seq_reset(batch_size=len(seeds))
+    stopping_types_count = {'curv': 0,
+                            'mask': 0}
 
     # Tracking
     for i in range(max_nb_points):
@@ -101,14 +105,19 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
         streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
         directions[undone] = model.seq_next(streamlines_dwi[undone])
-        all_directions = np.concatenate([all_directions, directions[:, None, :]], axis=1)
+        directions[undone] = directions[undone]
 
         # If a streamline makes a turn to tight, stop it.
         if sequences.shape[1] > 1:
+            # TEND-like approach
+            # directions[undone] = 0.5*last_directions[undone] + 0.5*directions[undone]
+
             angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
             model.seq_squeeze(tokeep=angles[undone] <= theta)
+            stopping_types_count['curv'] += np.sum(angles[undone] > theta)
             undone = np.logical_and(undone, angles <= theta)
 
+        all_directions = np.concatenate([all_directions, directions[:, None, :]], axis=1)
         last_directions[undone] = directions[undone].copy()
 
         # Make a step
@@ -121,12 +130,15 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
         if mask is not None:
             last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
             model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
+            stopping_types_count['mask'] += np.sum(last_point_values[undone] <= mask_threshold)
             undone = np.logical_and(undone, last_point_values > mask_threshold)
 
         # sequences[np.logical_not(undone), i+1] = np.nan
 
         if undone.sum() == 0:
             break
+    print("Max length: {}".format(streamlines_lengths.max()))
+    print("Stopping - mask: {:,}\t curv: {:,}".format(stopping_types_count['mask'], stopping_types_count['curv']))
 
     # Trim sequences to obtain the streamlines.
     streamlines = [s[:l] for s, l in zip(sequences, streamlines_lengths)]
@@ -223,15 +235,18 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
             streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
             directions[undone] = model.seq_next(streamlines_dwi[undone])
 
-            # Overwrite directions for all streamlines still being kickstarted (resumed).
-            directions[resuming] = r_directions[resuming, i, :]
 
             # If a streamline makes a turn to tight, stop it.
             if sequences.shape[1] > 1:
+                # TEND-like approach
+                # directions[undone] = 0.5*last_directions[undone] + 0.5*directions[undone]
+
                 angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
                 model.seq_squeeze(tokeep=np.logical_or(angles[undone] <= theta, resuming[undone]))
                 undone = np.logical_or(np.logical_and(undone, angles <= theta), resuming)
 
+            # Overwrite directions for all streamlines still being kickstarted (resumed).
+            directions[resuming] = r_directions[resuming, i, :]
             last_directions[undone] = directions[undone]
 
             # Make a step
@@ -371,8 +386,6 @@ def main():
             model.scheduled_sampling_rate.var.set_value(1)
 
     with Timer("Loading DWIs"):
-        dwi = nib.load(args.dwi)
-
         # Load gradients table
         bvals_filename = args.dwi.split('.')[0] + ".bvals"
         bvecs_filename = args.dwi.split('.')[0] + ".bvecs"
@@ -381,6 +394,90 @@ def main():
         dwi = nib.load(args.dwi)
         weights = utils.resample_dwi(dwi, bvals, bvecs).astype(np.float32)  # Resample to 100 directions
         affine_rasmm2dwivox = np.linalg.inv(dwi.affine)
+
+        if args.ref_dwi is not None:
+            # Load gradients table
+            ref_bvals_filename = args.ref_dwi.split('.')[0] + ".bvals"
+            ref_bvecs_filename = args.ref_dwi.split('.')[0] + ".bvecs"
+            ref_bvals, ref_bvecs = dipy.io.gradients.read_bvals_bvecs(ref_bvals_filename, ref_bvecs_filename)
+
+            ref_dwi = nib.load(args.ref_dwi)
+            ref_dwi2 = nib.load(args.ref_dwi2)
+            ref_weights = utils.resample_dwi(ref_dwi, ref_bvals, ref_bvecs).astype(np.float32)  # Resample to 100 directions
+            ref_weights2 = utils.resample_dwi(ref_dwi2, ref_bvals, ref_bvecs).astype(np.float32)  # Resample to 100 directions
+            #affine_rasmm2dwivox = np.linalg.inv(dwi.affine)
+
+            print ("Minmax:      ", weights.min(), weights.max())
+            print ("Minmax (ref):", ref_weights.min(), ref_weights.max())
+
+            import pylab as plt
+            # plt.hist(weights[weights!=0], normed=True, bins=np.linspace(0, 1), alpha=0.5)
+            # plt.hist(ref_weights[ref_weights!=0], normed=True, bins=np.linspace(0, 1), alpha=0.5)
+
+            # Normalization over all voxels and all directions
+            # non_zero = weights > 0
+            # std = weights[non_zero].std()
+            # mean = weights[non_zero].mean()
+            # ref_std = ref_weights[ref_weights!=0].std()
+            # ref_mean = ref_weights[ref_weights!=0].mean()
+            # standardized_weights = (weights[non_zero] - mean) / std
+            # weights[non_zero] = (standardized_weights * ref_std) + ref_mean
+
+            non_zero = weights > 0
+            std = weights.std()
+            mean = weights.mean()
+            ref_std = ref_weights.std()
+            ref_mean = ref_weights.mean()
+            standardized_weights = (weights - mean) / std
+            weights = (standardized_weights * ref_std) + ref_mean
+
+            # # Normalization over all voxels
+            # std = weights.std(axis=-1, keepdims=True)
+            # mean = weights.mean(axis=-1, keepdims=True)
+            # ref_std = ref_weights.std(axis=-1, keepdims=True)
+            # ref_mean = ref_weights.mean(axis=-1, keepdims=True)
+            # standardized_weights = (weights - mean) / std
+            # weights = (standardized_weights * ref_std) + ref_mean
+            # print (weights.sum())
+            # weights[np.isnan(weights)] = 0
+
+            # # Normalization over all directions
+            # std = weights.std(axis=(0,1,2), keepdims=True)
+            # mean = weights.mean(axis=(0,1,2), keepdims=True)
+            # ref_std = ref_weights.std(axis=(0,1,2), keepdims=True)
+            # ref_mean = ref_weights.mean(axis=(0,1,2), keepdims=True)
+            # standardized_weights = (weights - mean) / std
+            # weights = (standardized_weights * ref_std) + ref_mean
+            # print (weights.sum())
+            # weights[np.isnan(weights)] = 0
+
+            # for i in range(weights.shape[-1]):
+            #     std = weights[..., i][weights[..., i]>1e-2].std()
+            #     mean = weights[..., i][weights[..., i]!=0].mean()
+            #     ref_std = ref_weights[..., i][ref_weights[..., i]!=0].std()
+            #     ref_mean = ref_weights[..., i][ref_weights[..., i]!=0].mean()
+            #     standardized_weights = (weights[..., i][weights[..., i]!=0] - mean) / std
+            #     weights[..., i][weights[..., i]!=0] = (standardized_weights * ref_std) + ref_mean
+            #     print (weights.sum())
+
+            # weights[np.isnan(weights)] = 0
+            # weights[ref_weights==0] = 0
+
+            plt.figure()
+            # plt.hist(weights[weights!=0], normed=True, bins=np.linspace(0, 1), alpha=0.5)
+            # plt.hist(ref_weights[ref_weights!=0], normed=True, bins=np.linspace(0, 1), alpha=0.5)
+
+            # plt.show()
+
+        from ipdb import set_trace as dbg
+        dbg()
+
+        # # TMP
+        # weights[weights>1.3] = 1.3
+        # weights[weights>0] -= 0.25002471 - weights[weights>0]  # TMP, so the mean is the same
+
+    # from ipdb import set_trace as dbg
+    # dbg()
 
     mask = None
     if args.mask is not None:
@@ -437,6 +534,8 @@ def main():
             theta = np.deg2rad(45)
 
         print("Angle: {}".format(theta))
+        print("Step size (vox): {}".format(step_size))
+        print("Max nb. points: {}".format(max_nb_points))
 
         tractogram = batch_track(model, weights, seeds,
                                  step_size=step_size,

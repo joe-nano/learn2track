@@ -27,27 +27,28 @@ class L2DistanceWithBinaryCrossEntropy(Loss):
 
     def _compute_losses(self, model_output):
         mask = self.dataset.symb_mask
-        lengths = T.cast(T.sum(mask, axis=1), dtype="int32")  # Mask values are floats.
-        idx_examples = T.arange(self.dataset.symb_targets.shape[0])
-        # Create a mask that does not contain the last element of each sequence.
-        smaller_mask = T.set_subtensor(mask[idx_examples, lengths-1], 0)
+        regression_outputs, stopping = model_output
 
-        # WARN: no sigmoid activation have been applied to `classif_outputs`.
-        regression_outputs, classif_outputs = model_output
-        self.mean_sqr_error = T.mean(((regression_outputs - self.dataset.symb_targets)**2)*mask[:, :, None], axis=[1, 2])
+        # Regression part (next direction)
+        self.L2_error_per_item = T.sqrt(T.sum(((regression_outputs - self.dataset.symb_targets)**2), axis=2))
+        self.mean_sqr_error = T.sum(self.L2_error_per_item*mask, axis=1) / T.sum(mask, axis=1)
+
+        # Binary classification part (stopping criterion)
+        lengths = T.sum(mask, axis=1)
+        lengths_int = T.cast(lengths, dtype="int32")  # Mask values are floats.
+        idx_examples = T.arange(mask.shape[0])
+        # Create a mask that does not contain the last element of each sequence.
+        smaller_mask = T.set_subtensor(mask[idx_examples, lengths_int-1], 0)
 
         # Compute cross-entropy for non-ending points.
-        # Since target == 0, softplus(target * -classif_outputs + (1 - target) * classif_outputs)
-        # can be simplified to softplus(classif_outputs)
-        cross_entropy_not_ending = T.sum(T.nnet.softplus(classif_outputs)*smaller_mask[:, :, None], axis=[1, 2])
+        target = T.zeros(1)
+        cross_entropy_not_ending = T.sum(T.nnet.binary_crossentropy(stopping, target)*smaller_mask[:, :, None], axis=[1, 2])
 
         # Compute cross-entropy for ending points.
-        # Since target == 1, softplus(target * -classif_outputs + (1 - target) * classif_outputs)
-        # can be simplified to softplus(-classif_outputs)
-        # We also add an scaling factor because there is only one ending point per sequence whereas
+        # We add a scaling factor because there is only one ending point per sequence whereas
         # there multiple non-ending points.
-        cross_entropy_ending = (lengths-1) * T.nnet.softplus(-classif_outputs[idx_examples, lengths-1, 0])
-
+        target = T.ones(1)
+        cross_entropy_ending = T.nnet.binary_crossentropy(stopping[idx_examples, lengths_int-1, 0], target) * (lengths-1)
         self.cross_entropy = (cross_entropy_not_ending + cross_entropy_ending) / lengths
 
         return self.mean_sqr_error + self.cross_entropy

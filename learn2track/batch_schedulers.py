@@ -15,7 +15,7 @@ floatX = theano.config.floatX
 
 class StreamlinesBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines dataset. """
-    def __init__(self, dataset, batch_size, patch_shape=None, noisy_streamlines_sigma=None, nb_updates_per_epoch=None, seed=1234):
+    def __init__(self, dataset, batch_size, patch_shape=None, noisy_streamlines_sigma=None, nb_updates_per_epoch=None, seed=1234, include_last_point=False):
         self.dataset = dataset
         self.batch_size = batch_size
 
@@ -23,6 +23,8 @@ class StreamlinesBatchScheduler(BatchScheduler):
         self.use_neighborhood_patch = self.patch_shape is not None
         if self.use_neighborhood_patch:
             self._patch_offset_idx = np.array(list(itertools.product(*[range(-(self.patch_shape//2), (self.patch_shape//2)+1)]*3)))
+
+        self.include_last_point = include_last_point
 
         self.use_augment_by_flipping = True
 
@@ -126,20 +128,38 @@ class StreamlinesBatchScheduler(BatchScheduler):
         if self.use_augment_by_flipping:
             batch_size *= 2
 
-        max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
-        batch_masks = np.zeros((batch_size, max_streamline_length-1), dtype=floatX)
-        batch_inputs = np.zeros((batch_size, max_streamline_length-1, inputs.shape[1]), dtype=floatX)
-        batch_targets = np.zeros((batch_size, max_streamline_length-1, 3), dtype=floatX)
+        if self.include_last_point:  # only for the input
 
-        for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
-            batch_masks[i, :length-1] = 1
-            batch_inputs[i, :length-1] = inputs[offset:offset+length-1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
-            batch_targets[i, :length-1] = targets[offset:offset+length-1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
+            max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
+            batch_masks = np.zeros((batch_size, max_streamline_length-1), dtype=floatX)
+            batch_inputs = np.zeros((batch_size, max_streamline_length, inputs.shape[1]), dtype=floatX)
+            batch_targets = np.zeros((batch_size, max_streamline_length-1, 3), dtype=floatX)
 
-            if self.use_augment_by_flipping:
-                batch_masks[i+len(streamlines), :length-1] = 1
-                batch_inputs[i+len(streamlines), :length-1] = inputs[offset+1:offset+length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
-                batch_targets[i+len(streamlines), :length-1] = -targets[offset:offset+length-1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
+            for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
+                batch_masks[i, :length-1] = 1
+                batch_inputs[i, :length] = inputs[offset:offset+length]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3, 4]
+                batch_targets[i, :length-1] = targets[offset:offset+length-1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
+
+                if self.use_augment_by_flipping:
+                    batch_masks[i+len(streamlines), :length-1] = 1
+                    batch_inputs[i+len(streamlines), :length] = inputs[offset:offset+length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1, 0]
+                    batch_targets[i+len(streamlines), :length-1] = -targets[offset:offset+length-1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
+
+        else:
+            max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
+            batch_masks = np.zeros((batch_size, max_streamline_length-1), dtype=floatX)
+            batch_inputs = np.zeros((batch_size, max_streamline_length-1, inputs.shape[1]), dtype=floatX)
+            batch_targets = np.zeros((batch_size, max_streamline_length-1, 3), dtype=floatX)
+
+            for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
+                batch_masks[i, :length-1] = 1
+                batch_inputs[i, :length-1] = inputs[offset:offset+length-1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
+                batch_targets[i, :length-1] = targets[offset:offset+length-1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
+
+                if self.use_augment_by_flipping:
+                    batch_masks[i+len(streamlines), :length-1] = 1
+                    batch_inputs[i+len(streamlines), :length-1] = inputs[offset+1:offset+length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
+                    batch_targets[i+len(streamlines), :length-1] = -targets[offset:offset+length-1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
 
         return batch_inputs, batch_targets, batch_masks
 

@@ -38,7 +38,7 @@ from learn2track.factories import optimizer_factory
 #from learn2track.view import RegressionError
 
 from learn2track.losses import L2DistanceWithBinaryCrossEntropy, L2DistanceForSequences, NLLForSequenceOfDirections, ErrorForSequenceOfDirections
-from learn2track.losses import ErrorForSequenceWithClassTarget, NLLForSequenceWithClassTarget
+from learn2track.losses import ErrorForSequenceWithClassTarget, NLLForSequenceWithClassTarget, L2DistanceWithBinaryCrossEntropy
 from learn2track.batch_schedulers import StreamlinesBatchScheduler
 
 # DATASETS = ["ismrm2015_challenge"]
@@ -64,6 +64,9 @@ def build_train_gru_argparser(subparser):
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
     model.add_argument('--initialization-seed', type=int, default=1234,
                        help='seed used to generate random numbers. Default=1234')
+
+    model.add_argument('--learn-to-stop', action="store_true",
+                       help='if specified, the model will be trained to learn when to stop tracking')
 
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
@@ -179,18 +182,28 @@ def main():
                                                     # patch_shape=args.neighborhood_patch,
                                                     noisy_streamlines_sigma=args.noisy_streamlines_sigma,
                                                     nb_updates_per_epoch=args.nb_updates_per_epoch,
-                                                    seed=args.seed)
+                                                    seed=args.seed,
+                                                    include_last_point=args.learn_to_stop)
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
+        print (batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
 
     with Timer("Creating model"):
-        from learn2track.gru import GRU_Regression
-        print (batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
-        model = GRU_Regression(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
+        if args.learn_to_stop:
+            from learn2track.gru import GRU_RegressionWithBinaryClassification
+            model = GRU_RegressionWithBinaryClassification(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
+
+        else:
+            from learn2track.gru import GRU_Regression
+            model = GRU_Regression(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
+
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
 
     with Timer("Building optimizer"):
-        loss = L2DistanceForSequences(model, trainset)
+        if args.learn_to_stop:
+            loss = L2DistanceWithBinaryCrossEntropy(model, trainset)
+        else:
+            loss = L2DistanceForSequences(model, trainset)
 
         if args.clip_gradient is not None:
             loss.append_gradient_modifier(DirectionClipping(threshold=args.clip_gradient))
@@ -210,7 +223,22 @@ def main():
         trainer.append_task(avg_loss)
 
         # Print average training loss.
-        # trainer.append_task(tasks.Print("Avg. training loss:     : {}", avg_loss))
+        trainer.append_task(tasks.Print("Avg. training loss:         : {}", avg_loss))
+
+        if args.learn_to_stop:
+            l2err_monitor = views.MonitorVariable(T.mean(loss.mean_sqr_error))
+            avg_l2err = tasks.AveragePerEpoch(l2err_monitor)
+            trainer.append_task(avg_l2err)
+
+            crossentropy_monitor = views.MonitorVariable(T.mean(loss.cross_entropy))
+            avg_crossentropy = tasks.AveragePerEpoch(crossentropy_monitor)
+            trainer.append_task(avg_crossentropy)
+
+            trainer.append_task(tasks.Print("Avg. training L2 err:       : {}", avg_l2err))
+            trainer.append_task(tasks.Print("Avg. training stopping:     : {}", avg_crossentropy))
+            trainer.append_task(tasks.Print("L2 err : {0:.4f}", l2err_monitor, each_k_update=100))
+            trainer.append_task(tasks.Print("stopping : {0:.4f}", crossentropy_monitor, each_k_update=100))
+
 
         # Print NLL mean/stderror.
         # train_loss = L2DistanceForSequences(model, trainset)
@@ -222,12 +250,17 @@ def main():
         # train_error = views.LossView(loss=train_loss, batch_scheduler=train_batch_scheduler)
         # trainer.append_task(tasks.Print("Trainset - Error        : {0:.2f} | {1:.2f}", train_error.sum, train_error.mean))
 
-        valid_loss = L2DistanceForSequences(model, validset)
+        if args.learn_to_stop:
+            valid_loss = L2DistanceWithBinaryCrossEntropy(model, validset)
+        else:
+            valid_loss = L2DistanceForSequences(model, validset)
+
         valid_batch_scheduler = StreamlinesBatchScheduler(validset, batch_size=1000,
                                                           # patch_shape=args.neighborhood_patch,
                                                           noisy_streamlines_sigma=None,
                                                           nb_updates_per_epoch=None,
-                                                          seed=1234)
+                                                          seed=1234,
+                                                          include_last_point=args.learn_to_stop)
 
         valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
         trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))

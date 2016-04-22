@@ -483,6 +483,7 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
     idx = np.where(bvals >= 1e-4)[0]  # Discard b-value == 0
     bvals = np.asarray(bvals)[idx]
     bvecs = np.asarray(bvecs)[idx]
+    # bvecs *= np.array([1, -1, 1], dtype=np.float32)  # Debugging HACK
 
     # Assuming all directions are on the hemisphere.
     raw_sphere = HemiSphere(xyz=bvecs)
@@ -502,6 +503,74 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
     Ba, m, n = sph_harm_basis(sh_order, sphere.theta, sphere.phi)
     data_resampled = np.dot(data_sh, Ba.T)
     return data_resampled
+
+
+# def resample_dwi_and_normalize(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
+#     """ Resamples a diffusion signal according to a set of directions using spherical harmonics.
+
+#     Parameters
+#     -----------
+#     dwi : `nibabel.NiftiImage` object
+#         Diffusion signal as weighted images (4D).
+#     bvals : ndarray shape (N,)
+#         B-values used with each direction.
+#     bvecs : ndarray shape (N, 3)
+#         Directions of the diffusion signal. Directions are
+#         assumed to be only on the hemisphere.
+#     directions : `dipy.core.sphere.Sphere` object, optional
+#         Directions the diffusion signal will be resampled to. Directions are
+#         assumed to be on the whole sphere, not the hemisphere like bvecs.
+#         If omitted, 100 directions evenly distributed on the sphere will be used.
+#     sh_order : int, optional
+#         SH order. Default: 4
+#     smooth : float, optional
+#         Lambda-regularization in the SH fit. Default: 0.006.
+
+#     Returns
+#     -------
+#     ndarray
+#         Diffusion weights resampled according to `sphere`.
+#     """
+#     from dipy.data import get_sphere
+#     from dipy.core.sphere import Sphere, HemiSphere
+#     from dipy.reconst.shm import sph_harm_lookup, smooth_pinv
+
+#     # Indices of bvals sorted
+#     sorted_bvals_idx = np.argsort(bvals)
+#     nb_b0s = int(np.sum(bvals == 0))
+#     dwi_weights = dwi.get_data().astype("float32")
+
+#     # Keep only b-value greater than 0
+#     weights = dwi_weights[..., sorted_bvals_idx[nb_b0s:]]
+
+#     idx = np.where(bvals >= 1e-4)[0]  # Discard b-value == 0
+#     bvals = np.asarray(bvals)[idx]
+#     bvecs = np.asarray(bvecs)[idx]
+#     bvecs *= np.array([1, -1, 1], dtype=np.float32)
+
+#     # Assuming all directions are on the hemisphere.
+#     raw_sphere = HemiSphere(xyz=bvecs)
+
+#     # Fit SH to signal
+#     sph_harm_basis = sph_harm_lookup.get('mrtrix')
+#     Ba, m, n = sph_harm_basis(sh_order, raw_sphere.theta, raw_sphere.phi)
+#     L = -n * (n + 1)
+#     invB = smooth_pinv(Ba, np.sqrt(smooth) * L)
+#     data_sh = np.dot(weights, invB.T)
+
+#     sphere = get_sphere('repulsion100')
+#     # sphere = get_sphere('repulsion724')
+#     if directions is not None:
+#         sphere = Sphere(xyz=bvecs[1:])
+
+#     Ba, m, n = sph_harm_basis(sh_order, sphere.theta, sphere.phi)
+#     weights_resampled = np.dot(data_sh, Ba.T)
+
+#     # Remove mean and divided by standar deviation for non-zero value
+#     mean = weights_resampled.mean(axis=-1)
+#     weights_resampled_and_normalized = normalize_dwi(dwi, bvals)
+
+#     return weights_resampled_and_normalized
 
 
 def find_closest(sphere, xyz, normed=True):

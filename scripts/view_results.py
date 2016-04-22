@@ -178,10 +178,10 @@ def extract_result_from_experiment(e):
         missing_bundle_overlap = []
         missing_bundle_overreach = []
         for k, v in streamlines_per_bundle.items():
-            if k.startswith("_" + bundle_name):
+            if k.startswith(bundle_name):
                 missing_bundle_count += int(v)
-                missing_bundle_overlap.append(overlap_per_bundle[k])
-                missing_bundle_overreach.append(overreach_per_bundle[k])
+                missing_bundle_overlap.append(overlap_per_bundle.get(k, 0))
+                missing_bundle_overreach.append(overreach_per_bundle.get(k, 0))
 
         entry["Missing Bundle Count"] = str(missing_bundle_count)
         entry["Missing Bundle Overlap"] = str(np.mean(missing_bundle_overlap))
