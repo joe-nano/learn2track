@@ -876,3 +876,226 @@ class SequenceBatchSchedulerText8(BatchScheduler):
     def load(self, loaddir):
         state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
         self._cursors = state["cursors"]
+
+
+class MultistepSequenceBatchScheduler(BatchScheduler):
+    """ Multistep batch scheduler for streamlines dataset. """
+
+    def __init__(self, dataset, batch_size, k, patch_shape=None, noisy_streamlines_sigma=None, nb_updates_per_epoch=None, seed=1234,
+                 include_last_point=False):
+        self.dataset = dataset
+        self.batch_size = batch_size
+
+        self.k = k
+
+        self.patch_shape = patch_shape
+        self.use_neighborhood_patch = self.patch_shape is not None
+        if self.use_neighborhood_patch:
+            self._patch_offset_idx = np.array(list(itertools.product(*[range(-(self.patch_shape // 2), (self.patch_shape // 2) + 1)] * 3)))
+
+        self.include_last_point = include_last_point
+
+        self.use_augment_by_flipping = True
+
+        self._nb_updates_per_epoch = nb_updates_per_epoch
+        self.use_sample_from_bundle = self._nb_updates_per_epoch is not None
+
+        self.noisy_streamlines_sigma = noisy_streamlines_sigma
+        self.use_noisy_streamlines = self.noisy_streamlines_sigma is not None
+
+        self.seed = seed
+        self.rng = np.random.RandomState(self.seed)
+        self.rng_noise = np.random.RandomState(self.seed + 1)
+
+        # Shared variables
+        self._shared_batch_inputs = sharedX(np.ndarray((0, 0, 0)))
+        self._shared_batch_targets = sharedX(np.ndarray((0, 0, 0, 0)))
+        self._shared_batch_mask = sharedX(np.ndarray((0, 0)))
+
+        # Test value
+        batch_inputs, batch_targets, batch_mask = self._next_batch(0)
+        self.dataset.symb_inputs.tag.test_value = batch_inputs
+        self.dataset.symb_mask.tag.test_value = batch_mask
+
+        # Since this batch scheduler creates its own targets.
+        if self.dataset.symb_targets is None:
+            self.dataset.symb_targets = T.TensorVariable(type=T.TensorType("floatX", [False] * batch_targets.ndim),
+                                                         name=self.dataset.name + '_symb_targets')
+
+        self.dataset.symb_targets.tag.test_value = batch_targets
+
+    @property
+    def input_size(self):
+        if self.use_neighborhood_patch:
+            return self.dataset.volume.shape[-1] * int(self.patch_shape ** 3)
+
+        return self.dataset.volume.shape[-1]  # Number of diffusion directions
+
+    @property
+    def target_size(self):
+        return 3
+
+    @property
+    def nb_updates_per_epoch(self):
+        if self._nb_updates_per_epoch is None:
+            return int(np.ceil(len(self.dataset) / self.batch_size))
+
+        return self._nb_updates_per_epoch
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value):
+        self._batch_size = value
+
+        # Compute the number of streamlines from each bundle that should be present in a batch.
+        nb_bundles = int(np.sum(self.dataset.bundle_counts > 0))  # Keep only bundles that are present.
+        nb_streamlines_from_each_bundle = (value // nb_bundles) * np.ones(nb_bundles, dtype=int)
+
+        # Make sure the splits sum to `batch_size`.
+        nb_streamlines_from_each_bundle[:(value % nb_bundles)] += 1
+
+        self._nb_streamlines_from_each_bundle = np.zeros(len(self.dataset.bundle_names), dtype=int)
+        self._nb_streamlines_from_each_bundle[self.dataset.bundle_counts > 0] = nb_streamlines_from_each_bundle
+        assert sum(self._nb_streamlines_from_each_bundle) == self.batch_size
+
+        # Pre-allocated memory for indices (speedup)
+        self._indices = np.zeros((self._batch_size,), dtype=int)
+
+    def _augment_data(self, inputs):
+        pass
+
+    def _add_noise_to_streamlines(self, streamlines):
+        if not self.use_noisy_streamlines:
+            return streamlines
+
+        # Add gaussian noise, N(0, self.sigma).
+        noisy_streamlines = streamlines.copy()
+        shape = noisy_streamlines._data.shape
+        noisy_streamlines._data += self.noisy_streamlines_sigma * self.rng_noise.randn(*shape)
+        return noisy_streamlines
+
+    def _add_neighborhood_patch(self, inputs, streamlines_pts):
+        pts = (streamlines_pts[:, None] + self._patch_offset_idx).reshape((-1, 3))
+        inputs = utils.eval_volume_at_3d_coordinates(self.dataset.volume, pts).reshape((len(streamlines_pts), -1))
+        return inputs
+
+    def _prepare_batch(self, indices):
+        orig_streamlines = self.dataset.streamlines[indices].copy()
+        streamlines = self._add_noise_to_streamlines(orig_streamlines)
+
+        inputs = utils.eval_volume_at_3d_coordinates(self.dataset.volume, streamlines._data)
+        if self.use_neighborhood_patch:
+            inputs = self._add_neighborhood_patch(inputs, streamlines._data)
+
+        targets = streamlines._data[1:] - streamlines._data[:-1]
+        targets = targets / np.sqrt(np.sum(targets ** 2, axis=1, keepdims=True))
+
+        batch_size = len(streamlines)
+        if self.use_augment_by_flipping:
+            batch_size *= 2
+
+        if self.include_last_point:  # only for the input
+            max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
+            batch_masks = np.zeros((batch_size, max_streamline_length - self.k), dtype=floatX)
+            batch_inputs = np.zeros((batch_size, max_streamline_length, inputs.shape[1]), dtype=floatX)
+            batch_targets = np.zeros((batch_size, max_streamline_length - self.k, self.k, self.target_size), dtype=floatX)
+
+            for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
+                n = length - self.k
+                batch_masks[i, :n] = 1
+                batch_inputs[i, :length] = inputs[offset:offset + length]
+                batch_targets[i, :n] = self._window_stack(targets[offset:offset + length - 1, None], self.k)
+
+                if self.use_augment_by_flipping:
+                    batch_masks[i + len(streamlines), :n] = 1
+                    batch_inputs[i + len(streamlines), :length] = inputs[offset:offset + length][::-1]
+                    batch_targets[i + len(streamlines), :n] = self._window_stack(-targets[offset:offset + length - 1, None][::-1], self.k)
+
+        else:
+            max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
+            batch_masks = np.zeros((batch_size, max_streamline_length - self.k), dtype=floatX)
+            batch_inputs = np.zeros((batch_size, max_streamline_length - self.k, inputs.shape[1]), dtype=floatX)
+            batch_targets = np.zeros((batch_size, max_streamline_length - self.k, self.k, self.target_size), dtype=floatX)
+
+            for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
+                n = length - self.k
+                batch_masks[i, :n] = 1
+                batch_inputs[i, :n] = inputs[offset:offset + n]
+                batch_targets[i, :n] = self._window_stack(targets[offset:offset + length - 1, None], self.k)
+
+                if self.use_augment_by_flipping:
+                    batch_masks[i + len(streamlines), :n] = 1
+                    batch_inputs[i + len(streamlines), :n] = inputs[offset + self.k:offset + length][::-1]
+                    batch_targets[i + len(streamlines), :n] = self._window_stack(-targets[offset:offset + length - 1, None][::-1], self.k)
+
+        return batch_inputs, batch_targets, batch_masks
+
+    @staticmethod
+    def _window_stack(x, width):
+        return np.hstack(x[i:1 + i - width or None] for i in range(width))
+
+    def _next_batch(self, batch_count):
+        if not self.use_sample_from_bundle:
+            # Simply take the next slice.
+            start = batch_count * self.batch_size
+            end = (batch_count + 1) * self.batch_size
+            return self._prepare_batch(slice(start, end))
+
+        # Batch is a stratified sample of streamlines from the different bundles.
+        start = 0
+        for bundle_indices, nb_streamlines in zip(self.dataset.bundle_indices, self._nb_streamlines_from_each_bundle):
+            if nb_streamlines == 0:
+                continue
+
+            end = start + nb_streamlines
+            self._indices[start:end] = self.rng.choice(bundle_indices, size=(nb_streamlines,), replace=False)
+            start = end
+
+        return self._prepare_batch(self._indices)
+
+    @property
+    def givens(self):
+        return {
+            self.dataset.symb_inputs: self._shared_batch_inputs,
+            self.dataset.symb_targets: self._shared_batch_targets,
+            self.dataset.symb_mask: self._shared_batch_mask}
+
+    def __iter__(self):
+        for batch_count in range(self.nb_updates_per_epoch):
+            batch_inputs, batch_targets, batch_mask = self._next_batch(batch_count)
+            self._shared_batch_inputs.set_value(batch_inputs)
+            self._shared_batch_targets.set_value(batch_targets)
+            self._shared_batch_mask.set_value(batch_mask)
+
+            yield batch_count + 1
+
+    @property
+    def updates(self):
+        return {}  # No updates
+
+    def save(self, savedir):
+        state = {
+            "version": 1,
+            "batch_size": self.batch_size,
+            "k": self.k,
+            "nb_updates_per_epoch": self._nb_updates_per_epoch,
+            "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
+            "use_augment_by_flipping": self.use_augment_by_flipping,
+            "seed": self.seed,
+            "rng": pickle.dumps(self.rng),
+            "rng_noise": pickle.dumps(self.rng_noise)}
+
+        np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)
+
+    def load(self, loaddir):
+        state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
+        self.batch_size = state["batch_size"]
+        self.k = state["k"]
+        self._nb_updates_per_epoch = state["nb_updates_per_epoch"]
+        self.noisy_streamlines_sigma = state["noisy_streamlines_sigma"]
+        self.use_augment_by_flipping = state["use_augment_by_flipping"]
+        self.rng = pickle.loads(state["rng"])
+        self.rng_noise = pickle.loads(state["rng_noise"])
