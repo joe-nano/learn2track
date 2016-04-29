@@ -617,9 +617,10 @@ class GRU_Multistep_Gaussian(GRU):
         # Xi.shape : (batch_size, input_size)
         # args.shape : n_layers * (batch_size, layer_size)
 
-        # Random noise used for sampling at each step
-        # epsilon.shape : (K, batch_size, target_size)
-        epsilon = self.srng.normal((self.k - 1, Xi.shape[0], self.target_size))
+        if self.k > 1:
+            # Random noise used for sampling at each step (t+2)...(t+k)
+            # epsilon.shape : (K, batch_size, target_size)
+            epsilon = self.srng.normal((self.k - 1, Xi.shape[0], self.target_size))
 
         # Object to hold the distribution parameters at each prediction horizon
         # k_distribution_params.shape : (batch_size, K, target_size, 2)
@@ -698,5 +699,45 @@ class GRU_Multistep_Gaussian(GRU):
         return regression_out
 
     def use(self, X):
+        # output.shape : (batch_size, seq_len, K, M, target_size, 2)
         output = self.get_output(X)
-        return output
+
+        # Sample inputs for mean estimation
+        epsilon = self.srng.normal((X.shape[0], X.shape[1], self.k, self.m, self.target_size))
+        means = output[:, :, :, :, :, 0]
+        stds = output[:, :, :, :, :, 1]
+
+        # samples.shape : (batch_size, seq_len, K, M, target_size)
+        samples = means + epsilon * stds
+
+        # predictions.shape : (batch_size, seq_len, K, target_size)
+        predictions = T.mean(samples, axis=3)
+
+        return predictions
+
+    def seq_next(self, input):
+        """ Returns the next (t+1) prediction in every sequence of the batch.
+            self.k should be fixed to 1 in order to avoid useless computations from (t+2) to (t+k)  """
+        if self._gen is None:
+            self.seq_reset(batch_size=len(input))
+
+            X = T.TensorVariable(type=T.TensorType("floatX", [False] * input.ndim), name='X')
+            X.tag.test_value = input
+
+            states = self.states_h + [0]
+            new_states = self._fprop(X, *states)
+            new_states_h = new_states[:len(self.hidden_sizes)]
+
+            # output.shape : (batch_size, K, target_size, 2)
+            output = new_states[-1]
+
+            # next_step_predictions.shape : (batch_size, target_size)
+            next_step_predictions = output[:, 0, :, 0]
+
+            updates = OrderedDict()
+            for i in range(len(self.hidden_sizes)):
+                updates[self.states_h[i]] = new_states_h[i]
+
+            self._gen = theano.function([X], next_step_predictions, updates=updates)
+
+        return self._gen(input)
