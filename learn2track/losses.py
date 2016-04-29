@@ -3,7 +3,7 @@ import theano
 import theano.tensor as T
 
 from smartlearner.interfaces import Loss
-from learn2track.utils import softmax
+from learn2track.utils import softmax, logsumexp
 
 
 class L2DistanceForSequences(Loss):
@@ -247,11 +247,11 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         #   => (x - \mu)^T \Sigma^-1 (x - \mu) = \sum_n ((x_n - \mu_n) / \sigma_n)^2
         n = self.dataset.symb_targets.shape[3]
         likelihood = -0.5 * (n * np.log(2 * np.pi) + T.sum(2 * T.log(sigma) + T.sqr((targets - mu) / sigma), axis=4))
-        max_term = T.max(likelihood, axis=3)
+
         m = model_output.shape[3]
 
         # nll.shape :(batch_size, seq_len, K)
-        nll = T.log(m) - max_term - T.log(T.sum(T.exp(likelihood - max_term[:, :, :, None]), axis=3))
+        nll = T.log(m) - logsumexp(likelihood, axis=3, keepdims=False)
 
         # Return NLLs summed over K, meaned over sequence steps
         return T.sum(T.sum(nll, axis=2) * mask, axis=1) / T.sum(mask, axis=1)
