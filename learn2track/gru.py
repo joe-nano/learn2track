@@ -4,6 +4,7 @@ import numpy as np
 import theano
 import theano.tensor as T
 from collections import OrderedDict
+from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 from smartlearner.interfaces import Model
 from smartlearner import utils as smartutils
@@ -561,3 +562,141 @@ class GRU_Hybrid(GRU):
         """ Returns the directions from the sphere. """
         idx = T.argmax(self.get_output(X), axis=2)
         return self.directions[idx]
+
+
+class GRU_Multistep_Gaussian(GRU):
+    """ A multistep GRU model used to predict multivariate gaussian parameters (means and standard deviations)
+
+    For each target dimension, the model outputs (m) distribution parameters estimates for each prediction horizon up to (k)
+    """
+
+    def __init__(self, input_size, hidden_sizes, target_size, k, m, seed, **_):
+        """
+        Parameters
+        ----------
+        input_size : int
+            Number of units each element Xi in the input sequence X has.
+        hidden_sizes : int, list of int
+            Number of hidden units each GRU should have.
+        target_size : int
+            Dimension of the multivariate gaussian to estimate; the model outputs two distribution parameters for each dimension of the target
+        k : int
+            Number of steps ahead to predict (the model will predict all steps up to k)
+        m : int
+            Number of Monte-Carlo samples used to estimate the gaussian parameters
+        seed : int
+            Random seed to initialize the random noise used for sampling
+        """
+        super().__init__(input_size, hidden_sizes)
+        self.target_size = target_size  # Output distribution parameters mu and sigma for each dimension
+        self.layer_regression = LayerRegression(self.hidden_sizes[-1], 2 * self.target_size, normed=False)
+
+        self.k = k
+        self.m = m
+        self.seed = seed
+
+        self.srng = MRG_RandomStreams(self.seed)
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        super().initialize(weights_initializer)
+        self.layer_regression.initialize(weights_initializer)
+
+    @property
+    def hyperparameters(self):
+        hyperparameters = super().hyperparameters
+        hyperparameters['target_size'] = self.target_size
+        hyperparameters['k'] = self.k
+        hyperparameters['m'] = self.m
+        return hyperparameters
+
+    @property
+    def parameters(self):
+        return super().parameters + self.layer_regression.parameters
+
+    def _fprop(self, Xi, *args):
+        # Xi.shape : (batch_size, input_size)
+        # args.shape : n_layers * (batch_size, layer_size)
+
+        # Random noise used for sampling at each step
+        # epsilon.shape : (K, batch_size, target_size)
+        epsilon = self.srng.normal((self.k - 1, Xi.shape[0], self.target_size))
+
+        # Object to hold the distribution parameters at each prediction horizon
+        # k_distribution_params.shape : (batch_size, K, target_size, 2)
+        k_distribution_params = T.zeros((Xi.shape[0], self.k, self.target_size, 2))
+
+        # Hidden state to be passed to the next GRU iteration (next _fprop call)
+        # next_hidden_state.shape : n_layers * (batch_size, layer_size)
+        next_hidden_state = super()._fprop(Xi, *args)
+
+        # Compute the distribution parameters for step (t)
+        # distribution_params.shape : (batch_size, target_size, 2)
+        distribution_params = self._predict_distribution_params(next_hidden_state[-1])
+        k_distribution_params = T.set_subtensor(k_distribution_params[:, 0, :, :], distribution_params)
+
+        sample_hidden_state = next_hidden_state
+
+        for k in range(1, self.k):
+            # Sample an input for the next step
+            # sample_input.shape : (batch_size, target_size)
+            sample_input = self._get_sample(distribution_params, epsilon[k - 1])
+
+            # Compute the sample distribution parameters for step (t+k)
+            sample_hidden_state = super()._fprop(sample_input, *sample_hidden_state)
+            distribution_params = self._predict_distribution_params(sample_hidden_state[-1])
+            k_distribution_params = T.set_subtensor(k_distribution_params[:, k, :, :], distribution_params)
+
+        return next_hidden_state + (k_distribution_params,)
+
+    @staticmethod
+    def _get_sample(distribution_parameters, noise):
+        # distribution_parameters.shape : (batch_size, target_size, 2)
+        # noise.shape : (batch_size, target_size)
+        return distribution_parameters[:, :, 0] + noise * distribution_parameters[:, :, 1]
+
+    def _predict_distribution_params(self, hidden_state):
+        # regression layer outputs an array [mu_1, log(sigma_1), mu_2, log(sigma_2), ..., mu_k, log(sigma_k)] for each batch example
+        # regression_output.shape : (batch_size, target_size, 2)
+        regression_output = T.reshape(self.layer_regression.fprop(hidden_state), (hidden_state.shape[0], self.target_size, 2))
+
+        # Use T.exp to retrieve a positive sigma
+        distribution_params = T.set_subtensor(regression_output[:, :, 1], T.exp(regression_output[:, :, 1]))
+
+        # distribution_params.shape : (batch_size, target_size, 2)
+        return distribution_params
+
+    def get_output(self, X):
+        # X.shape : (batch_size, seq_len, n_features)
+
+        # Repeat Xs to compute M sample sequences for each input
+        # inputs.shape : (batch_size*M, seq_len, n_features)
+        inputs = T.repeat(X, self.m, axis=0)
+
+        # outputs_info_h.shape : n_layers * (batch_size*M, layer_size)
+        outputs_info_h = []
+        for hidden_size in self.hidden_sizes:
+            outputs_info_h.append(T.zeros((inputs.shape[0], hidden_size)))
+
+        # results.shape : n_layers * (seq_len, batch_size*M, layer_size), (seq_len, batch_size*M, K, target_size, 2)
+        results, updates = theano.scan(fn=self._fprop, outputs_info=outputs_info_h + [None],
+                                       sequences=[T.transpose(inputs, axes=(1, 0, 2))])  # We want to scan over sequence elements, not the examples.
+
+        self.graph_updates = updates
+
+        # Put back the examples so they are in the first dimension
+        # transposed.shape : (batch_size*M, seq_len, K, target_size, 2)
+        transposed = T.transpose(results[-1], axes=(1, 0, 2, 3, 4))
+
+        # Split the M sample sequences into a new dimension
+        # reshaped.shape : (batch_size, M, seq_len, K, target_size, 2)
+        reshaped = T.reshape(transposed, (X.shape[0], self.m, X.shape[1], self.k, self.target_size, 2))
+
+        # Transpose the output to get the M sequences dimension in the right place
+        # regression_out.shape : (batch_size, seq_len, K, M, target_size, 2)
+        regression_out = T.transpose(reshaped, (0, 2, 3, 1, 4, 5))
+
+        return regression_out
+
+    def use(self, X):
+        output = self.get_output(X)
+        return output

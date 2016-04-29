@@ -1,3 +1,4 @@
+import numpy as np
 import theano
 import theano.tensor as T
 
@@ -206,3 +207,51 @@ class ErrorForSequenceWithClassTarget(Loss):
         mean_errors_per_sequence = T.sum(errors*mask, axis=1) / T.sum(mask, axis=1)
 
         return mean_errors_per_sequence
+
+
+class MultistepMultivariateGaussianLossForSequences(Loss):
+    """ Compute multistep loss for a multivariate gaussian distribution using a monte-carlo estimate of the likelihood
+    """
+
+    def getstate(self):
+        state = {"version": 1, "__name__": type(self).__name__}
+
+        return state
+
+    def setstate(self, state):
+        pass
+
+    def _get_updates(self):
+        return {}
+
+    def _compute_losses(self, model_output):
+        # model_output.shape : shape : (batch_size, seq_len, K, M, target_size, 2)
+        # self.dataset.symb_targets.shape = (batch_size, seq_len, K, target_size)
+
+        # mask.shape : (batch_size, seq_len)
+        mask = self.dataset.symb_mask
+
+        # mu.shape = (batch_size, seq_len, K, M, target_size)
+        mu = model_output[:, :, :, :, :, 0]
+
+        # sigma.shape = (batch_size, seq_len, K, M, target_size)
+        sigma = model_output[:, :, :, :, :, 1]
+
+        # targets.shape = (batch_size, seq_len, K, 1, target_size)
+        targets = self.dataset.symb_targets[:, :, :, None, :]
+
+        # Likelihood of multivariate gaussian (n dimensions) is :
+        # ((2 \pi)^n |\Sigma|)^{-1/2} exp(-1/2 (x - \mu)^T \Sigma^-1 (x - \mu))
+        # We suppose a diagonal covariance matrix, so we have :
+        #   => |\Sigma| = \prod_n \sigma_n^2
+        #   => (x - \mu)^T \Sigma^-1 (x - \mu) = \sum_n ((x_n - \mu_n) / \sigma_n)^2
+        n = self.dataset.symb_targets.shape[3]
+        likelihood = -0.5 * (n * np.log(2 * np.pi) + T.sum(2 * T.log(sigma) + T.sqr((targets - mu) / sigma), axis=4))
+        max_term = T.max(likelihood, axis=3)
+        m = model_output.shape[3]
+
+        # nll.shape :(batch_size, seq_len, K)
+        nll = T.log(m) - max_term - T.log(T.sum(T.exp(likelihood - max_term[:, :, :, None]), axis=3))
+
+        # Return NLLs summed over K, meaned over sequence steps
+        return T.sum(T.sum(nll, axis=2) * mask, axis=1) / T.sum(mask, axis=1)
