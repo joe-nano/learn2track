@@ -212,6 +212,11 @@ class ErrorForSequenceWithClassTarget(Loss):
 class MultistepMultivariateGaussianLossForSequences(Loss):
     """ Compute multistep loss for a multivariate gaussian distribution using a monte-carlo estimate of the likelihood
     """
+    def __init__(self, model, dataset, nb_samples, target_size):
+        super().__init__(model, dataset)
+        self._graph_updates = {}
+        self.nb_samples = np.float32(nb_samples)
+        self.target_size = np.float32(target_size)
 
     def getstate(self):
         state = {"version": 1, "__name__": type(self).__name__}
@@ -245,13 +250,13 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         # We suppose a diagonal covariance matrix, so we have :
         #   => |\Sigma| = \prod_n \sigma_n^2
         #   => (x - \mu)^T \Sigma^-1 (x - \mu) = \sum_n ((x_n - \mu_n) / \sigma_n)^2
-        n = self.dataset.symb_targets.shape[3]
-        likelihood = -0.5 * (n * np.log(2 * np.pi) + T.sum(2 * T.log(sigma) + T.sqr((targets - mu) / sigma), axis=4))
+        # n = T.cast(self.dataset.symb_targets.shape[3], theano.config.floatX)
+        likelihood = -0.5 * (self.target_size * np.float32(np.log(2 * np.pi)) + T.sum(2 * T.log(sigma) + T.sqr((targets - mu) / sigma), axis=4))
 
-        m = model_output.shape[3]
+        # m = T.cast(model_output.shape[3], theano.config.floatX)
 
         # nll.shape :(batch_size, seq_len, K)
-        nll = T.log(m) - logsumexp(likelihood, axis=3, keepdims=False)
+        nll = T.log(self.nb_samples) - logsumexp(likelihood, axis=3, keepdims=False)
 
         # Return NLLs summed over K, meaned over sequence steps
         return T.sum(T.sum(nll, axis=2) * mask, axis=1) / T.sum(mask, axis=1)

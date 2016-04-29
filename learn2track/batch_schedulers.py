@@ -998,21 +998,22 @@ class MultistepSequenceBatchScheduler(BatchScheduler):
             batch_size *= 2
 
         if self.include_last_point:  # only for the input
-            max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
-            batch_masks = np.zeros((batch_size, max_streamline_length - self.k), dtype=floatX)
-            batch_inputs = np.zeros((batch_size, max_streamline_length, inputs.shape[1]), dtype=floatX)
-            batch_targets = np.zeros((batch_size, max_streamline_length - self.k, self.k, self.target_size), dtype=floatX)
+            raise NotImplementedError()
+            # max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
+            # batch_masks = np.zeros((batch_size, max_streamline_length - self.k), dtype=floatX)
+            # batch_inputs = np.zeros((batch_size, max_streamline_length, inputs.shape[1]), dtype=floatX)
+            # batch_targets = np.zeros((batch_size, max_streamline_length - self.k, self.k, self.target_size), dtype=floatX)
 
-            for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
-                n = length - self.k
-                batch_masks[i, :n] = 1
-                batch_inputs[i, :length] = inputs[offset:offset + length]
-                batch_targets[i, :n] = self._window_stack(targets[offset:offset + length - 1, None], self.k)
+            # for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
+            #     n = length - self.k
+            #     batch_masks[i, :n] = 1
+            #     batch_inputs[i, :length] = inputs[offset:offset + length]
+            #     batch_targets[i, :n] = self._window_stack(targets[offset:offset + length - 1, None], self.k)
 
-                if self.use_augment_by_flipping:
-                    batch_masks[i + len(streamlines), :n] = 1
-                    batch_inputs[i + len(streamlines), :length] = inputs[offset:offset + length][::-1]
-                    batch_targets[i + len(streamlines), :n] = self._window_stack(-targets[offset:offset + length - 1, None][::-1], self.k)
+            #     if self.use_augment_by_flipping:
+            #         batch_masks[i + len(streamlines), :n] = 1
+            #         batch_inputs[i + len(streamlines), :length] = inputs[offset:offset + length][::-1]
+            #         batch_targets[i + len(streamlines), :n] = self._window_stack(-targets[offset:offset + length - 1, None][::-1], self.k)
 
         else:
             max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
