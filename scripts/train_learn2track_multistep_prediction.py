@@ -185,7 +185,6 @@ def main():
 
         batch_scheduler = MultistepSequenceBatchScheduler(trainset, batch_size=args.batch_size,
                                                           k=args.nb_steps_to_predict,
-                                                          # patch_shape=args.neighborhood_patch,
                                                           noisy_streamlines_sigma=args.noisy_streamlines_sigma,
                                                           nb_updates_per_epoch=args.nb_updates_per_epoch,
                                                           seed=args.seed,
@@ -195,7 +194,8 @@ def main():
 
     with Timer("Creating model"):
         from learn2track.gru import GRU_Multistep_Gaussian
-        model = GRU_Multistep_Gaussian(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size,
+        model = GRU_Multistep_Gaussian(trainset.volume,
+                                       batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size,
                                        args.nb_steps_to_predict, args.nb_samples, args.model_seed)
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
@@ -231,7 +231,6 @@ def main():
                                                                    target_size=batch_scheduler.target_size)
         valid_batch_scheduler = MultistepSequenceBatchScheduler(validset, batch_size=1000,
                                                                 k=args.nb_steps_to_predict,
-                                                                # patch_shape=args.neighborhood_patch,
                                                                 noisy_streamlines_sigma=None,
                                                                 nb_updates_per_epoch=None,
                                                                 seed=1234,

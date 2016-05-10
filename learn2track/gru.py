@@ -13,6 +13,7 @@ import smartlearner.initializers as initer
 
 from learn2track.layers import LayerGRU, LayerRegression, LayerSoftmax, LayerDense
 from learn2track.tasks import DecayingVariable
+from learn2track.interpolation import eval_volume_at_3d_coordinates_in_theano
 
 
 class GRU(Model):
@@ -570,10 +571,12 @@ class GRU_Multistep_Gaussian(GRU):
     For each target dimension, the model outputs (m) distribution parameters estimates for each prediction horizon up to (k)
     """
 
-    def __init__(self, input_size, hidden_sizes, target_size, k, m, seed, **_):
+    def __init__(self, dwi, input_size, hidden_sizes, target_size, k, m, seed, **_):
         """
         Parameters
         ----------
+        dwi : 4D array with shape (width, height, depth, nb. diffusion directions)
+            Diffusion signal as weighted images.
         input_size : int
             Number of units each element Xi in the input sequence X has.
         hidden_sizes : int, list of int
@@ -590,6 +593,13 @@ class GRU_Multistep_Gaussian(GRU):
         super().__init__(input_size, hidden_sizes)
         self.target_size = target_size  # Output distribution parameters mu and sigma for each dimension
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], 2 * self.target_size, normed=False)
+
+        self.dwi = sharedX(dwi, name='dwi', keep_on_cpu=False)
+
+        # Precompute strides that will be used in the interpolation.
+        shapes = T.cast(self.dwi.shape[:-1], dtype=theano.config.floatX)
+        strides = T.concatenate([T.ones((1,)), T.cumprod(shapes[::-1])[:-1]], axis=0)[::-1]
+        self.dwi_strides = strides.eval()
 
         self.k = k
         self.m = m
@@ -614,21 +624,28 @@ class GRU_Multistep_Gaussian(GRU):
         return super().parameters + self.layer_regression.parameters
 
     def _fprop(self, Xi, *args):
-        # Xi.shape : (batch_size, input_size)
+        # Xi : coordinates in a 3D volume.
+        # Xi.shape : (batch_size, 3)
         # args.shape : n_layers * (batch_size, layer_size)
+        batch_size = Xi.shape[0]
+        coords = Xi
 
         if self.k > 1:
             # Random noise used for sampling at each step (t+2)...(t+k)
             # epsilon.shape : (K, batch_size, target_size)
-            epsilon = self.srng.normal((self.k - 1, Xi.shape[0], self.target_size))
+            epsilon = self.srng.normal((self.k - 1, batch_size, self.target_size))
 
         # Object to hold the distribution parameters at each prediction horizon
         # k_distribution_params.shape : (batch_size, K, target_size, 2)
-        k_distribution_params = T.zeros((Xi.shape[0], self.k, self.target_size, 2))
+        k_distribution_params = T.zeros((batch_size, self.k, self.target_size, 2))
+
+        # Get diffusion data.
+        # data_at_coords.shape : (batch_size, input_size)
+        data_at_coords = eval_volume_at_3d_coordinates_in_theano(self.dwi, coords, strides=self.dwi_strides)
 
         # Hidden state to be passed to the next GRU iteration (next _fprop call)
         # next_hidden_state.shape : n_layers * (batch_size, layer_size)
-        next_hidden_state = super()._fprop(Xi, *args)
+        next_hidden_state = super()._fprop(data_at_coords, *args)
 
         # Compute the distribution parameters for step (t)
         # distribution_params.shape : (batch_size, target_size, 2)
@@ -640,10 +657,14 @@ class GRU_Multistep_Gaussian(GRU):
         for k in range(1, self.k):
             # Sample an input for the next step
             # sample_input.shape : (batch_size, target_size)
-            sample_input = self._get_sample(distribution_params, epsilon[k - 1])
+            sample_directions = self._get_sample(distribution_params, epsilon[k - 1])
+
+            # Follow *unnormalized* direction and get diffusion data at the new location.
+            coords = coords + sample_directions
+            data_at_coords = eval_volume_at_3d_coordinates_in_theano(self.dwi, coords, strides=self.dwi_strides)
 
             # Compute the sample distribution parameters for step (t+k)
-            sample_hidden_state = super()._fprop(sample_input, *sample_hidden_state)
+            sample_hidden_state = super()._fprop(data_at_coords, *sample_hidden_state)
             distribution_params = self._predict_distribution_params(sample_hidden_state[-1])
             k_distribution_params = T.set_subtensor(k_distribution_params[:, k, :, :], distribution_params)
 
@@ -656,7 +677,7 @@ class GRU_Multistep_Gaussian(GRU):
         return distribution_parameters[:, :, 0] + noise * distribution_parameters[:, :, 1]
 
     def _predict_distribution_params(self, hidden_state):
-        # regression layer outputs an array [mu_1, log(sigma_1), mu_2, log(sigma_2), ..., mu_k, log(sigma_k)] for each batch example
+        # regression layer outputs an array [mu_1, log(sigma_1), mu_2, log(sigma_2), mu_3, log(sigma_3)] for each batch example
         # regression_output.shape : (batch_size, target_size, 2)
         regression_output = T.reshape(self.layer_regression.fprop(hidden_state), (hidden_state.shape[0], self.target_size, 2))
 
