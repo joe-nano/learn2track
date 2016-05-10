@@ -49,11 +49,21 @@ def test_trilinear_interpolation():
     volume_strides = strides.eval()
 
     values = eval_volume_at_3d_coordinates_in_theano(volume, coords, strides=volume_strides).eval()
-
     assert_array_almost_equal(values, expected, decimal=4)
 
-    fct = theano.function([], eval_volume_at_3d_coordinates_in_theano(volume, coords, strides=volume_strides))
-    theano.printing.pydotprint(fct, 'interpolation_vol4d', with_ids=True)
+    # fct = theano.function([], eval_volume_at_3d_coordinates_in_theano(volume, coords, strides=volume_strides))
+    # theano.printing.pydotprint(fct, 'interpolation_vol4d', with_ids=True)
+
+    # Test tahat coordinates outside the volume are clipped.
+    coords = coords * np.max(dwi.shape).astype('float32')
+    expected = eval_volume_at_3d_coordinates(dwi.get_data().astype('float32'), coords.eval())
+    values = eval_volume_at_3d_coordinates_in_theano(volume, coords, strides=volume_strides).eval()
+    assert_array_almost_equal(values, expected, decimal=4)
+
+    coords = -coords
+    expected = eval_volume_at_3d_coordinates(dwi.get_data().astype('float32'), coords.eval())
+    values = eval_volume_at_3d_coordinates_in_theano(volume, coords, strides=volume_strides).eval()
+    assert_array_almost_equal(values, expected, decimal=4)
 
 
 test_trilinear_interpolation()
