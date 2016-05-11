@@ -245,6 +245,12 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         # targets.shape = (batch_size, seq_len, K, 1, target_size)
         targets = self.dataset.symb_targets[:, :, :, None, :]
 
+        # For monitoring the L2 error of using $mu$ as the predicted direction (should be comparable to MICCAI's work).
+        normalized_mu = mu[:, :, 0, 0] / T.sqrt(T.sum(mu[:, :, 0, 0]**2, axis=2, keepdims=True) + 1e-8)
+        normalized_targets = targets[:, :, 0, 0] / T.sqrt(T.sum(targets[:, :, 0, 0]**2, axis=2, keepdims=True) + 1e-8)
+        self.L2_error_per_item = T.sqrt(T.sum(((normalized_mu - normalized_targets)**2), axis=2))
+        self.mean_sqr_error = T.sum(self.L2_error_per_item*mask, axis=1) / T.sum(mask, axis=1)
+
         # Likelihood of multivariate gaussian (n dimensions) is :
         # ((2 \pi)^n |\Sigma|)^{-1/2} exp(-1/2 (x - \mu)^T \Sigma^-1 (x - \mu))
         # We suppose a diagonal covariance matrix, so we have :

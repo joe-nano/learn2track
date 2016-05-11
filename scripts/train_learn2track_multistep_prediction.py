@@ -222,8 +222,14 @@ def main():
         avg_loss = tasks.AveragePerEpoch(loss_monitor)
         trainer.append_task(avg_loss)
 
+        # Log training L2 error
+        mean_sqr_error_monitor = views.MonitorVariable(T.mean(loss.mean_sqr_error))
+        avg_mean_sqr_error = tasks.AveragePerEpoch(mean_sqr_error_monitor)
+        trainer.append_task(avg_mean_sqr_error)
+
         # Print average training loss.
-        trainer.append_task(tasks.Print("Avg. training loss:         : {}", avg_loss))
+        trainer.append_task(tasks.Print("Avg. training loss: {}", avg_loss))
+        trainer.append_task(tasks.Print("Avg. MSE:           {}", avg_mean_sqr_error))
 
         # Print NLL mean/stderror.
         valid_loss = MultistepMultivariateGaussianLossForSequences(model, validset,
