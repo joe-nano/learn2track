@@ -233,14 +233,15 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         # model_output.shape : shape : (batch_size, seq_len, K, M, target_size, 2)
         # self.dataset.symb_targets.shape = (batch_size, seq_len, K, target_size)
 
-        # mask.shape : (batch_size, seq_len)
+        # mask.shape : (batch_size, seq_len) or None
         mask = self.dataset.symb_mask
 
         # mu.shape = (batch_size, seq_len, K, M, target_size)
         mu = model_output[:, :, :, :, :, 0]
 
         # sigma.shape = (batch_size, seq_len, K, M, target_size)
-        sigma = model_output[:, :, :, :, :, 1]
+        # Use T.exp to retrieve a positive sigma
+        sigma = T.exp(model_output[:, :, :, :, :, 1])
 
         # targets.shape = (batch_size, seq_len, K, 1, target_size)
         targets = self.dataset.symb_targets[:, :, :, None, :]
@@ -249,7 +250,10 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         normalized_mu = mu[:, :, 0, 0] / T.sqrt(T.sum(mu[:, :, 0, 0]**2, axis=2, keepdims=True) + 1e-8)
         normalized_targets = targets[:, :, 0, 0] / T.sqrt(T.sum(targets[:, :, 0, 0]**2, axis=2, keepdims=True) + 1e-8)
         self.L2_error_per_item = T.sqrt(T.sum(((normalized_mu - normalized_targets)**2), axis=2))
-        self.mean_sqr_error = T.sum(self.L2_error_per_item*mask, axis=1) / T.sum(mask, axis=1)
+        if mask is not None:
+            self.mean_sqr_error = T.sum(self.L2_error_per_item*mask, axis=1) / T.sum(mask, axis=1)
+        else:
+            self.mean_sqr_error = T.mean(self.L2_error_per_item, axis=1)
 
         # Likelihood of multivariate gaussian (n dimensions) is :
         # ((2 \pi)^n |\Sigma|)^{-1/2} exp(-1/2 (x - \mu)^T \Sigma^-1 (x - \mu))
@@ -262,4 +266,7 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         nll = T.log(self.nb_samples) - logsumexp(likelihood, axis=3, keepdims=False)
 
         # Return NLLs summed over K, meaned over sequence steps
-        return T.sum(T.mean(nll, axis=2) * mask, axis=1) / T.sum(mask, axis=1)
+        if mask is not None:
+            return T.sum(T.mean(nll, axis=2) * mask, axis=1) / T.sum(mask, axis=1)
+        else:
+            return T.mean(T.mean(nll, axis=2), axis=1)

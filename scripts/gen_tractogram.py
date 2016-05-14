@@ -26,6 +26,9 @@ from learn2track import utils
 from learn2track.utils import Timer, map_coordinates_3d_4d, normalize_dwi
 from smartlearner.utils import load_dict_from_json_file
 
+from learn2track.gru import GRU_Multistep_Gaussian
+
+
 
 def build_argparser():
     DESCRIPTION = "Generate a tractogram from a LSTM model trained on ismrm2015 challenge data."
@@ -64,8 +67,8 @@ def build_argparser():
 
     p.add_argument('--batch-size', type=int, help="number of streamlines to process at the same time. Default: the biggest possible")
 
-    p.add_argument('--no-dilatation', action="store_true",
-                   help="if specified, do not dilate tracking mask.")
+    p.add_argument('--dilate-mask', action="store_true",
+                   help="if specified, apply binary dilation on the tracking mask.")
 
     p.add_argument('--append-previous-direction', action="store_true",
                    help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
@@ -105,7 +108,6 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
         streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
         directions[undone] = model.seq_next(streamlines_dwi[undone])
-        directions[undone] = directions[undone]
 
         # If a streamline makes a turn to tight, stop it.
         if sequences.shape[1] > 1:
@@ -142,6 +144,199 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
     # Trim sequences to obtain the streamlines.
     streamlines = [s[:l] for s, l in zip(sequences, streamlines_lengths)]
+
+    if backward_tracking_algo == 0:
+        return streamlines
+
+    if backward_tracking_algo == 1:
+        # Reset everything and start tracking from the opposite direction.
+        streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
+
+        sequences = seeds.copy()
+        if sequences.ndim == 2:
+            sequences = sequences[:, None, :]
+
+        directions = np.zeros((len(sequences), 3), dtype=np.float32)
+        last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
+
+        streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
+        undone = np.ones(len(sequences), dtype=bool)
+
+        model.seq_reset(batch_size=len(seeds))
+
+        # Tracking
+        print("Tracking backward...")
+        for i in range(max_nb_points):
+            if (i+1) % 100 == 0:
+                print("pts: {}/{}".format(i+1, max_nb_points))
+
+            streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
+            directions[undone] = model.seq_next(streamlines_dwi[undone])
+
+            if i == 0:
+                # Follow the opposite direction obtained from the seed points (and only for that point).
+                directions[undone] *= -1
+
+            # If a streamline makes a turn to tight, stop it.
+            if sequences.shape[1] > 1:
+                angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
+                model.seq_squeeze(tokeep=angles[undone] <= theta)
+                undone = np.logical_and(undone, angles <= theta)
+
+            last_directions[undone] = directions[undone]
+
+            # Make a step
+            directions[undone] = directions[undone] * step_size
+            sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
+            streamlines_lengths[:] += undone[:]
+
+            # If a streamline goes outside the wm mask, mark is as done.
+            if mask is not None:
+                last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
+                model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
+                undone = np.logical_and(undone, last_point_values > mask_threshold)
+
+            if undone.sum() == 0:
+                break
+
+        # Trim sequences to obtain the streamlines.
+        streamlines = [np.r_[s[::-1], seq[1:l]] for s, seq, l in zip(streamlines, sequences, streamlines_lengths)]
+        return streamlines
+
+    elif backward_tracking_algo == 2:
+        # Reset everything, kickstart the model with the first half of the streamline and resume tracking.
+        streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
+
+        # Reverse streamline
+        forward_streamlines_lengths = streamlines_lengths.copy()
+        r_directions = np.zeros((len(sequences), streamlines_lengths.max(), 3), dtype=sequences.dtype)
+        for i, l in enumerate(streamlines_lengths):
+            r_directions[i, :l-1] = -all_directions[i, :l-1][::-1]
+
+        # old_streamlines_lengths = streamlines_lengths  # DEBUG
+        # old_sequences = sequences  # DEBUG
+        new_sequences = sequences[range(len(sequences)), streamlines_lengths-1].copy()
+        sequences = new_sequences[:, None, :]
+
+        directions = np.zeros((len(sequences), 3), dtype=np.float32)
+        last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
+
+        streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
+        undone = np.ones(len(sequences), dtype=bool)
+
+        model.seq_reset(batch_size=len(seeds))
+
+        # Tracking
+        print("Tracking backward...")
+        for i in range(max_nb_points):
+            if (i+1) % 100 == 0:
+                print("pts: {}/{}".format(i+1, max_nb_points))
+
+            resuming = i < forward_streamlines_lengths-1
+
+            streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
+            directions[undone] = model.seq_next(streamlines_dwi[undone])
+
+            # If a streamline makes a turn to tight, stop it.
+            if sequences.shape[1] > 1:
+                # TEND-like approach
+                # directions[undone] = 0.5*last_directions[undone] + 0.5*directions[undone]
+
+                angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
+                model.seq_squeeze(tokeep=np.logical_or(angles[undone] <= theta, resuming[undone]))
+                undone = np.logical_or(np.logical_and(undone, angles <= theta), resuming)
+
+            # Overwrite directions for all streamlines still being kickstarted (resumed).
+            directions[resuming] = r_directions[resuming, i, :]
+            last_directions[undone] = directions[undone]
+
+            # Make a step
+            directions[undone] = directions[undone] * step_size
+            sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
+            streamlines_lengths[:] += undone[:]
+
+            # If a streamline goes outside the wm mask, mark is as done.
+            if mask is not None:
+                last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
+                model.seq_squeeze(tokeep=np.logical_or(last_point_values[undone] > mask_threshold, resuming[undone]))
+                undone = np.logical_or(np.logical_and(undone, last_point_values > mask_threshold), resuming)
+
+            if undone.sum() == 0:
+                break
+
+        # Trim sequences to obtain the streamlines.
+        streamlines = [s[:l] for s, l in zip(sequences, streamlines_lengths)]
+        return streamlines
+
+
+def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0):
+    streamlines_dwi = np.zeros((len(seeds), dwi.shape[-1]), dtype=np.float32)
+
+    # Forward tracking
+    # Prepare some data container and reset the model.
+    sequences = seeds.copy()
+    if sequences.ndim == 2:
+        sequences = sequences[:, None, :]
+
+    directions = np.zeros((len(seeds), 3), dtype=np.float32)
+    all_directions = np.zeros((len(seeds), 0, 3), dtype=np.float32)
+    last_directions = np.zeros((len(seeds), 3), dtype=np.float32)
+
+    streamlines_nb_pts = np.zeros(len(seeds), dtype=np.int16)
+    undone = np.ones(len(sequences), dtype=bool)
+
+    model.seq_reset(batch_size=len(seeds))
+    stopping_types_count = {'curv': 0,
+                            'mask': 0}
+
+    # Tracking
+    for i in range(max_nb_points):
+        if (i+1) % 100 == 0:
+            print("pts: {}/{}".format(i+1, max_nb_points))
+
+        directions[undone] = model.seq_next(sequences[undone, -1, :])   # Get next unnormalized directions
+        normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
+
+        # If a streamline makes a turn to tight, stop it.
+        if sequences.shape[1] > 1:
+            # TEND-like approach
+            # directions[undone] = 0.5*last_directions[undone] + 0.5*directions[undone]
+
+            angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
+            model.seq_squeeze(tokeep=angles[undone] <= theta)
+            stopping_types_count['curv'] += np.sum(angles[undone] > theta)
+            undone = np.logical_and(undone, angles <= theta)
+
+        all_directions = np.concatenate([all_directions, directions[:, None, :]], axis=1)
+        last_directions[undone] = normalized_directions[undone].copy()
+
+        # Make a step
+        # directions[undone] = directions[undone] * step_size  # Model should have learned the step size.
+        directions[np.logical_not(undone)] = np.nan  # Help debugging
+        sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
+        streamlines_nb_pts[:] += undone[:]
+
+        # If a streamline goes outside the wm mask, mark is as done.
+        if mask is not None:
+            last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
+            model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
+            stopping_types_count['mask'] += np.sum(last_point_values[undone] <= mask_threshold)
+            undone = np.logical_and(undone, last_point_values > mask_threshold)
+
+        sequences[np.logical_not(undone), i+1] = np.nan  # Help debugging
+
+        if undone.sum() == 0:
+            break
+
+    print("Max length: {}".format(streamlines_nb_pts.max()))
+    print("Stopping - mask: {:,}\t curv: {:,}".format(stopping_types_count['mask'], stopping_types_count['curv']))
+
+    # Trim sequences to obtain the streamlines.
+    streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_nb_pts)]
+
+    norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
+    avg_step_sizes = [np.mean(norm(s[1:]-s[:-1])) for s in streamlines]
+    print("Average step sizes: {:.2f} mm.".format(np.nanmean(avg_step_sizes)))
 
     if backward_tracking_algo == 0:
         return streamlines
@@ -281,10 +476,17 @@ def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78,
             for start in range(0, len(seeds), batch_size):
                 print("{:,} / {:,}".format(start, len(seeds)))
                 end = start+batch_size
-                new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
-                                        max_nb_points=max_nb_points, theta=theta,
-                                        mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
-                                        backward_tracking_algo=backward_tracking_algo)
+                if isinstance(model, GRU_Multistep_Gaussian):
+                    new_streamlines = track_interp(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
+                                                   max_nb_points=max_nb_points, theta=theta,
+                                                   mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
+                                                   backward_tracking_algo=backward_tracking_algo)
+                else:
+                    new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
+                                            max_nb_points=max_nb_points, theta=theta,
+                                            mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
+                                            backward_tracking_algo=backward_tracking_algo)
+
                 new_streamlines = compress_streamlines(new_streamlines)
                 tractogram.streamlines.extend(new_streamlines)
 
@@ -328,7 +530,6 @@ def get_max_angle_from_curvature(curvature, step_size):
     return theta
 
 
-
 def main():
     parser = build_argparser()
     args = parser.parse_args()
@@ -347,43 +548,6 @@ def main():
         hyperparams = smartutils.load_dict_from_json_file(pjoin(experiment_path, "hyperparams.json"))
     except FileNotFoundError:
         hyperparams = smartutils.load_dict_from_json_file(pjoin(experiment_path, "..", "hyperparams.json"))
-
-    with Timer("Loading model"):
-        if "classification" in hyperparams and hyperparams["classification"]:
-            if hyperparams["model"] == "lstm":
-                from learn2track.lstm import LSTM_Softmax
-                model_class = LSTM_Softmax
-            elif hyperparams["model"] == "lstm_hybrid":
-                from learn2track.lstm import LSTM_Hybrid
-                model_class = LSTM_Hybrid
-
-        elif "regression" in hyperparams and hyperparams["regression"]:
-            if hyperparams["model"] == "lstm":
-                from learn2track.lstm import LSTM_Regression
-                model_class = LSTM_Regression
-            elif hyperparams["model"] == "lstm_extraction":
-                from learn2track.lstm import LSTM_RegressionWithFeaturesExtraction
-                model_class = LSTM_RegressionWithFeaturesExtraction
-            if hyperparams["model"] == "gru":
-                from learn2track.gru import GRU_Regression
-                model_class = GRU_Regression
-
-                if args.append_previous_direction:
-                    raise NameError("Not implemented")
-                    from learn2track.gru import GRU_RegressionWithScheduledSampling
-                    model_class = GRU_RegressionWithScheduledSampling
-
-        else:
-            from learn2track.gru import GRU_Regression
-            model_class = GRU_Regression
-
-        # Load the actual model.
-        model = model_class.create(pjoin(experiment_path))  # Create new instance
-        model.load(pjoin(experiment_path))  # Restore state.
-        print(str(model))
-
-        if args.append_previous_direction:
-            model.scheduled_sampling_rate.var.set_value(1)
 
     with Timer("Loading DWIs"):
         # Load gradients table
@@ -469,15 +633,50 @@ def main():
 
             # plt.show()
 
-        from ipdb import set_trace as dbg
-        dbg()
+    with Timer("Loading model"):
+        kwargs = {}
+        if "classification" in hyperparams and hyperparams["classification"]:
+            if hyperparams["model"] == "lstm":
+                from learn2track.lstm import LSTM_Softmax
+                model_class = LSTM_Softmax
+            elif hyperparams["model"] == "lstm_hybrid":
+                from learn2track.lstm import LSTM_Hybrid
+                model_class = LSTM_Hybrid
 
-        # # TMP
-        # weights[weights>1.3] = 1.3
-        # weights[weights>0] -= 0.25002471 - weights[weights>0]  # TMP, so the mean is the same
+        elif "regression" in hyperparams and hyperparams["regression"]:
+            if hyperparams["model"] == "lstm":
+                from learn2track.lstm import LSTM_Regression
+                model_class = LSTM_Regression
+            elif hyperparams["model"] == "lstm_extraction":
+                from learn2track.lstm import LSTM_RegressionWithFeaturesExtraction
+                model_class = LSTM_RegressionWithFeaturesExtraction
+            if hyperparams["model"] == "gru":
+                from learn2track.gru import GRU_Regression
+                model_class = GRU_Regression
 
-    # from ipdb import set_trace as dbg
-    # dbg()
+                if args.append_previous_direction:
+                    raise NameError("Not implemented")
+                    from learn2track.gru import GRU_RegressionWithScheduledSampling
+                    model_class = GRU_RegressionWithScheduledSampling
+
+        elif hyperparams["model"] == "gru":
+            if "nb_steps_to_predict" in hyperparams:
+                from learn2track.gru import GRU_Multistep_Gaussian
+                model_class = GRU_Multistep_Gaussian
+                kwargs = {"dwi": weights,
+                          'seed': 1234  # Temp
+                          }
+            else:
+                from learn2track.gru import GRU_Regression
+                model_class = GRU_Regression
+
+        # Load the actual model.
+        model = model_class.create(pjoin(experiment_path), **kwargs)  # Create new instance
+        model.load(pjoin(experiment_path))  # Restore state.
+        print(str(model))
+
+        if args.append_previous_direction:
+            model.scheduled_sampling_rate.var.set_value(1)
 
     mask = None
     if args.mask is not None:
@@ -485,8 +684,9 @@ def main():
             mask_nii = nib.load(args.mask)
             mask = mask_nii.get_data()
             # Compute the affine allowing to evaluate the mask at some coordinates correctly.
+
             mask_affine = np.dot(affine_rasmm2dwivox, mask_nii.affine)
-            if not args.no_dilatation:
+            if args.dilate_mask:
                 import scipy
                 mask = scipy.ndimage.morphology.binary_dilation(mask).astype(mask.dtype)
 
@@ -497,7 +697,7 @@ def main():
             if filename.endswith('.trk') or filename.endswith('.tck'):
                 tfile = nib.streamlines.load(filename)
                 # Send the streamlines to voxel since that's where we'll track.
-                tfile.tractoram.apply_affine(affine_rasmm2dwivox)
+                tfile.tractogram.apply_affine(affine_rasmm2dwivox)
 
                 # Use extremities of the streamlines as seeding points.
                 seeds += [s[0] for s in tfile.streamlines]
@@ -515,7 +715,7 @@ def main():
                     seeds_in_voxel = nib.affines.apply_affine(seeds_affine, seeds_in_voxel)
                     seeds.extend(seeds_in_voxel)
 
-        seeds = np.array(seeds)
+        seeds = np.array(seeds, dtype=theano.config.floatX)
 
     with Timer("Tracking in the diffusion voxel space"):
         voxel_sizes = np.asarray(dwi.header.get_zooms()[:3])

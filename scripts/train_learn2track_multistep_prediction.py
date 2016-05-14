@@ -40,7 +40,7 @@ from learn2track.factories import optimizer_factory
 from learn2track.losses import MultistepMultivariateGaussianLossForSequences
 #from learn2track.losses import L2DistanceWithBinaryCrossEntropy, L2DistanceForSequences, NLLForSequenceOfDirections, ErrorForSequenceOfDirections
 from learn2track.losses import ErrorForSequenceWithClassTarget, NLLForSequenceWithClassTarget, L2DistanceWithBinaryCrossEntropy
-from learn2track.batch_schedulers import MultistepSequenceBatchScheduler
+from learn2track.batch_schedulers import MultistepSequenceBatchScheduler, MultistepSequenceBatchSchedulerWithoutMask
 
 # DATASETS = ["ismrm2015_challenge"]
 MODELS = ['gru']
@@ -183,12 +183,18 @@ def main():
         trainset, validset, testset = utils.load_streamlines_dataset(args.dwi, args.dataset)
         print("Datasets:", len(trainset), len(validset), len(testset))
 
-        batch_scheduler = MultistepSequenceBatchScheduler(trainset, batch_size=args.batch_size,
-                                                          k=args.nb_steps_to_predict,
-                                                          noisy_streamlines_sigma=args.noisy_streamlines_sigma,
-                                                          nb_updates_per_epoch=args.nb_updates_per_epoch,
-                                                          seed=args.seed,
-                                                          include_last_point=False)
+        batch_scheduler = MultistepSequenceBatchSchedulerWithoutMask(trainset, batch_size=args.batch_size,
+                                                                     k=args.nb_steps_to_predict,
+                                                                     noisy_streamlines_sigma=args.noisy_streamlines_sigma,
+                                                                     nb_updates_per_epoch=args.nb_updates_per_epoch,
+                                                                     seed=args.seed,
+                                                                     include_last_point=False)
+        # batch_scheduler = MultistepSequenceBatchScheduler(trainset, batch_size=args.batch_size,
+        #                                                   k=args.nb_steps_to_predict,
+        #                                                   noisy_streamlines_sigma=args.noisy_streamlines_sigma,
+        #                                                   nb_updates_per_epoch=args.nb_updates_per_epoch,
+        #                                                   seed=args.seed,
+        #                                                   include_last_point=False)
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
         print (batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
 
@@ -230,6 +236,7 @@ def main():
         # Print average training loss.
         trainer.append_task(tasks.Print("Avg. training loss: {}", avg_loss))
         trainer.append_task(tasks.Print("Avg. MSE:           {}", avg_mean_sqr_error))
+        # trainer.append_task(tasks.PrintUpdateDuration())
 
         # Print NLL mean/stderror.
         valid_loss = MultistepMultivariateGaussianLossForSequences(model, validset,

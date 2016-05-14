@@ -1,3 +1,4 @@
+import os
 from os.path import join as pjoin
 
 import numpy as np
@@ -617,6 +618,7 @@ class GRU_Multistep_Gaussian(GRU):
         hyperparameters['target_size'] = self.target_size
         hyperparameters['k'] = self.k
         hyperparameters['m'] = self.m
+        hyperparameters['seed'] = self.seed
         return hyperparameters
 
     @property
@@ -637,7 +639,7 @@ class GRU_Multistep_Gaussian(GRU):
 
         # Object to hold the distribution parameters at each prediction horizon
         # k_distribution_params.shape : (batch_size, K, target_size, 2)
-        k_distribution_params = T.zeros((batch_size, self.k, self.target_size, 2))
+        # k_distribution_params = T.zeros((batch_size, self.k, self.target_size, 2))
 
         # Get diffusion data.
         # data_at_coords.shape : (batch_size, input_size)
@@ -650,7 +652,8 @@ class GRU_Multistep_Gaussian(GRU):
         # Compute the distribution parameters for step (t)
         # distribution_params.shape : (batch_size, target_size, 2)
         distribution_params = self._predict_distribution_params(next_hidden_state[-1])
-        k_distribution_params = T.set_subtensor(k_distribution_params[:, 0, :, :], distribution_params)
+        # k_distribution_params = T.set_subtensor(k_distribution_params[:, 0, :, :], distribution_params)
+        k_distribution_params = [distribution_params]
 
         sample_hidden_state = next_hidden_state
 
@@ -666,7 +669,10 @@ class GRU_Multistep_Gaussian(GRU):
             # Compute the sample distribution parameters for step (t+k)
             sample_hidden_state = super()._fprop(data_at_coords, *sample_hidden_state)
             distribution_params = self._predict_distribution_params(sample_hidden_state[-1])
-            k_distribution_params = T.set_subtensor(k_distribution_params[:, k, :, :], distribution_params)
+            # k_distribution_params = T.set_subtensor(k_distribution_params[:, k, :, :], distribution_params)
+            k_distribution_params += [distribution_params]
+
+        k_distribution_params = T.stack(k_distribution_params, axis=1)
 
         return next_hidden_state + (k_distribution_params,)
 
@@ -674,7 +680,10 @@ class GRU_Multistep_Gaussian(GRU):
     def _get_sample(distribution_parameters, noise):
         # distribution_parameters.shape : (batch_size, target_size, 2)
         # noise.shape : (batch_size, target_size)
-        return distribution_parameters[:, :, 0] + noise * distribution_parameters[:, :, 1]
+        mu = distribution_parameters[:, :, 0]
+        # Use T.exp to retrieve a positive sigma
+        sigma = T.exp(distribution_parameters[:, :, 1])
+        return mu + noise * sigma
 
     def _predict_distribution_params(self, hidden_state):
         # regression layer outputs an array [mu_1, log(sigma_1), mu_2, log(sigma_2), mu_3, log(sigma_3)] for each batch example
@@ -682,8 +691,8 @@ class GRU_Multistep_Gaussian(GRU):
         regression_output = T.reshape(self.layer_regression.fprop(hidden_state), (hidden_state.shape[0], self.target_size, 2))
 
         # Use T.exp to retrieve a positive sigma
-        distribution_params = T.set_subtensor(regression_output[:, :, 1], T.exp(regression_output[:, :, 1]))
-
+        # distribution_params = T.set_subtensor(regression_output[:, :, 1], T.exp(regression_output[:, :, 1]))
+        distribution_params = regression_output
         # distribution_params.shape : (batch_size, target_size, 2)
         return distribution_params
 
@@ -700,8 +709,11 @@ class GRU_Multistep_Gaussian(GRU):
             outputs_info_h.append(T.zeros((inputs.shape[0], hidden_size)))
 
         # results.shape : n_layers * (seq_len, batch_size*M, layer_size), (seq_len, batch_size*M, K, target_size, 2)
-        results, updates = theano.scan(fn=self._fprop, outputs_info=outputs_info_h + [None],
-                                       sequences=[T.transpose(inputs, axes=(1, 0, 2))])  # We want to scan over sequence elements, not the examples.
+        results, updates = theano.scan(fn=self._fprop,
+                                       sequences=[T.transpose(inputs, axes=(1, 0, 2))],  # We want to scan over sequence elements, not the examples.
+                                       outputs_info=outputs_info_h + [None],
+                                       non_sequences=self.parameters + [self.dwi],
+                                       strict=True)
 
         self.graph_updates = updates
 
@@ -738,8 +750,12 @@ class GRU_Multistep_Gaussian(GRU):
 
     def seq_next(self, input):
         """ Returns the next (t+1) prediction in every sequence of the batch.
-            self.k should be fixed to 1 in order to avoid useless computations from (t+2) to (t+k)  """
+
+            Note: self.k will be fixed to 1 in order to avoid useless computations from (t+2) to (t+k).
+        """
         if self._gen is None:
+            k_bak = self.k
+            self.k = 1  # Temporarily set $k$ to one.
             self.seq_reset(batch_size=len(input))
 
             X = T.TensorVariable(type=T.TensorType("floatX", [False] * input.ndim), name='X')
@@ -753,12 +769,47 @@ class GRU_Multistep_Gaussian(GRU):
             output = new_states[-1]
 
             # next_step_predictions.shape : (batch_size, target_size)
-            next_step_predictions = output[:, 0, :, 0]
+            mu = output[:, 0, :, 0]
+            next_step_predictions = mu
 
             updates = OrderedDict()
             for i in range(len(self.hidden_sizes)):
                 updates[self.states_h[i]] = new_states_h[i]
 
             self._gen = theano.function([X], next_step_predictions, updates=updates)
+            self.k = k_bak  # Restore original $k$.
 
         return self._gen(input)
+
+    @classmethod
+    def create(cls, path, **kwargs):
+        loaddir = pjoin(path, cls.__name__)
+        hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
+        hyperparams.update(kwargs)
+        model = cls(**hyperparams)
+        model.load(path)
+        return model
+
+    def save(self, path):
+        super().save(path)
+
+        savedir = smartutils.create_folder(pjoin(path, type(self).__name__))
+        state = {
+            "version": 1,
+            "_srng_rstate": self.srng.rstate,
+            "_srng_state_updates": [state_update[0].get_value() for state_update in self.srng.state_updates]}
+
+        np.savez(pjoin(savedir, "state.npz"), **state)
+
+    def load(self, path):
+        super().load(path)
+
+        loaddir = pjoin(path, type(self).__name__)
+        # TODO: remove the following file check (only there for backward compatibility).
+        if os.path.isfile(pjoin(loaddir, 'state.npz')):
+            state = np.load(pjoin(loaddir, 'state.npz'))
+
+            self.srng.rstate[:] = state['_srng_rstate']
+
+            for state_update, saved_state in zip(self.srng.state_updates, state["_srng_state_updates"]):
+                state_update[0].set_value(saved_state)
