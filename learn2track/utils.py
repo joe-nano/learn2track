@@ -57,7 +57,7 @@ class StreamlinesData(object):
                  bundle_names=self.bundle_names)
 
 
-def load_streamlines_dataset(dwi_filename, streamlines_filename, name="ISMRM15_Challenge"):
+def load_streamlines_dataset(dwi_filename, streamlines_filename, name="ISMRM15_Challenge", use_sh_coeffs=False):
     import nibabel as nib
     from dipy.io.gradients import read_bvals_bvecs
 
@@ -68,7 +68,10 @@ def load_streamlines_dataset(dwi_filename, streamlines_filename, name="ISMRM15_C
         bvals, bvecs = read_bvals_bvecs(bvals_filename, bvecs_filename)
 
         dwi = nib.load(dwi_filename)
-        volume = resample_dwi(dwi, bvals, bvecs).astype(np.float32)  # Resample to 100 directions
+        if use_sh_coeffs:
+            volume = get_spherical_harmonics_coefficients(dwi, bvals, bvecs).astype(np.float32)  # Use 45 spherical harmonic coefficients
+        else:
+            volume = resample_dwi(dwi, bvals, bvecs).astype(np.float32)  # Resample to 100 directions
 
     with Timer("Loading streamlines"):
         basename = streamlines_filename[:-len('.npz')]
@@ -438,8 +441,9 @@ def normalize_dwi(dwi, bvals):
     b0 = dwi_weights[..., [sorted_bvals_idx[0]]]
     # Keep only b-value greater than 0
     weights = dwi_weights[..., sorted_bvals_idx[nb_b0s:]]
-    # Make sure in every voxels weights are lower than ones from the b0. (should not happen)
-    #weights_normed = np.minimum(weights, b0)
+    # Make sure in every voxels weights are lower than ones from the b0.
+    # Should not happen, but with the noise we never know!
+    weights = np.minimum(weights, b0)
     # Normalize dwi using the b0.
     weights_normed = weights / b0
     weights_normed[np.logical_not(np.isfinite(weights_normed))] = 0.
@@ -447,8 +451,8 @@ def normalize_dwi(dwi, bvals):
     return weights_normed
 
 
-def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
-    """ Resamples a diffusion signal according to a set of directions using spherical harmonics.
+def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0.006):
+    """ Compute coefficients of the spherical harmonics basis.
 
     Parameters
     -----------
@@ -459,12 +463,8 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
     bvecs : ndarray shape (N, 3)
         Directions of the diffusion signal. Directions are
         assumed to be only on the hemisphere.
-    directions : `dipy.core.sphere.Sphere` object, optional
-        Directions the diffusion signal will be resampled to. Directions are
-        assumed to be on the whole sphere, not the hemisphere like bvecs.
-        If omitted, 100 directions evenly distributed on the sphere will be used.
     sh_order : int, optional
-        SH order. Default: 4
+        SH order. Default: 8
     smooth : float, optional
         Lambda-regularization in the SH fit. Default: 0.006.
 
@@ -473,8 +473,7 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
     ndarray
         Diffusion weights resampled according to `sphere`.
     """
-    from dipy.data import get_sphere
-    from dipy.core.sphere import Sphere, HemiSphere
+    from dipy.core.sphere import HemiSphere
     from dipy.reconst.shm import sph_harm_lookup, smooth_pinv
 
     # Start by normalizing DWI with the B0.
@@ -494,12 +493,47 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
     L = -n * (n + 1)
     invB = smooth_pinv(Ba, np.sqrt(smooth) * L)
     data_sh = np.dot(weights, invB.T)
+    return data_sh
+
+
+def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006):
+    """ Resamples a diffusion signal according to a set of directions using spherical harmonics.
+
+    Parameters
+    -----------
+    dwi : `nibabel.NiftiImage` object
+        Diffusion signal as weighted images (4D).
+    bvals : ndarray shape (N,)
+        B-values used with each direction.
+    bvecs : ndarray shape (N, 3)
+        Directions of the diffusion signal. Directions are
+        assumed to be only on the hemisphere.
+    directions : `dipy.core.sphere.Sphere` object, optional
+        Directions the diffusion signal will be resampled to. Directions are
+        assumed to be on the whole sphere, not the hemisphere like bvecs.
+        If omitted, 100 directions evenly distributed on the sphere will be used.
+    sh_order : int, optional
+        SH order. Default: 8
+    smooth : float, optional
+        Lambda-regularization in the SH fit. Default: 0.006.
+
+    Returns
+    -------
+    ndarray
+        Diffusion weights resampled according to `sphere`.
+    """
+    from dipy.data import get_sphere
+    from dipy.core.sphere import Sphere
+    from dipy.reconst.shm import sph_harm_lookup
+
+    data_sh = get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=sh_order, smooth=smooth)
 
     sphere = get_sphere('repulsion100')
     # sphere = get_sphere('repulsion724')
     if directions is not None:
         sphere = Sphere(xyz=bvecs[1:])
 
+    sph_harm_basis = sph_harm_lookup.get('mrtrix')
     Ba, m, n = sph_harm_basis(sh_order, sphere.theta, sphere.phi)
     data_resampled = np.dot(data_sh, Ba.T)
     return data_resampled

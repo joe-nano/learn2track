@@ -86,6 +86,7 @@ def build_argparser():
     dataset = p.add_argument_group("Data options")
     dataset.add_argument('dwi', help='file containing a diffusion weighted image (.nii|.nii.gz).')
     dataset.add_argument('dataset', help='file containing streamlines coordinates used as training data (.npz).')
+    dataset.add_argument('--use-sh-coeffs', action='store_true', help='if specified, use spherical harmonics coefficients as input instead of the diffusion values.')
 
     duration = p.add_argument_group("Training duration options")
     duration.add_argument('--max-epoch', type=int, metavar='N', help='if specified, train for a maximum of N epochs.')
@@ -97,7 +98,7 @@ def build_argparser():
     # Training options
     training = p.add_argument_group("Training options")
     training.add_argument('--batch-size', type=int,
-                          help='size of the batch to use when training the model. Default: 100.', default=100)
+                          help='size of the batch to use when training the model. Default: 128.', default=128)
     training.add_argument('--nb-updates-per-epoch', type=int,
                           help=('If specified, a batch will be composed of streamlines drawn from each different bundle (similar amount) at each update.'
                                 ' Default: go through all streamlines in the trainset exactly once.'))
@@ -180,7 +181,7 @@ def main():
     print("Resuming:" if resuming else "Creating:", experiment_path)
 
     with Timer("Loading dataset"):
-        trainset, validset, testset = utils.load_streamlines_dataset(args.dwi, args.dataset)
+        trainset, validset, testset = utils.load_streamlines_dataset(args.dwi, args.dataset, use_sh_coeffs=args.use_sh_coeffs)
         print("Datasets:", len(trainset), len(validset), len(testset))
 
         batch_scheduler = MultistepSequenceBatchSchedulerWithoutMask(trainset, batch_size=args.batch_size,
@@ -236,6 +237,8 @@ def main():
         # Print average training loss.
         trainer.append_task(tasks.Print("Avg. training loss: {}", avg_loss))
         trainer.append_task(tasks.Print("Avg. MSE:           {}", avg_mean_sqr_error))
+        # trainer.append_task(tasks.Print("Avg. training loss: {}", avg_loss, each_k_update=1))
+        # trainer.append_task(tasks.Print("Avg. MSE:           {}", avg_mean_sqr_error, each_k_update=1))
         # trainer.append_task(tasks.PrintUpdateDuration())
 
         # Print NLL mean/stderror.

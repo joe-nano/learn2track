@@ -458,7 +458,7 @@ class MultistepSequenceBatchSchedulerWithoutMask(BatchScheduler):
 
     @property
     def input_size(self):
-        return self.dataset.volume.shape[-1]  # Number of diffusion directions
+        return self.dataset.volume.shape[-1]  # Number of diffusion directions or coefficients of spherical harmonics
 
     @property
     def target_size(self):
