@@ -74,20 +74,20 @@ def get_regression_results(model, dataset, batch_size, k=10, Ms=[1, 10]):
         results += [{"M": M,
                      "nll_per_k": [
                         {"k": 1,
-                         "nll_mean": np.mean(k_nlls_per_seq[:, 1-1], axis=0),
-                         "nll_stderr": np.std(k_nlls_per_seq[:, 1-1], axis=0)/np.sqrt(len(k_nlls_per_seq))
+                         "nll_mean": float(np.mean(k_nlls_per_seq[:, 1-1], axis=0)),
+                         "nll_stderr": float(np.std(k_nlls_per_seq[:, 1-1], axis=0)/np.sqrt(len(k_nlls_per_seq)))
                          },
                         {"k": 5,
-                         "nll_mean": np.mean(k_nlls_per_seq[:, 5-1], axis=0),
-                         "nll_stderr": np.std(k_nlls_per_seq[:, 5-1], axis=0)/np.sqrt(len(k_nlls_per_seq))
+                         "nll_mean": float(np.mean(k_nlls_per_seq[:, 5-1], axis=0)),
+                         "nll_stderr": float(np.std(k_nlls_per_seq[:, 5-1], axis=0)/np.sqrt(len(k_nlls_per_seq)))
                          },
                         {"k": 10,
-                         "nll_mean": np.mean(k_nlls_per_seq[:, 10-1], axis=0),
-                         "nll_stderr": np.std(k_nlls_per_seq[:, 10-1], axis=0)/np.sqrt(len(k_nlls_per_seq))
+                         "nll_mean": float(np.mean(k_nlls_per_seq[:, 10-1], axis=0)),
+                         "nll_stderr": float(np.std(k_nlls_per_seq[:, 10-1], axis=0)/np.sqrt(len(k_nlls_per_seq)))
                          }
                      ],
-                     "nll_mean": np.mean(np.mean(k_nlls_per_seq, axis=1), axis=0),
-                     "nll_stderr": np.std(np.mean(k_nlls_per_seq, axis=1), axis=0)/np.sqrt(len(k_nlls_per_seq))
+                     "nll_mean": float(np.mean(np.mean(k_nlls_per_seq, axis=1), axis=0)),
+                     "nll_stderr": float(np.std(np.mean(k_nlls_per_seq, axis=1), axis=0)/np.sqrt(len(k_nlls_per_seq)))
                      }
                     ]
 
