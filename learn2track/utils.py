@@ -658,7 +658,8 @@ def log_variables(batch_scheduler, *symb_vars):
                         on_unused_input='ignore')
 
     log = [[] for _ in range(len(symb_vars))]
-    for _ in batch_scheduler:
+    for j in batch_scheduler:
+        print(j)
         for i, e in enumerate(f()):
             log[i].append(e.copy())
 

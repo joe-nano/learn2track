@@ -261,11 +261,12 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         #   => |\Sigma| = \prod_n \sigma_n^2
         #   => (x - \mu)^T \Sigma^-1 (x - \mu) = \sum_n ((x_n - \mu_n) / \sigma_n)^2
         likelihood = -0.5 * (self.target_size * np.float32(np.log(2 * np.pi)) + T.sum(2 * T.log(sigma) + T.sqr((targets - mu) / sigma), axis=4))
+        self.likelihood = likelihood
 
         # nll.shape :(batch_size, seq_len, K)
         nll = T.log(self.nb_samples) - logsumexp(likelihood, axis=3, keepdims=False)
 
-        # Return NLLs summed over K, meaned over sequence steps
+        # Return NLLs meaned over K, meaned over sequence steps
         if mask is not None:
             return T.sum(T.mean(nll, axis=2) * mask, axis=1) / T.sum(mask, axis=1)
         else:

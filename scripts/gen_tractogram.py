@@ -672,7 +672,6 @@ def main():
 
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path), **kwargs)  # Create new instance
-        model.load(pjoin(experiment_path))  # Restore state.
         print(str(model))
 
         if args.append_previous_direction:
