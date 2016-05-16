@@ -268,7 +268,7 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         # Average over sequence steps.
         # k_nlls_per_seq.shape :(batch_size, K)
         if mask is not None:
-            self.k_nlls_per_seq = T.sum(self.k_nlls_per_timestep * mask, axis=1) / T.sum(mask, axis=1)
+            self.k_nlls_per_seq = T.sum(self.k_nlls_per_timestep * mask[:, :, None], axis=1) / T.sum(mask, axis=1, keepdims=True)
         else:
             self.k_nlls_per_seq = T.mean(self.k_nlls_per_timestep, axis=1)
 
