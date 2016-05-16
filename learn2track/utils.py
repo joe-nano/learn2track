@@ -649,11 +649,12 @@ def softmax(x, axis=None):
     return T.exp(x - logsumexp(x, axis=axis, keepdims=True))
 
 
-def log_variables(batch_scheduler, *symb_vars):
+def log_variables(batch_scheduler, model, *symb_vars):
     # Gather updates from the optimizer and the batch scheduler.
     f = theano.function([],
                         symb_vars,
                         givens=batch_scheduler.givens,
+                        updates=model.updates,
                         name="compute_loss",
                         on_unused_input='ignore')
 

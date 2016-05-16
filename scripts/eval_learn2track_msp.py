@@ -58,7 +58,7 @@ def get_regression_results(model, dataset, batch_size, k=10, Ms=[1, 10]):
 
         loss.losses  # Hack to generate update dict in loss :(
         # masks.shape = (dataset_len, seq_len)
-        l2_error, lls, masks = log_variables(batch_scheduler, loss.L2_error_per_item, loss.likelihood, dataset.symb_mask*1)
+        l2_error, lls, masks = log_variables(batch_scheduler, model, loss.L2_error_per_item, loss.likelihood, dataset.symb_mask*1)
 
         # Average the M samples
         # nlls_per_timestep.shape = (dataset_len, seq_len, K)
