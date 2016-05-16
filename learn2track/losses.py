@@ -261,13 +261,18 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         #   => |\Sigma| = \prod_n \sigma_n^2
         #   => (x - \mu)^T \Sigma^-1 (x - \mu) = \sum_n ((x_n - \mu_n) / \sigma_n)^2
         likelihood = -0.5 * (self.target_size * np.float32(np.log(2 * np.pi)) + T.sum(2 * T.log(sigma) + T.sqr((targets - mu) / sigma), axis=4))
-        self.likelihood = likelihood
 
-        # nll.shape :(batch_size, seq_len, K)
-        nll = T.log(self.nb_samples) - logsumexp(likelihood, axis=3, keepdims=False)
+        # k_nlls_per_timestep.shape :(batch_size, seq_len, K)
+        self.k_nlls_per_timestep = T.log(self.nb_samples) - logsumexp(likelihood, axis=3, keepdims=False)
 
-        # Return NLLs meaned over K, meaned over sequence steps
+        # Average over sequence steps.
+        # k_nlls_per_seq.shape :(batch_size, K)
         if mask is not None:
-            return T.sum(T.mean(nll, axis=2) * mask, axis=1) / T.sum(mask, axis=1)
+            self.k_nlls_per_seq = T.sum(self.k_nlls_per_timestep * mask, axis=1) / T.sum(mask, axis=1)
         else:
-            return T.mean(T.mean(nll, axis=2), axis=1)
+            self.k_nlls_per_seq = T.mean(self.k_nlls_per_timestep, axis=1)
+
+        # Average over K
+        # nlls.shape :(batch_size,)
+        self.nlls = T.mean(self.k_nlls_per_seq, axis=1)
+        return self.nlls

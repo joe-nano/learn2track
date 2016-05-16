@@ -664,4 +664,5 @@ def log_variables(batch_scheduler, model, *symb_vars):
         for i, e in enumerate(f()):
             log[i].append(e.copy())
 
-    return [list(itertools.chain(*l)) for l in log]
+    #return [list(itertools.chain(*l)) for l in log]
+    return log#[list(itertools.chain(*l)) for l in log]

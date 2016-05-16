@@ -43,11 +43,11 @@ def buildArgsParser():
 
 
 def get_regression_results(model, dataset, batch_size, k=10, Ms=[1, 10]):
-    results = []
+    model.k = k
 
+    results = []
     for M in Ms:
         model.m = M
-        model.k = k
         loss = MultistepMultivariateGaussianLossForSequences(model, dataset, nb_samples=M, target_size=3)
         batch_scheduler = MultistepSequenceBatchScheduler(dataset,
                                                           batch_size=batch_size,
@@ -57,35 +57,37 @@ def get_regression_results(model, dataset, batch_size, k=10, Ms=[1, 10]):
                                                           seed=1234)
 
         loss.losses  # Hack to generate update dict in loss :(
-        # masks.shape = (dataset_len, seq_len)
-        l2_error, lls, masks = log_variables(batch_scheduler, model, loss.L2_error_per_item, loss.likelihood, dataset.symb_mask*1)
+        # k_nlls_per_seq.shape = [(batch_size, K)] * n_batches
+        # masks.shape = [(batch_size, seq_len)] * n_batches
+        # l2_errors.shape = [(batch_size, seq_len)] * n_batches
+        k_nlls_per_seq, masks, l2_error = log_variables(batch_scheduler, model, loss.k_nlls_per_seq, dataset.symb_mask*1, loss.L2_error_per_item)
 
-        # Average the M samples
-        # nlls_per_timestep.shape = (dataset_len, seq_len, K)
-        nlls_per_timestep = np.log(M) - np.logaddexp.reduce(lls, axis=3)
-        # avg_nlls_per_seq.shape = (dataset_len, K)
-        avg_nlls_per_seq = np.sum(nlls_per_timestep * masks[:, :, None], axis=1) / np.sum(masks, axis=1)
+        # Concatenate all batches
+        # k_nlls_per_seq : (dataset_len, K)
+        k_nlls_per_seq = np.concatenate(k_nlls_per_seq, axis=0)
 
+        masks = list(itertools.chain(*masks))
+        l2_error = list(itertools.chain(*l2_error))
         timesteps_l2_error = ArraySequence([l[:int(m.sum())] for l, m in zip(l2_error, masks)])
         sequences_mean_l2_error = np.array([l.mean() for l in timesteps_l2_error])
 
         results += [{"M": M,
                      "nll_per_k": [
                         {"k": 1,
-                         "nll_mean": np.mean(avg_nlls_per_seq[:, 1-1], axis=0),
-                         "nll_stderr": np.std(avg_nlls_per_seq[:, 1-1], axis=0)/np.sqrt(len(avg_nlls_per_seq))
+                         "nll_mean": np.mean(k_nlls_per_seq[:, 1-1], axis=0),
+                         "nll_stderr": np.std(k_nlls_per_seq[:, 1-1], axis=0)/np.sqrt(len(k_nlls_per_seq))
                          },
                         {"k": 5,
-                         "nll_mean": np.mean(avg_nlls_per_seq[:, 5-1], axis=0),
-                         "nll_stderr": np.std(avg_nlls_per_seq[:, 5-1], axis=0)/np.sqrt(len(avg_nlls_per_seq))
+                         "nll_mean": np.mean(k_nlls_per_seq[:, 5-1], axis=0),
+                         "nll_stderr": np.std(k_nlls_per_seq[:, 5-1], axis=0)/np.sqrt(len(k_nlls_per_seq))
                          },
                         {"k": 10,
-                         "nll_mean": np.mean(avg_nlls_per_seq[:, 10-1], axis=0),
-                         "nll_stderr": np.std(avg_nlls_per_seq[:, 10-1], axis=0)/np.sqrt(len(avg_nlls_per_seq))
+                         "nll_mean": np.mean(k_nlls_per_seq[:, 10-1], axis=0),
+                         "nll_stderr": np.std(k_nlls_per_seq[:, 10-1], axis=0)/np.sqrt(len(k_nlls_per_seq))
                          }
                      ],
-                     "nll_mean": np.mean(np.mean(avg_nlls_per_seq, axis=1), axis=0),
-                     "nll_stderr": np.std(np.mean(avg_nlls_per_seq, axis=1), axis=0)/np.sqrt(len(avg_nlls_per_seq))
+                     "nll_mean": np.mean(np.mean(k_nlls_per_seq, axis=1), axis=0),
+                     "nll_stderr": np.std(np.mean(k_nlls_per_seq, axis=1), axis=0)/np.sqrt(len(k_nlls_per_seq))
                      }
                     ]
 
