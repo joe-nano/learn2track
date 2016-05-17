@@ -164,7 +164,8 @@ def main():
     with Timer("Loading dataset"):
         dataset_file = args.dataset if args.dataset is not None else hyperparams['dataset']
         dwi_file = args.dwi if args.dwi is not None else hyperparams['dwi']
-        trainset, validset, testset = utils.load_streamlines_dataset(dwi_file, dataset_file)
+        trainset, validset, testset = utils.load_streamlines_dataset(dwi_file, dataset_file,
+                                                                     use_sh_coeffs=hyperparams.get("use_sh_coeffs", False))
         print("Datasets:", len(trainset), len(validset), len(testset))
 
     with Timer("Loading model"):

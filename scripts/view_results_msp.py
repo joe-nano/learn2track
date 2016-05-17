@@ -111,6 +111,7 @@ def extract_result_from_experiment(e, k, M, k2idx, m2idx):
     entry["Nb. Samples"] = e.hyperparams.get("nb_samples", "")
     entry["Nb. Steps"] = e.hyperparams.get("nb_steps_to_predict", "")
     entry["Batch Size"] = e.hyperparams.get("batch_size", "")
+    entry["SH Coeffs"] = e.hyperparams.get("use_sh_coeffs", False)
     entry["Optimizer"] = get_optimizer(e)
     entry["Optimizer params"] = e.hyperparams.get(get_optimizer(e), "")
     entry["Nb. updates/epoch"] = e.hyperparams.get("nb_updates_per_epoch", "")

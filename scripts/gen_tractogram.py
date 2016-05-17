@@ -270,8 +270,6 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
 
 def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0):
-    streamlines_dwi = np.zeros((len(seeds), dwi.shape[-1]), dtype=np.float32)
-
     # Forward tracking
     # Prepare some data container and reset the model.
     sequences = seeds.copy()
@@ -282,7 +280,7 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
     all_directions = np.zeros((len(seeds), 0, 3), dtype=np.float32)
     last_directions = np.zeros((len(seeds), 3), dtype=np.float32)
 
-    streamlines_nb_pts = np.zeros(len(seeds), dtype=np.int16)
+    streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
     undone = np.ones(len(sequences), dtype=bool)
 
     model.seq_reset(batch_size=len(seeds))
@@ -314,9 +312,9 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
         # directions[undone] = directions[undone] * step_size  # Model should have learned the step size.
         directions[np.logical_not(undone)] = np.nan  # Help debugging
         sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
-        streamlines_nb_pts[:] += undone[:]
+        streamlines_lengths[:] += undone[:]
 
-        # If a streamline goes outside the wm mask, mark is as done.
+        # If a streamline goes outside the wm mask, mark it as done.
         if mask is not None:
             last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
             model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
@@ -328,11 +326,11 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
         if undone.sum() == 0:
             break
 
-    print("Max length: {}".format(streamlines_nb_pts.max()))
+    print("Max length: {}".format(streamlines_lengths.max()))
     print("Stopping - mask: {:,}\t curv: {:,}".format(stopping_types_count['mask'], stopping_types_count['curv']))
 
     # Trim sequences to obtain the streamlines.
-    streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_nb_pts)]
+    streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_lengths)]
 
     norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
     avg_step_sizes = [np.mean(norm(s[1:]-s[:-1])) for s in streamlines]
@@ -343,7 +341,6 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
 
     if backward_tracking_algo == 1:
         # Reset everything and start tracking from the opposite direction.
-        streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
 
         sequences = seeds.copy()
         if sequences.ndim == 2:
@@ -363,8 +360,8 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
             if (i+1) % 100 == 0:
                 print("pts: {}/{}".format(i+1, max_nb_points))
 
-            streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
-            directions[undone] = model.seq_next(streamlines_dwi[undone])
+            directions[undone] = model.seq_next(sequences[undone, -1, :])   # Get next unnormalized directions
+            normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
 
             if i == 0:
                 # Follow the opposite direction obtained from the seed points (and only for that point).
@@ -372,18 +369,17 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
 
             # If a streamline makes a turn to tight, stop it.
             if sequences.shape[1] > 1:
-                angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
+                angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
                 model.seq_squeeze(tokeep=angles[undone] <= theta)
                 undone = np.logical_and(undone, angles <= theta)
 
-            last_directions[undone] = directions[undone]
+            last_directions[undone] = normalized_directions[undone].copy()
 
             # Make a step
-            directions[undone] = directions[undone] * step_size
             sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
             streamlines_lengths[:] += undone[:]
 
-            # If a streamline goes outside the wm mask, mark is as done.
+            # If a streamline goes outside the wm mask, mark it as done.
             if mask is not None:
                 last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
                 model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
@@ -398,7 +394,6 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
 
     elif backward_tracking_algo == 2:
         # Reset everything, kickstart the model with the first half of the streamline and resume tracking.
-        streamlines_dwi = np.zeros((len(sequences), dwi.shape[-1]), dtype=np.float32)
 
         # Reverse streamline
         forward_streamlines_lengths = streamlines_lengths.copy()
@@ -427,29 +422,27 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
 
             resuming = i < forward_streamlines_lengths-1
 
-            streamlines_dwi[undone] = map_coordinates_3d_4d(dwi, sequences[undone, -1, :])
-            directions[undone] = model.seq_next(streamlines_dwi[undone])
-
+            directions[undone] = model.seq_next(sequences[undone, -1, :])   # Get next unnormalized directions
+            normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
 
             # If a streamline makes a turn to tight, stop it.
             if sequences.shape[1] > 1:
                 # TEND-like approach
                 # directions[undone] = 0.5*last_directions[undone] + 0.5*directions[undone]
 
-                angles = np.arccos(np.sum(last_directions * directions, axis=1))  # Normed directions.
+                angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
                 model.seq_squeeze(tokeep=np.logical_or(angles[undone] <= theta, resuming[undone]))
                 undone = np.logical_or(np.logical_and(undone, angles <= theta), resuming)
 
             # Overwrite directions for all streamlines still being kickstarted (resumed).
             directions[resuming] = r_directions[resuming, i, :]
-            last_directions[undone] = directions[undone]
+            last_directions[undone] = normalized_directions[undone].copy()
 
             # Make a step
-            directions[undone] = directions[undone] * step_size
             sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
             streamlines_lengths[:] += undone[:]
 
-            # If a streamline goes outside the wm mask, mark is as done.
+            # If a streamline goes outside the wm mask, mark it as done.
             if mask is not None:
                 last_point_values = map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
                 model.seq_squeeze(tokeep=np.logical_or(last_point_values[undone] > mask_threshold, resuming[undone]))
@@ -671,7 +664,7 @@ def main():
                 model_class = GRU_Regression
 
         # Load the actual model.
-        model = model_class.create(pjoin(experiment_path), **kwargs)  # Create new instance
+        model = model_class.create(pjoin(experiment_path), **kwargs)  # Create new instance and restore model.
         print(str(model))
 
         if args.append_previous_direction:
