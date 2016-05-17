@@ -42,6 +42,10 @@ from learn2track.losses import MultistepMultivariateGaussianLossForSequences
 from learn2track.losses import ErrorForSequenceWithClassTarget, NLLForSequenceWithClassTarget, L2DistanceWithBinaryCrossEntropy
 from learn2track.batch_schedulers import MultistepSequenceBatchScheduler, MultistepSequenceBatchSchedulerWithoutMask
 
+
+# Needed to unroll the multistep part in the GRU.
+sys.setrecursionlimit(10000)
+
 # DATASETS = ["ismrm2015_challenge"]
 MODELS = ['gru']
 
