@@ -39,6 +39,9 @@ def buildArgsParser():
                    help='if specified, will use try this batch_size first and will reduce it if needed.')
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+    p.add_argument('--no-trainset', action='store_true', help='do not run evaluation on the trainset.')
+    p.add_argument('--no-testset', action='store_true', help='do not run evaluation on the testset.')
+    p.add_argument('--no-validset', action='store_true', help='do not run evaluation on the validset.')
     return p
 
 
@@ -181,20 +184,25 @@ def main():
 
     results_file = pjoin(experiment_path, "results.json")
 
-    if not os.path.isfile(results_file) or args.force:
-        results = {}
-
-        with Timer("Evaluating validset"):
-            results['validset'], batch_size = batch_get_regression_results(model, validset, batch_size=args.batch_size)
-        with Timer("Evaluating testset"):
-            results['testset'], _ = batch_get_regression_results(model, testset, batch_size=batch_size)
-        with Timer("Evaluating trainset"):
-            results['trainset'], _ = batch_get_regression_results(model, trainset, batch_size=batch_size)
-
-        smartutils.save_dict_to_json_file(results_file, results)
-    else:
+    results = {}
+    if os.path.isfile(results_file) and not args.force:
         print("Loading saved results... (use --force to re-run evaluation)")
         results = smartutils.load_dict_from_json_file(results_file)
+
+    batch_size = args.batch_size
+    if 'validset' not in results and not args.no_validset:
+        with Timer("Evaluating validset"):
+            results['validset'], batch_size = batch_get_regression_results(model, validset, batch_size=batch_size)
+
+    if 'testset' not in results and not args.no_testset:
+        with Timer("Evaluating testset"):
+            results['testset'], batch_size = batch_get_regression_results(model, testset, batch_size=batch_size)
+
+    if 'trainset' not in results and not args.no_trainset:
+        with Timer("Evaluating trainset"):
+            results['trainset'], batch_size = batch_get_regression_results(model, trainset, batch_size=batch_size)
+
+    smartutils.save_dict_to_json_file(results_file, results)
 
     for dataset in ['trainset', 'validset', 'testset']:
         print("\n-= {} =-".format(dataset))

@@ -726,7 +726,7 @@ def main():
         else:
             theta = np.deg2rad(45)
 
-        print("Angle: {}".format(theta))
+        print("Angle: {}".format(np.rad2deg(theta)))
         print("Step size (vox): {}".format(step_size))
         print("Max nb. points: {}".format(max_nb_points))
 
