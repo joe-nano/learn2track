@@ -435,7 +435,8 @@ def track_interp(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.7
                 undone = np.logical_or(np.logical_and(undone, angles <= theta), resuming)
 
             # Overwrite directions for all streamlines still being kickstarted (resumed).
-            directions[resuming] = r_directions[resuming, i, :]
+            if i < r_directions.shape[1]:
+                directions[resuming] = r_directions[resuming, i, :]
             last_directions[undone] = normalized_directions[undone].copy()
 
             # Make a step
