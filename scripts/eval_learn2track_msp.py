@@ -199,15 +199,16 @@ def main():
             print("Skipping evaluation of the {0}... (use --force to re-run evaluation or remove option --no-{0})".format(dataset))
 
     for dataset in ['trainset', 'validset', 'testset']:
-        print("\n-= {} =-".format(dataset))
-        print("L2 error (per timestep): {:.2f} ± {:.2f}".format(results[dataset]["L2_error"]['timesteps_loss_avg'], results[dataset]["L2_error"]['timesteps_loss_std']))
-        print("L2 error: {:.2f} ± {:.2f}".format(results[dataset]["L2_error"]['sequences_mean_loss_avg'], results[dataset]["L2_error"]['sequences_mean_loss_stderr']))
+        if dataset in results:
+            print("\n-= {} =-".format(dataset))
+            print("L2 error (per timestep): {:.2f} ± {:.2f}".format(results[dataset]["L2_error"]['timesteps_loss_avg'], results[dataset]["L2_error"]['timesteps_loss_std']))
+            print("L2 error: {:.2f} ± {:.2f}".format(results[dataset]["L2_error"]['sequences_mean_loss_avg'], results[dataset]["L2_error"]['sequences_mean_loss_stderr']))
 
-        for results_per_M in results[dataset]["NLL_per_M"]:
-            print("With ensemble of {}".format(results_per_M['M']))
-            print("  NLL (avg. over all k): {:.2f} ± {:.2f}".format(results_per_M["nll_mean"], results_per_M["nll_stderr"]))
-            for results_per_k in results_per_M["nll_per_k"]:
-                print("  NLL (k={}): {:.2f} ± {:.2f}".format(results_per_k["k"], results_per_k["nll_mean"], results_per_k["nll_stderr"]))
+            for results_per_M in results[dataset]["NLL_per_M"]:
+                print("With ensemble of {}".format(results_per_M['M']))
+                print("  NLL (avg. over all k): {:.2f} ± {:.2f}".format(results_per_M["nll_mean"], results_per_M["nll_stderr"]))
+                for results_per_k in results_per_M["nll_per_k"]:
+                    print("  NLL (k={}): {:.2f} ± {:.2f}".format(results_per_k["k"], results_per_k["nll_mean"], results_per_k["nll_stderr"]))
 
 
 if __name__ == "__main__":
