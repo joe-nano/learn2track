@@ -190,19 +190,13 @@ def main():
         results = smartutils.load_dict_from_json_file(results_file)
 
     batch_size = args.batch_size
-    if 'validset' not in results and not args.no_validset:
-        with Timer("Evaluating validset"):
-            results['validset'], batch_size = batch_get_regression_results(model, validset, batch_size=batch_size)
-
-    if 'testset' not in results and not args.no_testset:
-        with Timer("Evaluating testset"):
-            results['testset'], batch_size = batch_get_regression_results(model, testset, batch_size=batch_size)
-
-    if 'trainset' not in results and not args.no_trainset:
-        with Timer("Evaluating trainset"):
-            results['trainset'], batch_size = batch_get_regression_results(model, trainset, batch_size=batch_size)
-
-    smartutils.save_dict_to_json_file(results_file, results)
+    for dataset in ['validset', 'testset', 'trainset']:
+        if dataset not in results and not eval("args.no_{}".format(dataset)):
+            with Timer("Evaluating {}".format(dataset)):
+                results[dataset], batch_size = batch_get_regression_results(model, eval(dataset), batch_size=batch_size)
+                smartutils.save_dict_to_json_file(results_file, results)
+        else:
+            print("Skipping evaluation of the {}... (use --force to re-run evaluation or remove option --no-{})".format(dataset))
 
     for dataset in ['trainset', 'validset', 'testset']:
         print("\n-= {} =-".format(dataset))
