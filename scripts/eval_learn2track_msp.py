@@ -196,7 +196,7 @@ def main():
                 results[dataset], batch_size = batch_get_regression_results(model, eval(dataset), batch_size=batch_size)
                 smartutils.save_dict_to_json_file(results_file, results)
         else:
-            print("Skipping evaluation of the {}... (use --force to re-run evaluation or remove option --no-{})".format(dataset))
+            print("Skipping evaluation of the {0}... (use --force to re-run evaluation or remove option --no-{0})".format(dataset))
 
     for dataset in ['trainset', 'validset', 'testset']:
         print("\n-= {} =-".format(dataset))
