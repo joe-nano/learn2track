@@ -250,7 +250,11 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
             print('\n')
 
         if f.endswith('.trk') or f.endswith('.tck'):
-            streamlines = nib.streamlines.load(f).streamlines#[::100]
+            streamlines = nib.streamlines.load(f).streamlines
+            idx = np.arange(len(streamlines))
+            rng = np.random.RandomState(42)
+            rng.shuffle(idx)
+            streamlines = streamlines[idx[:100]]
 
             if noisy_streamlines_sigma > 0. and i > 0:
                 streamlines = add_noise_to_streamlines(streamlines, noisy_streamlines_sigma)
@@ -259,6 +263,10 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
 
         if f.endswith('.npz'):
             streamlines_data = StreamlinesData.load(f)
+            idx = np.arange(len(streamlines_data.streamlines))
+            rng = np.random.RandomState(42)
+            rng.shuffle(idx)
+            streamlines_data.streamlines = streamlines_data.streamlines[idx[:200]]
             tractograms.append(streamlines_data.streamlines)
 
         if f.endswith('.nii.gz') or f.endswith('.nii'):

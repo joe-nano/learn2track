@@ -731,22 +731,22 @@ class GRU_Multistep_Gaussian(GRU):
 
         return regression_out
 
-    def use(self, X):
-        # output.shape : (batch_size, seq_len, K, M, target_size, 2)
-        output = self.get_output(X)
+    # def use(self, X):
+    #     # output.shape : (batch_size, seq_len, K, M, target_size, 2)
+    #     output = self.get_output(X)
 
-        # Sample inputs for mean estimation
-        epsilon = self.srng.normal((X.shape[0], X.shape[1], self.k, self.m, self.target_size))
-        means = output[:, :, :, :, :, 0]
-        stds = output[:, :, :, :, :, 1]
+    #     # Sample inputs for mean estimation
+    #     epsilon = self.srng.normal((X.shape[0], X.shape[1], self.k, self.m, self.target_size))
+    #     means = output[:, :, :, :, :, 0]
+    #     stds = output[:, :, :, :, :, 1]
 
-        # samples.shape : (batch_size, seq_len, K, M, target_size)
-        samples = means + epsilon * stds
+    #     # samples.shape : (batch_size, seq_len, K, M, target_size)
+    #     samples = means + epsilon * stds
 
-        # predictions.shape : (batch_size, seq_len, K, target_size)
-        predictions = T.mean(samples, axis=3)
+    #     # predictions.shape : (batch_size, seq_len, K, target_size)
+    #     predictions = T.mean(samples, axis=3)
 
-        return predictions
+    #     return predictions
 
     def seq_next(self, input):
         """ Returns the next (t+1) prediction in every sequence of the batch.

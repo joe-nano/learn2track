@@ -7,7 +7,10 @@ import theano
 import theano.tensor as T
 import itertools
 import string
+import shutil
 import hashlib
+
+from collections import OrderedDict
 from time import time
 from os.path import join as pjoin
 from scipy.ndimage import map_coordinates
@@ -17,6 +20,7 @@ import nibabel as nib
 from nibabel.streamlines import ArraySequence
 
 from smartlearner import Dataset
+import smartlearner.utils as smartutils
 from .dataset import ReconstructionDataset, MaskedSequenceDataset, SequenceDataset, BundlesDataset, StreamlinesDataset
 
 
@@ -666,3 +670,39 @@ def log_variables(batch_scheduler, model, *symb_vars):
 
     #return [list(itertools.chain(*l)) for l in log]
     return log#[list(itertools.chain(*l)) for l in log]
+
+
+def maybe_create_experiment_folder(args, exclude=[]):
+    # Extract experiments hyperparameters
+    hyperparams = OrderedDict(sorted(vars(args).items()))
+
+    # Remove hyperparams that should not be part of the hash
+    for name in exclude:
+        del hyperparams[name]
+
+    # Get/generate experiment name
+    experiment_name = args.name
+    if experiment_name is None:
+        experiment_name = generate_uid_from_string(repr(hyperparams))
+
+    # Create experiment folder
+    experiment_path = pjoin(".", "experiments", experiment_name)
+    resuming = False
+    if os.path.isdir(experiment_path) and not args.force:
+        resuming = True
+        print("### Resuming experiment ({0}). ###\n".format(experiment_name))
+        # Check if provided hyperparams match those in the experiment folder
+        hyperparams_loaded = smartutils.load_dict_from_json_file(pjoin(experiment_path, "hyperparams.json"))
+        if hyperparams != hyperparams_loaded:
+            print("{\n" + "\n".join(["{}: {}".format(k, hyperparams[k]) for k in sorted(hyperparams.keys())]) + "\n}")
+            print("{\n" + "\n".join(["{}: {}".format(k, hyperparams_loaded[k]) for k in sorted(hyperparams_loaded.keys())]) + "\n}")
+            print("The arguments provided are different than the one saved. Use --force if you are certain.\nQuitting.")
+            sys.exit(1)
+    else:
+        if os.path.isdir(experiment_path):
+            shutil.rmtree(experiment_path)
+
+        os.makedirs(experiment_path)
+        smartutils.save_dict_to_json_file(pjoin(experiment_path, "hyperparams.json"), hyperparams)
+
+    return experiment_path, hyperparams, resuming

@@ -61,7 +61,7 @@ def main():
 
     # Retrieve data.
     with Timer("Retrieving data", newline=args.verbose):
-        for i, filename in enumerate(args.bundles):
+        for i, filename in enumerate(sorted(args.bundles)):
             if args.verbose:
                 print("{}".format(filename))
 
