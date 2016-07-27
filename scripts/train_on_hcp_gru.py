@@ -39,7 +39,7 @@ from learn2track.factories import optimizer_factory
 
 from learn2track.losses import L2DistanceWithBinaryCrossEntropy, L2DistanceForSequences, NLLForSequenceOfDirections, ErrorForSequenceOfDirections
 from learn2track.losses import ErrorForSequenceWithClassTarget, NLLForSequenceWithClassTarget, L2DistanceWithBinaryCrossEntropy
-from learn2track.batch_schedulers import StreamlinesBatchScheduler
+from learn2track.batch_schedulers import StreamlinesBatchSchedulerMultiSubjects
 
 # DATASETS = ["ismrm2015_challenge"]
 MODELS = ['gru']
@@ -79,23 +79,28 @@ def build_argparser():
 
     # Dataset options
     dataset = p.add_argument_group("Data options")
-    dataset.add_argument('dwi', help='file containing a diffusion weighted image (.nii|.nii.gz).')
-    dataset.add_argument('dataset', help='file containing streamlines coordinates used as training data (.npz).')
+    dataset.add_argument('train_subjects_dir',
+                         help='folder containing one folder for each subject used for training in which itself contains `dwi.nii.gz` and `dataset.npz`.')
+    dataset.add_argument('valid_subjects_dir',
+                         help='same as argument `train_subjects_dir` but the data will be used for validation purpose.')
+
+    dataset.add_argument('--dwi-name', default='dwi.nii.gz',
+                         help='name of the dwi file to look for in each subject folder (.nii|.nii.gz). Default: `%(default)s`')
+    dataset.add_argument('--dataset-name', default='dataset.npz',
+                         help='name of the dataset file to look for in each subject folder (.npz). Default: `%(default)s`')
 
     duration = p.add_argument_group("Training duration options")
-    duration.add_argument('--max-epoch', type=int, metavar='N', help='if specified, train for a maximum of N epochs.')
+    duration.add_argument('--max-epoch', type=int, metavar='N', default=100,
+                          help='if specified, train for a maximum of N epochs. Default: %(default)s')
     duration.add_argument('--lookahead', type=int, metavar='K', default=10,
-                          help='use early stopping with a lookahead of K. Default: 10')
+                          help='use early stopping with a lookahead of K. Default: %(default)s')
     duration.add_argument('--lookahead-eps', type=float, default=1e-3,
-                          help='in early stopping, an improvement is whenever the objective improve of at least `eps`. Default: 1e-3',)
+                          help='in early stopping, an improvement is whenever the objective improve of at least `eps`. Default: %(default)s',)
 
     # Training options
     training = p.add_argument_group("Training options")
     training.add_argument('--batch-size', type=int,
                           help='size of the batch to use when training the model. Default: 100.', default=100)
-    training.add_argument('--nb-updates-per-epoch', type=int,
-                          help=('If specified, a batch will be composed of streamlines drawn from each different bundle (similar amount) at each update.'
-                                ' Default: go through all streamlines in the trainset exactly once.'))
     # training.add_argument('--neighborhood-patch', type=int, metavar='N',
     #                       help='if specified, patch (as a cube, i.e. NxNxN) around each streamlines coordinates will be concatenated to the input.')
     training.add_argument('--noisy-streamlines-sigma', type=float,
@@ -138,16 +143,15 @@ def main():
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude)
     print("Resuming:" if resuming else "Creating:", experiment_path)
 
-    with Timer("Loading dataset"):
-        trainset, validset, testset = utils.load_streamlines_dataset(args.dwi, args.dataset)
-        print("Datasets:", len(trainset), len(validset), len(testset))
+    with Timer("Loading dataset", newline=True):
+        trainset = utils.load_streamlines_datasets(args.train_subjects_dir, args.dwi_name, args.dataset_name)
+        validset = utils.load_streamlines_datasets(args.valid_subjects_dir, args.dwi_name, args.dataset_name)
+        print("Datasets:", len(trainset), " |", len(validset))
 
-        batch_scheduler = StreamlinesBatchScheduler(trainset, batch_size=args.batch_size,
-                                                    # patch_shape=args.neighborhood_patch,
-                                                    noisy_streamlines_sigma=args.noisy_streamlines_sigma,
-                                                    nb_updates_per_epoch=args.nb_updates_per_epoch,
-                                                    seed=args.seed,
-                                                    include_last_point=args.learn_to_stop)
+        batch_scheduler = StreamlinesBatchSchedulerMultiSubjects(trainset,
+                                                                 batch_size=args.batch_size,
+                                                                 noisy_streamlines_sigma=args.noisy_streamlines_sigma,
+                                                                 seed=args.seed)
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
         print (batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
 
@@ -176,10 +180,6 @@ def main():
 
     with Timer("Building trainer"):
         trainer = Trainer(optimizer, batch_scheduler)
-
-        # Print time for one epoch
-        trainer.append_task(tasks.PrintEpochDuration())
-        trainer.append_task(tasks.PrintTrainingDuration())
 
         # Log training error
         loss_monitor = views.MonitorVariable(loss.loss)
@@ -219,12 +219,10 @@ def main():
         else:
             valid_loss = L2DistanceForSequences(model, validset)
 
-        valid_batch_scheduler = StreamlinesBatchScheduler(validset, batch_size=1000,
-                                                          # patch_shape=args.neighborhood_patch,
-                                                          noisy_streamlines_sigma=None,
-                                                          nb_updates_per_epoch=None,
-                                                          seed=1234,
-                                                          include_last_point=args.learn_to_stop)
+        valid_batch_scheduler = StreamlinesBatchSchedulerMultiSubjects(validset,
+                                                                       batch_size=1000,
+                                                                       noisy_streamlines_sigma=None,
+                                                                       seed=1234)
 
         valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
         trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))
@@ -256,17 +254,34 @@ def main():
 
             trainer.append_task(tasks.Callback(_plot))
 
-        # Save training progression
-        # def save_model(*args):
-        def save_model(obj, status):
-            print("\n*** Best epoch: {0}".format(obj.best_epoch))
+        # Callback function to stop training if NaN is detected.
+        def detect_nan(obj, status):
+            if np.isnan(model.parameters[0].get_value().sum()):
+                print("NaN detected! Not saving the model. Crashing now.")
+                sys.exit()
+        trainer.append_task(tasks.Callback(detect_nan, each_k_update=1))
+
+        # Early stopping with a callback for saving every time model improves.
+        def save_training(obj, status):
+            """ Save training progression. """
+            if np.isnan(model.parameters[0].get_value().sum()):
+                print("NaN detected! Not saving the model. Crashing now.")
+                sys.exit()
+
+            print("*** Best epoch: {0} ***\n".format(obj.best_epoch))
             trainer.save(experiment_path)
 
-        trainer.append_task(stopping_criteria.EarlyStopping(lookahead_loss, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_model))
+        # Print time for one epoch
+        trainer.append_task(tasks.PrintEpochDuration())
+        trainer.append_task(tasks.PrintTrainingDuration())
+        trainer.append_task(tasks.PrintTime(each_k_update=100))  # Profiling
 
-        if args.max_epoch is not None:
-            trainer.append_task(stopping_criteria.MaxEpochStopping(args.max_epoch))
+        # Add stopping criteria
+        trainer.append_task(stopping_criteria.MaxEpochStopping(args.max_epoch))
+        early_stopping = stopping_criteria.EarlyStopping(lookahead_loss, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_training)
+        trainer.append_task(early_stopping)
 
+    with Timer("Compiling Theano graph"):
         trainer.build_theano_graph()
 
     if resuming:

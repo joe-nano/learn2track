@@ -21,7 +21,7 @@ from nibabel.streamlines import ArraySequence
 
 from smartlearner import Dataset
 import smartlearner.utils as smartutils
-from .dataset import ReconstructionDataset, MaskedSequenceDataset, SequenceDataset, BundlesDataset, StreamlinesDataset
+from .dataset import ReconstructionDataset, MaskedSequenceDataset, SequenceDataset, BundlesDataset, StreamlinesDataset, TractogramsDataset
 
 
 DATASETS_ENV = "DATASETS"
@@ -65,7 +65,7 @@ def load_streamlines_dataset(dwi_filename, streamlines_filename, name="ISMRM15_C
     import nibabel as nib
     from dipy.io.gradients import read_bvals_bvecs
 
-    with Timer("Loading DWIs"):
+    with Timer("Loading DWI"):
         # Load gradients table
         bvals_filename = dwi_filename.split('.')[0] + ".bvals"
         bvecs_filename = dwi_filename.split('.')[0] + ".bvecs"
@@ -87,6 +87,41 @@ def load_streamlines_dataset(dwi_filename, streamlines_filename, name="ISMRM15_C
         testset = StreamlinesDataset(volume, StreamlinesData.load(basename + "_testset.npz"), name=name+"_testset")
 
     return trainset, validset, testset
+
+
+def load_streamlines_datasets(subjects_dir, dwi_name, dataset_name, name="HCP", use_sh_coeffs=False):
+    import nibabel as nib
+    from dipy.io.gradients import read_bvals_bvecs
+
+    with Timer("  Loading DWI", newline=True):
+        volumes = []
+        for subject_dir in sorted(os.listdir(subjects_dir)):
+            print("    {}".format(subject_dir))
+            dwi_filename = pjoin(subjects_dir, subject_dir, dwi_name)
+
+            # Load gradients table
+            bvals_filename = dwi_filename.split('.')[0] + ".bvals"
+            bvecs_filename = dwi_filename.split('.')[0] + ".bvecs"
+            bvals, bvecs = read_bvals_bvecs(bvals_filename, bvecs_filename)
+
+            dwi = nib.load(dwi_filename)
+            if use_sh_coeffs:
+                volume = get_spherical_harmonics_coefficients(dwi, bvals, bvecs).astype(np.float32)  # Use 45 spherical harmonic coefficients
+            else:
+                volume = resample_dwi(dwi, bvals, bvecs).astype(np.float32)  # Resample to 100 directions
+
+            volumes.append(volume)
+
+    with Timer("  Loading streamlines", newline=True):
+        tractograms = []
+        for subject_dir in sorted(os.listdir(subjects_dir)):
+            print("    {}".format(subject_dir))
+            tractogram_filename = pjoin(subjects_dir, subject_dir, dataset_name)
+            tractogram = StreamlinesData.load(tractogram_filename)
+            tractograms.append(tractogram)
+
+    subjects = list(zip(volumes, tractograms))
+    return TractogramsDataset(subjects, name)
 
 
 def load_ismrm2015_challenge(bundles_path, classification=False):

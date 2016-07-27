@@ -4,6 +4,7 @@ import numpy as np
 
 import theano
 import theano.tensor as T
+import nibabel as nib
 
 from smartlearner import Dataset
 
@@ -172,6 +173,48 @@ class StreamlinesDataset(MaskedSequenceDataset):
         self.bundle_indices = [np.where(self.bundle_ids == i)[0] for i in range(len(self.bundle_names))]
 
         super().__init__(self.streamlines, targets=None, name=name)
+
+
+class TractogramsDataset(MaskedSequenceDataset):
+    def __init__(self, subjects, name="dataset"):
+        """
+        Parameters
+        ----------
+        subjects: list of  (3d array, `StreamlinesData`) pairs.
+        """
+        self.subjects = subjects
+        self.volumes, self.tractograms = list(zip(*self.subjects))
+
+        # Combine all tractograms in one.
+        self.streamlines = nib.streamlines.ArraySequence()
+        for i, tractogram in enumerate(self.tractograms):
+            self.streamlines.extend(tractogram.streamlines)
+
+        super().__init__(self.streamlines, targets=None, name=name)
+
+        # Build int2indices
+        self.streamline_id_to_volume_id = np.nan * np.ones((len(self.streamlines),))
+
+        start = 0
+        for i, tractogram in enumerate(self.tractograms):
+            end = start + len(tractogram.streamlines)
+            self.streamline_id_to_volume_id[start:end] = i
+            start = end
+
+        assert not np.isnan(self.streamline_id_to_volume_id.sum())
+
+        # self.streamlines = streamlines_data.streamlines
+        # self.bundle_ids = streamlines_data.bundle_ids
+        # self.bundle_names = streamlines_data.bundle_names
+        # self.bundle_counts = np.bincount(self.bundle_ids)
+        # self.bundle_indices = [np.where(self.bundle_ids == i)[0] for i in range(len(self.bundle_names))]
+        # super().__init__(self.streamlines, targets=None, name=name)
+
+    def __len__(self):
+        return len(self.streamlines)
+
+    def __getitem__(self, idx):
+        return self.streamlines[idx], self.streamline_id_to_volume_id[idx]
 
 
 class BundlesDataset(MaskedSequenceDataset):

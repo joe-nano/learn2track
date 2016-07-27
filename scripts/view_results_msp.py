@@ -101,15 +101,15 @@ def get_results(e, *keys):
     return res
 
 
-def extract_result_from_experiment(e, k, M, k2idx, m2idx):
+def extract_result_from_experiment(e, M, Ks, k2idx, m2idx):
     """e: `Experiment` object"""
     entry = OrderedDict()
     entry["Weights Initialization"] = e.hyperparams.get("weights_initialization", "")
     entry["Look Ahead"] = e.hyperparams.get("lookahead", "")
     entry["Look Ahead eps"] = e.hyperparams.get("lookahead_eps", "")
     entry["Hidden Size(s)"] = ",".join(map(str, e.hyperparams.get("hidden_sizes", [])))
-    entry["Nb. Samples"] = e.hyperparams.get("nb_samples", "")
-    entry["Nb. Steps"] = e.hyperparams.get("nb_steps_to_predict", "")
+    entry["Nb. Samples (M)"] = e.hyperparams.get("nb_samples", "")
+    entry["Nb. Steps (K)"] = e.hyperparams.get("nb_steps_to_predict", "")
     entry["Batch Size"] = e.hyperparams.get("batch_size", "")
     entry["SH Coeffs"] = e.hyperparams.get("use_sh_coeffs", False)
     entry["Optimizer"] = get_optimizer(e)
@@ -125,17 +125,23 @@ def extract_result_from_experiment(e, k, M, k2idx, m2idx):
     entry["Valid L2"] = get_results(e, "validset", "L2_error", "sequences_mean_loss_avg")
     entry["Test L2"] = get_results(e, "L2_error", "sequences_mean_loss_avg")
 
-    entry["Ensemble"] = str(M)
-    entry["Pred. Steps"] = str(k)
+    entry["M"] = str(M)
 
-    if k == "avg":
-        entry["Train NLL"] = get_results(e, "trainset", "NLL_per_M", m2idx[M], "nll_mean")
-        entry["Valid NLL"] = get_results(e, "validset", "NLL_per_M", m2idx[M], "nll_mean")
-        entry["Test NLL"] = get_results(e, "testset", "NLL_per_M", m2idx[M], "nll_mean")
-    else:
-        entry["Train NLL"] = get_results(e, "trainset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_mean")
-        entry["Valid NLL"] = get_results(e, "validset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_mean")
-        entry["Test NLL"] = get_results(e, "testset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_mean")
+    for k in Ks:
+        if k == "avg":
+            entry["Train NLL (K={})".format(k)] = get_results(e, "trainset", "NLL_per_M", m2idx[M], "nll_mean")
+            entry["Train stderr (K={})".format(k)] = get_results(e, "trainset", "NLL_per_M", m2idx[M], "nll_stderr")
+            entry["Valid NLL (K={})".format(k)] = get_results(e, "validset", "NLL_per_M", m2idx[M], "nll_mean")
+            entry["Valid stderr (K={})".format(k)] = get_results(e, "validset", "NLL_per_M", m2idx[M], "nll_stderr")
+            entry["Test NLL (K={})".format(k)] = get_results(e, "testset", "NLL_per_M", m2idx[M], "nll_mean")
+            entry["Test stderr (K={})".format(k)] = get_results(e, "testset", "NLL_per_M", m2idx[M], "nll_stderr")
+        else:
+            entry["Train NLL (K={})".format(k)] = get_results(e, "trainset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_mean")
+            entry["Train stderr (K={})".format(k)] = get_results(e, "trainset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_stderr")
+            entry["Valid NLL (K={})".format(k)] = get_results(e, "validset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_mean")
+            entry["Valid stderr (K={})".format(k)] = get_results(e, "validset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_stderr")
+            entry["Test NLL (K={})".format(k)] = get_results(e, "testset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_mean")
+            entry["Test stderr (K={})".format(k)] = get_results(e, "testset", "NLL_per_M", m2idx[M], "nll_per_k", k2idx[k], "nll_stderr")
 
     # Tractometer results
     entry["VC"] = str(e.tractometer_scores.get("VC", ""))
@@ -231,8 +237,7 @@ def main():
                 experiment = Experiment(experiment_path, tractography_name)
 
                 for M in args.M:
-                    for k in args.K:
-                        experiments_results.append(extract_result_from_experiment(experiment, k, M, k2idx, m2idx))
+                    experiments_results.append(extract_result_from_experiment(experiment, M, args.K, k2idx, m2idx))
 
             except IOError as e:
                 if args.verbose:
