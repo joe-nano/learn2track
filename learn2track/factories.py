@@ -1,6 +1,7 @@
 import theano.tensor as T
 
 import smartlearner.initializers as initer
+from learn2track.initializers import OrthogonalInitializer
 
 
 WEIGHTS_INITIALIZERS = ["uniform", "zeros", "diagonal", "orthogonal", "gaussian"]
@@ -14,7 +15,7 @@ def weigths_initializer_factory(name, seed=1234):
     elif name == "diagonal":
         return initer.DiagonalInitializer(seed)
     elif name == "orthogonal":
-        return initer.OrthogonalInitializer(seed)
+        return OrthogonalInitializer(seed)
     elif name == "gaussian":
         return initer.GaussienInitializer(seed)
 

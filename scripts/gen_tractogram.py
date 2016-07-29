@@ -742,7 +742,8 @@ def main():
     with Timer("Saving streamlines"):
         # Flush streamlines that has no points.
         tractogram = tractogram[np.array(list(map(len, tractogram))) > 0]
-        tractogram.apply_affine(dwi.affine)  # Streamlines were generated in diffusion voxel space.
+        tractogram.affine_to_rasmm = dwi.affine
+        # tractogram.apply_affine(dwi.affine)  # Streamlines were generated in diffusion voxel space.
         # Remove small streamlines
         lengths = dipy.tracking.streamline.length(tractogram.streamlines)
         tractogram = tractogram[lengths >= args.min_length]
