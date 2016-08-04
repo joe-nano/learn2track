@@ -36,6 +36,8 @@ class StreamlinesBatchSchedulerMultiSubjects(BatchScheduler):
         self.seed = seed
         self.rng = np.random.RandomState(self.seed)
         self.rng_noise = np.random.RandomState(self.seed+1)
+        self.shuffle_streamlines = True
+        self.indices = np.arange(len(self.dataset))
 
         # Shared variables
         self._shared_batch_inputs = sharedX(np.ndarray((0, 0, 0)))
@@ -135,7 +137,7 @@ class StreamlinesBatchSchedulerMultiSubjects(BatchScheduler):
         # Simply take the next slice.
         start = batch_count * self.batch_size
         end = (batch_count + 1) * self.batch_size
-        return self._prepare_batch(slice(start, end))
+        return self._prepare_batch(self.indices[slice(start, end)])
 
     @property
     def givens(self):
@@ -144,6 +146,9 @@ class StreamlinesBatchSchedulerMultiSubjects(BatchScheduler):
                 self.dataset.symb_mask: self._shared_batch_mask}
 
     def __iter__(self):
+        if self.shuffle_streamlines:
+            self.rng.shuffle(self.indices)
+
         for batch_count in range(self.nb_updates_per_epoch):
             batch_inputs, batch_targets, batch_mask = self._next_batch(batch_count)
             self._shared_batch_inputs.set_value(batch_inputs)
