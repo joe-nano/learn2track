@@ -7,48 +7,30 @@ import sys
 # Hack so you don't have to put the library containing this script in the PYTHONPATH.
 sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
-import pickle
-import shutil
 import numpy as np
-from os.path import join as pjoin
 import argparse
-
-import theano
-import nibabel as nib
-
-from time import sleep
 
 import theano.tensor as T
 
-from smartlearner import Trainer, tasks, Dataset
-from smartlearner import tasks
-from smartlearner import stopping_criteria
-from smartlearner import views
-from smartlearner import utils as smartutils
-from smartlearner.optimizers import SGD, AdaGrad, Adam
-from smartlearner.direction_modifiers import ConstantLearningRate, DirectionClipping
+from smartlearner import Trainer
+from smartlearner import tasks, views, stopping_criteria
+from smartlearner.direction_modifiers import DirectionClipping
 
 
 from learn2track import utils
 from learn2track.utils import Timer
-from learn2track.lstm import LSTM_Regression, LSTM_RegressionWithFeaturesExtraction, LSTM_Softmax, LSTM_Hybrid
-from learn2track.factories import ACTIVATION_FUNCTIONS
 from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory
 from learn2track.factories import optimizer_factory
-#from learn2track.view import RegressionError
+from learn2track.factories import model_factory
+from learn2track.factories import loss_factory
 
-from learn2track.losses import L2DistanceWithBinaryCrossEntropy, L2DistanceForSequences, NLLForSequenceOfDirections, ErrorForSequenceOfDirections
-from learn2track.losses import ErrorForSequenceWithClassTarget, NLLForSequenceWithClassTarget, L2DistanceWithBinaryCrossEntropy
 from learn2track.batch_schedulers import StreamlinesBatchSchedulerMultiSubjects
-
-# DATASETS = ["ismrm2015_challenge"]
-MODELS = ['gru']
 
 
 def build_train_gru_argparser(subparser):
     DESCRIPTION = "Train a GRU."
 
-    p = subparser.add_parser("gru", description=DESCRIPTION, help=DESCRIPTION)
+    p = subparser.add_parser("gru_regression", description=DESCRIPTION, help=DESCRIPTION)
 
     # p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
 
@@ -58,9 +40,7 @@ def build_train_gru_argparser(subparser):
     model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
                        help="Size of the hidden layers. Default: 500")
 
-    model.add_argument('--hidden-activation', type=str, choices=ACTIVATION_FUNCTIONS, default=ACTIVATION_FUNCTIONS[0],
-                       help="Activation functions: {}".format(ACTIVATION_FUNCTIONS),)
-    model.add_argument('--weights-initialization', type=str, default=WEIGHTS_INITIALIZERS[0], choices=WEIGHTS_INITIALIZERS,
+    model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
     model.add_argument('--initialization-seed', type=int, default=1234,
                        help='seed used to generate random numbers. Default=1234')
@@ -79,10 +59,10 @@ def build_argparser():
 
     # Dataset options
     dataset = p.add_argument_group("Data options")
-    dataset.add_argument('train_subjects_dir',
-                         help='folder containing one folder for each subject used for training in which itself contains `dwi.nii.gz` and `dataset.npz`.')
-    dataset.add_argument('valid_subjects_dir',
-                         help='same as argument `train_subjects_dir` but the data will be used for validation purpose.')
+    dataset.add_argument('--train-subjects', nargs='+',
+                         help='folder(s) containing `dwi.nii.gz` and `dataset.npz` that will be used as training data.')
+    dataset.add_argument('--valid-subjects', nargs='+',
+                         help='folder(s) containing `dwi.nii.gz` and `dataset.npz` that will be used as validation data.')
 
     dataset.add_argument('--dwi-name', default='dwi.nii.gz',
                          help='name of the dwi file to look for in each subject folder (.nii|.nii.gz). Default: `%(default)s`')
@@ -139,13 +119,13 @@ def main():
     args = parser.parse_args()
     print(args)
 
-    hyperparams_to_exclude = ['max_epoch', 'force', 'name']
+    hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view']
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude)
     print("Resuming:" if resuming else "Creating:", experiment_path)
 
     with Timer("Loading dataset", newline=True):
-        trainset = utils.load_streamlines_datasets(args.train_subjects_dir, args.dwi_name, args.dataset_name)
-        validset = utils.load_streamlines_datasets(args.valid_subjects_dir, args.dwi_name, args.dataset_name)
+        trainset = utils.load_streamlines_datasets(args.train_subjects, args.dwi_name, args.dataset_name)
+        validset = utils.load_streamlines_datasets(args.valid_subjects, args.dwi_name, args.dataset_name)
         print("Datasets:", len(trainset), " |", len(validset))
 
         batch_scheduler = StreamlinesBatchSchedulerMultiSubjects(trainset,
@@ -156,22 +136,12 @@ def main():
         print (batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
 
     with Timer("Creating model"):
-        if args.learn_to_stop:
-            from learn2track.gru import GRU_RegressionWithBinaryClassification
-            model = GRU_RegressionWithBinaryClassification(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
-
-        else:
-            from learn2track.gru import GRU_Regression
-            model = GRU_Regression(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
-
+        model = model_factory(hyperparams, batch_scheduler)
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
 
     with Timer("Building optimizer"):
-        if args.learn_to_stop:
-            loss = L2DistanceWithBinaryCrossEntropy(model, trainset)
-        else:
-            loss = L2DistanceForSequences(model, trainset)
+        loss = loss_factory(hyperparams, model, trainset)
 
         if args.clip_gradient is not None:
             loss.append_gradient_modifier(DirectionClipping(threshold=args.clip_gradient))
@@ -203,7 +173,6 @@ def main():
             trainer.append_task(tasks.Print("L2 err : {0:.4f}", l2err_monitor, each_k_update=100))
             trainer.append_task(tasks.Print("stopping : {0:.4f}", crossentropy_monitor, each_k_update=100))
 
-
         # Print NLL mean/stderror.
         # train_loss = L2DistanceForSequences(model, trainset)
         # train_batch_scheduler = StreamlinesBatchScheduler(trainset, batch_size=1000,
@@ -214,11 +183,7 @@ def main():
         # train_error = views.LossView(loss=train_loss, batch_scheduler=train_batch_scheduler)
         # trainer.append_task(tasks.Print("Trainset - Error        : {0:.2f} | {1:.2f}", train_error.sum, train_error.mean))
 
-        if args.learn_to_stop:
-            valid_loss = L2DistanceWithBinaryCrossEntropy(model, validset)
-        else:
-            valid_loss = L2DistanceForSequences(model, validset)
-
+        valid_loss = loss_factory(hyperparams, model, validset)
         valid_batch_scheduler = StreamlinesBatchSchedulerMultiSubjects(validset,
                                                                        batch_size=1000,
                                                                        noisy_streamlines_sigma=None,
@@ -293,24 +258,6 @@ def main():
 
     trainer.save(experiment_path)
     model.save(experiment_path)
-
-    pickle.dump(logger._history, open(pjoin(experiment_path, "logger.pkl"), 'wb'))
-
-    if args.view:
-        import pylab as plt
-
-        # Plot some graphs
-        plt.figure()
-        plt.subplot(121)
-        plt.title("Loss")
-        plt.plot(logger.get_variable_history(0), label="Train")
-        plt.plot(logger.get_variable_history(1), label="Valid")
-        plt.legend()
-
-        plt.subplot(122)
-        plt.title("Gradient norm")
-        plt.plot(logger.get_variable_history(3), label="||d||")
-        plt.show()
 
 if __name__ == "__main__":
     main()

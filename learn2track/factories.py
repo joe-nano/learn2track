@@ -41,7 +41,7 @@ def make_activation_function(name):
 
 
 def optimizer_factory(hyperparams, loss):
-    #Set learning rate method that will be used.
+    # Set learning rate method that will be used.
     if hyperparams["SGD"] is not None:
         from smartlearner.optimizers import SGD
         from smartlearner.direction_modifiers import ConstantLearningRate
@@ -74,3 +74,33 @@ def optimizer_factory(hyperparams, loss):
 
     else:
         raise ValueError("The optimizer is mandatory!")
+
+
+def model_factory(hyperparams, batch_scheduler):
+    if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
+        from learn2track.models import GRU_RegressionAndBinaryClassification
+        return GRU_RegressionAndBinaryClassification(batch_scheduler.input_size,
+                                                     hyperparams['hidden_sizes'],
+                                                     batch_scheduler.target_size)
+
+    elif hyperparams['model'] == 'gru_regression':
+        from learn2track.models import GRU_Regression
+        return GRU_Regression(batch_scheduler.input_size,
+                              hyperparams['hidden_sizes'],
+                              batch_scheduler.target_size)
+
+    else:
+        raise ValueError("Unknown model!")
+
+
+def loss_factory(hyperparams, model, dataset):
+    if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
+        from learn2track.models.gru_regression_and_binary_classification import L2DistancePlusBinaryCrossEntropy
+        return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize=True)
+
+    elif hyperparams['model'] == 'gru_regression':
+        from learn2track.models.gru_regression import L2DistanceForSequences
+        return L2DistanceForSequences(model, dataset, normalize=True)
+
+    else:
+        raise ValueError("Unknown model!")

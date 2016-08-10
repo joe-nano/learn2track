@@ -31,7 +31,6 @@ from smartlearner.direction_modifiers import ConstantLearningRate, DirectionClip
 
 from learn2track import utils
 from learn2track.utils import Timer
-from learn2track.lstm import LSTM_Regression, LSTM_RegressionWithFeaturesExtraction, LSTM_Softmax, LSTM_Hybrid
 from learn2track.factories import ACTIVATION_FUNCTIONS
 from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory
 from learn2track.factories import optimizer_factory
@@ -153,11 +152,11 @@ def main():
 
     with Timer("Creating model"):
         if args.learn_to_stop:
-            from learn2track.gru import GRU_RegressionWithBinaryClassification
-            model = GRU_RegressionWithBinaryClassification(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
+            from learn2track.models import GRU_RegressionAndBinaryClassification
+            model = GRU_RegressionAndBinaryClassification(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
 
         else:
-            from learn2track.gru import GRU_Regression
+            from learn2track.models import GRU_Regression
             model = GRU_Regression(batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
 
         model.initialize(weigths_initializer_factory(args.weights_initialization,

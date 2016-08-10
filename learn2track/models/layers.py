@@ -1,16 +1,8 @@
-import os
-from os.path import join as pjoin
-
-import pickle
 import numpy as np
-import theano
 import theano.tensor as T
-from collections import OrderedDict
 
 from learn2track import factories
 
-from smartlearner.interfaces import Model
-from smartlearner import utils as smartutils
 from smartlearner.utils import sharedX
 import smartlearner.initializers as initer
 
@@ -41,7 +33,7 @@ class LayerDense(object):
 
 
 class LayerRegression(object):
-    def __init__(self, input_size, output_size, normed=True, name="Regression"):
+    def __init__(self, input_size, output_size, normed=False, name="Regression"):
 
         self.input_size = input_size
         self.output_size = output_size
@@ -93,66 +85,7 @@ class LayerSoftmax(object):
         return out
 
 
-class LayerLSTMSlow(object):
-    def __init__(self, input_size, hidden_size, activation="tanh", name="LSTM"):
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.name = name
-        self.activation = activation
-        self.activation_fct = factories.make_activation_function(self.activation)
-
-        # Input weights (i:input, o:output, f:forget, m:memory)
-        self.Wi = sharedX(value=np.zeros((input_size, hidden_size)), name=self.name+'_Wi')
-        self.Wo = sharedX(value=np.zeros((input_size, hidden_size)), name=self.name+'_Wo')
-        self.Wf = sharedX(value=np.zeros((input_size, hidden_size)), name=self.name+'_Wf')
-        self.Wm = sharedX(value=np.zeros((input_size, hidden_size)), name=self.name+'_Wm')
-
-        # Biases (i:input, o:output, f:forget, m:memory)
-        self.bi = sharedX(value=np.zeros(hidden_size), name=self.name+'_bi')
-        self.bo = sharedX(value=np.zeros(hidden_size), name=self.name+'_bo')
-        self.bf = sharedX(value=np.zeros(hidden_size), name=self.name+'_bf')
-        self.bm = sharedX(value=np.zeros(hidden_size), name=self.name+'_bm')
-
-        # Recurrence weights (i:input, o:output, f:forget, m:memory)
-        self.Ui = sharedX(value=np.zeros((hidden_size, hidden_size)), name=self.name+'_Ui')
-        self.Uo = sharedX(value=np.zeros((hidden_size, hidden_size)), name=self.name+'_Uo')
-        self.Uf = sharedX(value=np.zeros((hidden_size, hidden_size)), name=self.name+'_Uf')
-        self.Um = sharedX(value=np.zeros((hidden_size, hidden_size)), name=self.name+'_Um')
-
-        # Memory weights (i:input, o:output, f:forget, m:memory)
-        self.Vi = sharedX(value=np.ones(hidden_size), name=self.name+'_Vi')
-        self.Vo = sharedX(value=np.ones(hidden_size), name=self.name+'_Vo')
-        self.Vf = sharedX(value=np.ones(hidden_size), name=self.name+'_Vf')
-
-    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
-        for param in [self.Wi, self.Wo, self.Wf, self.Wm]:
-            weights_initializer(param)
-
-        for param in [self.Ui, self.Uo, self.Uf, self.Um]:
-            weights_initializer(param)
-
-    @property
-    def parameters(self):
-        return [self.Wi, self.Wo, self.Wf, self.Wm,
-                self.Ui, self.Uo, self.Uf, self.Um,
-                self.bi, self.bo, self.bf, self.bm,
-                self.Vi, self.Vo, self.Vf]
-
-    def fprop(self, Xi, last_h, last_m):
-        # TODO: replace sigmoid by ReLU?
-        gate_i = T.nnet.sigmoid(T.dot(Xi, self.Wi) + T.dot(last_h, self.Ui) + last_m*self.Vi + self.bi)
-        mi = T.tanh(T.dot(Xi, self.Wm) + T.dot(last_h, self.Um) + self.bm)
-
-        gate_f = T.nnet.sigmoid(T.dot(Xi, self.Wf) + T.dot(last_h, self.Uf) + last_m*self.Vf + self.bf)
-        m = gate_i*mi + gate_f*last_m
-
-        gate_o = T.nnet.sigmoid(T.dot(Xi, self.Wo) + T.dot(last_h, self.Uo) + m*self.Vo + self.bo)
-        h = gate_o * self.activation_fct(m)
-
-        return h, m
-
-
-class LayerLSTM(object):
+class LayerLstmWithPeepholes(object):
     def __init__(self, input_size, hidden_size, activation="tanh", name="LSTM"):
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -172,7 +105,7 @@ class LayerLSTM(object):
         # Concatenation of the recurrence weights in that order: Ui, Uo, Uf, Um
         self.U = sharedX(value=np.zeros((hidden_size, 4*hidden_size)), name=self.name+'_U')
 
-        # Memory weights (i:input, o:output, f:forget, m:memory)
+        # Peepholes (i:input, o:output, f:forget, m:memory)
         self.Vi = sharedX(value=np.ones(hidden_size), name=self.name+'_Vi')
         self.Vo = sharedX(value=np.ones(hidden_size), name=self.name+'_Vo')
         self.Vf = sharedX(value=np.ones(hidden_size), name=self.name+'_Vf')
