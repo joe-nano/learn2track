@@ -76,7 +76,8 @@ class L2DistanceForSequences(Loss):
     -----
     This loss assumes the regression target at every time step is a vector.
     """
-    def __init__(self, normalize_output=False):
+    def __init__(self, model, dataset, normalize_output=False):
+        super().__init__(model, dataset)
         self.normalize_output = normalize_output
 
     def _get_updates(self):

@@ -96,11 +96,11 @@ def model_factory(hyperparams, batch_scheduler):
 def loss_factory(hyperparams, model, dataset):
     if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
         from learn2track.models.gru_regression_and_binary_classification import L2DistancePlusBinaryCrossEntropy
-        return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize=True)
+        return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize_output=True)
 
     elif hyperparams['model'] == 'gru_regression':
         from learn2track.models.gru_regression import L2DistanceForSequences
-        return L2DistanceForSequences(model, dataset, normalize=True)
+        return L2DistanceForSequences(model, dataset, normalize_output=True)
 
     else:
         raise ValueError("Unknown model!")

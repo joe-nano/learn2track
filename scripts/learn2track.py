@@ -59,9 +59,9 @@ def build_argparser():
 
     # Dataset options
     dataset = p.add_argument_group("Data options")
-    dataset.add_argument('--train-subjects', nargs='+',
+    dataset.add_argument('--train-subjects', nargs='+', required=True,
                          help='folder(s) containing `dwi.nii.gz` and `dataset.npz` that will be used as training data.')
-    dataset.add_argument('--valid-subjects', nargs='+',
+    dataset.add_argument('--valid-subjects', nargs='+', required=True,
                          help='folder(s) containing `dwi.nii.gz` and `dataset.npz` that will be used as validation data.')
 
     dataset.add_argument('--dwi-name', default='dwi.nii.gz',

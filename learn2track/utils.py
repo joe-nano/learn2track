@@ -89,15 +89,15 @@ def load_streamlines_dataset(dwi_filename, streamlines_filename, name="ISMRM15_C
     return trainset, validset, testset
 
 
-def load_streamlines_datasets(subjects_dir, dwi_name, dataset_name, name="HCP", use_sh_coeffs=False):
+def load_streamlines_datasets(subject_dirs, dwi_name, dataset_name, name="HCP", use_sh_coeffs=False):
     import nibabel as nib
     from dipy.io.gradients import read_bvals_bvecs
 
     with Timer("  Loading DWI", newline=True):
         volumes = []
-        for subject_dir in sorted(os.listdir(subjects_dir)):
+        for subject_dir in sorted(subject_dirs):
             print("    {}".format(subject_dir))
-            dwi_filename = pjoin(subjects_dir, subject_dir, dwi_name)
+            dwi_filename = pjoin(subject_dir, dwi_name)
 
             # Load gradients table
             bvals_filename = dwi_filename.split('.')[0] + ".bvals"
@@ -114,9 +114,9 @@ def load_streamlines_datasets(subjects_dir, dwi_name, dataset_name, name="HCP", 
 
     with Timer("  Loading streamlines", newline=True):
         tractograms = []
-        for subject_dir in sorted(os.listdir(subjects_dir)):
+        for subject_dir in sorted(subject_dirs):
             print("    {}".format(subject_dir))
-            tractogram_filename = pjoin(subjects_dir, subject_dir, dataset_name)
+            tractogram_filename = pjoin(subject_dir, dataset_name)
             tractogram = StreamlinesData.load(tractogram_filename)
             tractograms.append(tractogram)
 
