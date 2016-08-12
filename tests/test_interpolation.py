@@ -13,7 +13,7 @@ import theano
 import theano.tensor as T
 
 from learn2track.interpolation import eval_volume_at_3d_coordinates_in_theano
-from learn2track.utils import eval_volume_at_3d_coordinates
+from learn2track.neurotools import eval_volume_at_3d_coordinates
 
 
 def test_trilinear_interpolation():

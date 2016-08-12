@@ -29,7 +29,6 @@ from smartlearner.utils import load_dict_from_json_file
 from learn2track.gru import GRU_Multistep_Gaussian
 
 
-
 def build_argparser():
     DESCRIPTION = "Generate a tractogram from a LSTM model trained on ismrm2015 challenge data."
     p = argparse.ArgumentParser(description=DESCRIPTION)

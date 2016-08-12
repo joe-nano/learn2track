@@ -23,7 +23,13 @@ idx = np.array([[0, 0, 0],
 
 
 def advanced_indexing(volume, *indices_list, **kwargs):
-    """
+    """ Performs advanced indexing on `volume`.
+
+    This function exists because in Theano<=0.9 advanced indexing is
+    only supported along the first dimension.
+
+    Notes
+    -----
     Assuming `volume` is C contiguous.
     """
     strides = kwargs.get("strides")

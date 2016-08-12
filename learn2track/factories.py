@@ -85,9 +85,10 @@ def model_factory(hyperparams, batch_scheduler):
 
     elif hyperparams['model'] == 'gru_regression':
         from learn2track.models import GRU_Regression
-        return GRU_Regression(batch_scheduler.input_size,
-                              hyperparams['hidden_sizes'],
-                              batch_scheduler.target_size)
+        return GRU_Regression(dwis=batch_scheduler.dataset.volumes,
+                              input_size=batch_scheduler.input_size,
+                              hidden_sizes=hyperparams['hidden_sizes'],
+                              output_size=batch_scheduler.target_size)
 
     else:
         raise ValueError("Unknown model!")

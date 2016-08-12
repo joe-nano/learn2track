@@ -18,6 +18,6 @@ setup(
                       'https://github.com/MarcCote/nibabel/archive/streamlines_tck.zip#egg=nibabel-2.0.4'],
     scripts=[pjoin('scripts', 'process_streamlines.py'),
              pjoin('scripts', 'viz.py'),
-             pjoin('scripts', 'learn2track.py'),
+             pjoin('scripts', 'learn.py'),
              pjoin('scripts', 'track.py')]
 )

@@ -11,17 +11,183 @@ from smartlearner.interfaces import BatchScheduler
 from smartlearner.utils import sharedX
 
 from learn2track import utils
+from learn2track import neurotools
 
 floatX = theano.config.floatX
 
 
-class StreamlinesBatchSchedulerMultiSubjects(BatchScheduler):
+class TractographyBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines coming from multiple subjects. """
     def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True):
         """
         Parameters
         ----------
-        dataset : :class:`TractogramsDataset`
+        dataset : :class:`TractographyDataset`
+        batch_size : int
+        use_data_augment : bool
+            If true, perform data augmentation by flipping streamlines.
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.use_augment_by_flipping = use_data_augment
+
+        self.noisy_streamlines_sigma = noisy_streamlines_sigma
+        self.use_noisy_streamlines = self.noisy_streamlines_sigma is not None
+
+        self.seed = seed
+        self.rng = np.random.RandomState(self.seed)
+        self.rng_noise = np.random.RandomState(self.seed+1)
+        self.shuffle_streamlines = True
+        self.indices = np.arange(len(self.dataset))
+
+        # Shared variables
+        self._shared_batch_inputs = sharedX(np.ndarray((0, 0, 0)))
+        self._shared_batch_targets = sharedX(np.ndarray((0, 0, 0)))
+        self._shared_batch_mask = sharedX(np.ndarray((0, 0)))
+
+        # Test value
+        batch_inputs, batch_targets, batch_mask = self._next_batch(0)
+        self.dataset.symb_inputs.tag.test_value = batch_inputs
+        self.dataset.symb_mask.tag.test_value = batch_mask
+
+        # Since this batch scheduler creates its own targets.
+        if self.dataset.symb_targets is None:
+            self.dataset.symb_targets = T.TensorVariable(type=T.TensorType("floatX", [False]*(batch_targets.ndim)),
+                                                         name=self.dataset.name+'_symb_targets')
+
+        self.dataset.symb_targets.tag.test_value = batch_targets
+
+    @property
+    def input_size(self):
+        # Number of diffusion directions or Spherical Harmonics (SH) coefficients
+        return self.dataset.volumes[0].shape[-1]
+
+    @property
+    def target_size(self):
+        return 3  # Direction to follow.
+
+    @property
+    def nb_updates_per_epoch(self):
+        return int(np.ceil(len(self.dataset) / self.batch_size))
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value):
+        self._batch_size = value
+
+    def _augment_data(self, inputs):
+        pass
+
+    def _add_noise_to_streamlines(self, streamlines):
+        if not self.use_noisy_streamlines:
+            return streamlines
+
+        # Add gaussian noise, N(0, self.sigma).
+        noisy_streamlines = streamlines.copy()
+        shape = noisy_streamlines._data.shape
+        noisy_streamlines._data += self.noisy_streamlines_sigma * self.rng_noise.randn(*shape)
+        return noisy_streamlines
+
+    def _prepare_batch(self, indices):
+        orig_streamlines, volume_ids = self.dataset[indices]
+        streamlines = self._add_noise_to_streamlines(orig_streamlines.copy())
+
+        # streamline_length = np.max(streamlines._lengths)  # Sequences are resampled so that they have the same length.
+        streamline_length = np.min(streamlines._lengths)  # Sequences are resampled so that they have the same length.
+        streamlines._lengths = streamlines._lengths.astype("int64")
+        streamlines = set_number_of_points(streamlines, nb_points=streamline_length)
+
+        inputs = streamlines._data  # Streamlines coordinates
+        targets = streamlines._data[1:] - streamlines._data[:-1]  # Unnormalized directions
+        targets = targets / np.sqrt(np.sum(targets**2, axis=1, keepdims=True))  # Normalized directions
+
+        batch_size = len(streamlines)
+        if self.use_augment_by_flipping:
+            batch_size *= 2
+
+        max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
+        batch_masks = np.zeros((batch_size, max_streamline_length-1), dtype=floatX)
+        batch_inputs = np.zeros((batch_size, max_streamline_length-1, inputs.shape[1]), dtype=floatX)
+        batch_targets = np.zeros((batch_size, max_streamline_length-1, 3), dtype=floatX)
+
+        for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
+            batch_masks[i, :length-1] = 1
+            batch_inputs[i, :length-1] = inputs[offset:offset+length-1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
+            batch_targets[i, :length-1] = targets[offset:offset+length-1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
+
+            if self.use_augment_by_flipping:
+                batch_masks[i+len(streamlines), :length-1] = 1
+                batch_inputs[i+len(streamlines), :length-1] = inputs[offset+1:offset+length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
+                batch_targets[i+len(streamlines), :length-1] = -targets[offset:offset+length-1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
+
+        volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length-1, 1))
+        batch_inputs = np.concatenate([batch_inputs, volume_ids], axis=2)  # Streamlines coords + dwi ID
+        return batch_inputs, batch_targets, batch_masks
+
+    def _next_batch(self, batch_count):
+        # Simply take the next slice.
+        start = batch_count * self.batch_size
+        end = (batch_count + 1) * self.batch_size
+        return self._prepare_batch(self.indices[slice(start, end)])
+
+    @property
+    def givens(self):
+        return {self.dataset.symb_inputs: self._shared_batch_inputs,
+                self.dataset.symb_targets: self._shared_batch_targets,
+                self.dataset.symb_mask: self._shared_batch_mask}
+
+    def __iter__(self):
+        if self.shuffle_streamlines:
+            self.rng.shuffle(self.indices)
+
+        for batch_count in range(self.nb_updates_per_epoch):
+            batch_inputs, batch_targets, batch_mask = self._next_batch(batch_count)
+            self._shared_batch_inputs.set_value(batch_inputs)
+            self._shared_batch_targets.set_value(batch_targets)
+            self._shared_batch_mask.set_value(batch_mask)
+
+            yield batch_count + 1
+
+    @property
+    def updates(self):
+        return {}  # No updates
+
+    def save(self, savedir):
+        state = {"version": 1,
+                 "batch_size": self.batch_size,
+                 "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
+                 "use_augment_by_flipping": self.use_augment_by_flipping,
+                 "seed": self.seed,
+                 "rng": pickle.dumps(self.rng),
+                 "rng_noise": pickle.dumps(self.rng_noise),
+                 }
+
+        np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)
+
+    def load(self, loaddir):
+        state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
+        self.batch_size = state["batch_size"]
+        self.noisy_streamlines_sigma = state["noisy_streamlines_sigma"]
+        self.use_augment_by_flipping = state["use_augment_by_flipping"]
+        self.rng = pickle.loads(state["rng"])
+        self.rng_noise = pickle.loads(state["rng_noise"])
+
+
+
+
+
+
+
+class TractographyBatchScheduler_OLD(BatchScheduler):
+    """ Batch scheduler for streamlines coming from multiple subjects. """
+    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True):
+        """
+        Parameters
+        ----------
+        dataset : :class:`TractographyDataset`
         batch_size : int
         use_data_augment : bool
             If true, perform data augmentation by flipping streamlines.
@@ -101,7 +267,7 @@ class StreamlinesBatchSchedulerMultiSubjects(BatchScheduler):
         inputs = np.nan * np.ones((len(streamlines._data), self.input_size))
         targets = []
         for i in range(len(self.dataset.volumes)):
-            values = utils.eval_volume_at_3d_coordinates(self.dataset.volumes[i], streamlines._data)
+            values = neurotools.eval_volume_at_3d_coordinates(self.dataset.volumes[i], streamlines._data)
 
             streamlines_for_volume = streamlines[volume_ids == i]
             for offset, length in zip(streamlines_for_volume._offsets, streamlines_for_volume._lengths):
@@ -180,6 +346,18 @@ class StreamlinesBatchSchedulerMultiSubjects(BatchScheduler):
         self.use_augment_by_flipping = state["use_augment_by_flipping"]
         self.rng = pickle.loads(state["rng"])
         self.rng_noise = pickle.loads(state["rng_noise"])
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class StreamlinesBatchScheduler(BatchScheduler):
@@ -1338,87 +1516,3 @@ class ProportionalBundlesBatchScheduler(BatchScheduler):
             self.shared_batch_count.set_value(batch_count)
             yield batch_count + 1
 
-
-class SequenceBatchSchedulerText8(BatchScheduler):
-    """ BatchScheduler specially design for the Text8 dataset. """
-
-    def __init__(self, dataset, batch_size, sequence_length=10, nb_updates_per_epoch=100):
-        """
-        Parameters
-        ----------
-        dataset : `SequenceDataset` object
-            Dataset of datasets (one for each bundle).
-        batch_size : int
-            Number of examples per batch. *Must be greater than the number of
-            bundles in `bundles_dataset`.*
-        """
-        super().__init__(dataset)
-        self._shared_batch_size = theano.shared(np.array(0, dtype='i4'))
-        self.batch_size = batch_size
-        self.sequence_length = sequence_length + 1
-        self.nb_updates_per_epoch = nb_updates_per_epoch
-        segment_length = len(self.dataset) // batch_size
-        self._cursors = np.array([offset * segment_length for offset in range(batch_size)])
-
-        # Redefine symbolic inputs
-        self.dataset.symb_inputs = T.TensorVariable(type=T.TensorType("floatX", [False]*3),
-                                                    name=self.dataset.name+'_symb_inputs')
-        self.dataset.symb_targets = T.TensorVariable(type=T.TensorType("floatX", [False]*3),
-                                                     name=self.dataset.name+'_symb_targets')
-
-        # Keep only `batch_size` examples as test values.
-        self.dataset.symb_inputs.tag.test_value = self._next_batch()[:, :-1, :]
-        self.dataset.symb_targets.tag.test_value = self._next_batch()[:, 1:, :]
-
-        self._shared_batch_inputs = sharedX(np.zeros((self.batch_size, sequence_length, self.dataset.vocabulary_size)))
-        self._shared_batch_targets = sharedX(np.zeros((self.batch_size, sequence_length, self.dataset.vocabulary_size)))
-
-    def _next_batch(self):
-        # Make sure there are self.sequence_length characters available ahead of us.
-        self._cursors[self._cursors + self.sequence_length > len(self.dataset)] %= len(self.dataset) - self.sequence_length
-
-        batch = np.zeros(shape=(self.batch_size, self.sequence_length, self.dataset.vocabulary_size), dtype=theano.config.floatX)
-        for i in range(self.sequence_length):
-            batch[range(self.batch_size), i, self.dataset.inputs[self._cursors].astype(int)] = 1.0
-            self._cursors += 1
-
-        # self._cursors -= 1  # Overlap
-
-        return batch
-
-    @property
-    def updates(self):
-        return {}  # No updates
-
-    @property
-    def batch_size(self):
-        return self._shared_batch_size.get_value()
-
-    @batch_size.setter
-    def batch_size(self, value):
-        self._shared_batch_size.set_value(np.array(value, dtype='i4'))
-
-    @property
-    def givens(self):
-        return {self.dataset.symb_inputs: self._shared_batch_inputs,
-                self.dataset.symb_targets: self._shared_batch_targets}
-
-    def __iter__(self):
-        for batch_count in range(self.nb_updates_per_epoch):
-            inputs = self._next_batch()
-            self._shared_batch_inputs.set_value(inputs[:, :-1, :])
-            self._shared_batch_targets.set_value(inputs[:, 1:, :])
-            yield batch_count + 1
-
-    def save(self, savedir):
-        state = {"version": 1,
-                 "sequence_length": self.sequence_length,
-                 "batch_size": self.batch_size,
-                 "cursors": self._cursors
-                 }
-
-        np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)
-
-    def load(self, loaddir):
-        state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
-        self._cursors = state["cursors"]
