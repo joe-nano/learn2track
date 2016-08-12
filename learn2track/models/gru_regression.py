@@ -60,7 +60,7 @@ class GRU_Regression(GRU):
     def parameters(self):
         return super().parameters + self.layer_regression.parameters
 
-    def _fprop(self, Xi, *args):
+    def _fprop_step(self, Xi, *args):
         # coords : streamlines 3D coordinates.
         # coords.shape : (batch_size, 4) where the last column is a dwi ID.
         # args.shape : n_layers * (batch_size, layer_size)
@@ -94,7 +94,7 @@ class GRU_Regression(GRU):
         for hidden_size in self.hidden_sizes:
             outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
 
-        results, updates = theano.scan(fn=self._fprop,
+        results, updates = theano.scan(fn=self._fprop_step,
                                        # We want to scan over sequence elements, not the examples.
                                        sequences=[T.transpose(X, axes=(1, 0, 2))],
                                        outputs_info=outputs_info_h + [None],
@@ -107,62 +107,43 @@ class GRU_Regression(GRU):
         self.regression_out = T.transpose(results[-1], axes=(1, 0, 2))
         return self.regression_out
 
-    def use(self, X):
-        directions = self.get_output(X)
-        return directions
+    def seq_next(self, x_t, dwi_ids=None):
+        """ Returns the prediction for x_{t+1} for every sequence in the batch.
 
-
-class GRU_Regression_OLD(GRU):
-    """ A standard GRU model with a regression layer stacked on top of it.
-    """
-    def __init__(self, input_size, hidden_sizes, output_size, **_):
-        """
         Parameters
         ----------
-        input_size : int
-            Number of units each element Xi in the input sequence X has.
-        hidden_sizes : int, list of int
-            Number of hidden units each GRU should have.
-        output_size : int
-            Number of units the regression layer should have.
+        x_t : ndarray with shape (batch_size, 3)
+            Streamline coordinate (x, y, z).
+        dwi_ids : ndarray with shape (batch_size, 1), optional
+            ID of the DWIs to use among `self.dwis`. Default: [0]*len(x_t)
         """
-        super().__init__(input_size, hidden_sizes)
-        self.output_size = output_size
-        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
+        if dwi_ids is None:
+            dwi_ids = np.array([0] * len(x_t), dtype=floatX)[:, None]
 
-    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
-        super().initialize(weights_initializer)
-        self.layer_regression.initialize(weights_initializer)
+        # Append the DWI ID of each sequence after the 3D coordinates.
+        x_t = np.c_[x_t, dwi_ids]
 
-    @property
-    def hyperparameters(self):
-        hyperparameters = super().hyperparameters
-        hyperparameters['output_size'] = self.output_size
-        return hyperparameters
+        if self._gen is None:
+            # Build theano function and cache it.
+            self.seq_reset(batch_size=len(x_t))
 
-    @property
-    def parameters(self):
-        return super().parameters + self.layer_regression.parameters
+            symb_x_t = T.TensorVariable(type=T.TensorType("floatX", [False] * x_t.ndim), name='x_t')
+            symb_x_t.tag.test_value = x_t
 
-    def _fprop(self, Xi, *args):
-        outputs = super()._fprop(Xi, *args)
-        last_layer_h = outputs[len(self.hidden_sizes)-1]
-        regression_out = self.layer_regression.fprop(last_layer_h)
-        return outputs + (regression_out,)
+            states = self.states_h + [0]
+            new_states = self._fprop_step(symb_x_t, *states)
+            new_states_h = new_states[:len(self.hidden_sizes)]
 
-    def get_output(self, X):
-        outputs_info_h = []
-        for hidden_size in self.hidden_sizes:
-            outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
+            # output.shape : (batch_size, target_size)
+            next_step_predictions = new_states[-1]
 
-        results, updates = theano.scan(fn=self._fprop,
-                                       outputs_info=outputs_info_h + [None],
-                                       sequences=[T.transpose(X, axes=(1, 0, 2))])  # We want to scan over sequence elements, not the examples.
+            updates = OrderedDict()
+            for i in range(len(self.hidden_sizes)):
+                updates[self.states_h[i]] = new_states_h[i]
 
-        self.graph_updates = updates
-        # Put back the examples so they are in the first dimension.
-        self.regression_out = T.transpose(results[-1], axes=(1, 0, 2))
-        return self.regression_out
+            self._gen = theano.function([symb_x_t], next_step_predictions, updates=updates)
+
+        return self._gen(x_t)
 
     def use(self, X):
         directions = self.get_output(X)

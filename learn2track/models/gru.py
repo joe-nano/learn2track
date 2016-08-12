@@ -142,9 +142,10 @@ class GRU(Model):
             param.set_value(parameters[param.name])
 
     @classmethod
-    def create(cls, path):
+    def create(cls, path, **kwargs):
         loaddir = pjoin(path, cls.__name__)
         hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
+        hyperparams.update(kwargs)
 
         model = cls(**hyperparams)
         model.load(path)
