@@ -29,7 +29,7 @@ class SequenceDataset(Dataset):
     `symb_inputs` and `symb_targets` have test value already tagged to them. Use
     THEANO_FLAGS="compute_test_value=warn" to use them.
     """
-    def __init__(self, inputs, targets=None, name="dataset"):
+    def __init__(self, inputs, targets=None, name="dataset", keep_on_cpu=False):
         """
         Parameters
         ----------
@@ -40,6 +40,7 @@ class SequenceDataset(Dataset):
         name : str (optional)
             The name of the dataset is used to name Theano variables. Default: 'dataset'.
         """
+        self.keep_on_cpu = keep_on_cpu
         self.name = name
         self.inputs = inputs
         self.targets = targets
@@ -120,7 +121,7 @@ class MaskedSequenceDataset(SequenceDataset):
     `symb_inputs` and `symb_targets` have test value already tagged to them. Use
     THEANO_FLAGS="compute_test_value=warn" to use them.
     """
-    def __init__(self, inputs, targets=None, name="dataset"):
+    def __init__(self, inputs, targets=None, name="dataset", keep_on_cpu=False):
         """
         Parameters
         ----------
@@ -131,14 +132,14 @@ class MaskedSequenceDataset(SequenceDataset):
         name : str (optional)
             The name of the dataset is used to name Theano variables. Default: 'dataset'.
         """
-        super().__init__(inputs, targets, name)
+        super().__init__(inputs, targets, name, keep_on_cpu)
         self.symb_mask = T.TensorVariable(type=T.TensorType("floatX", [False]*inputs[0].ndim),
                                           name=self.name+'_symb_mask')
         self.symb_mask.tag.test_value = (inputs[0][:, 0] > 0.5).astype(floatX)[None, ...]  # For debugging Theano graphs.
 
 
 class TractographyDataset(MaskedSequenceDataset):
-    def __init__(self, subjects, name="dataset"):
+    def __init__(self, subjects, name="dataset", keep_on_cpu=False):
         """
         Parameters
         ----------
@@ -152,7 +153,7 @@ class TractographyDataset(MaskedSequenceDataset):
         for i, subject in enumerate(self.subjects):
             self.streamlines.extend(subject.streamlines)
 
-        super().__init__(self.streamlines, targets=None, name=name)
+        super().__init__(self.streamlines, targets=None, name=name, keep_on_cpu=keep_on_cpu)
 
         # Build int2indices
         self.streamline_id_to_volume_id = np.nan * np.ones((len(self.streamlines),))
@@ -201,4 +202,4 @@ def load_tractography_dataset(subject_files, name="HCP", use_sh_coeffs=False):
             tracto_data.volume = volume
             subjects.append(tracto_data)
 
-    return TractographyDataset(subjects, name)
+    return TractographyDataset(subjects, name, keep_on_cpu=True)

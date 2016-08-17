@@ -2,6 +2,8 @@ import numpy as np
 
 import theano
 import theano.tensor as T
+from theano.ifelse import ifelse
+
 
 B1 = np.array([[1, 0, 0, 0, 0, 0, 0, 0],
                [-1, 0, 0, 0, 1, 0, 0, 0],
@@ -87,4 +89,4 @@ def eval_volume_at_3d_coordinates_in_theano(volume, coords, strides=None):
         dx, dy, dz = d[:, 0], d[:, 1], d[:, 2]
         Q1 = T.stack([T.ones_like(dx), d[:, 0], d[:, 1], d[:, 2], dx*dy, dy*dz, dx*dz, dx*dy*dz], axis=0)
         values = T.sum(P * T.dot(B1.T, Q1), axis=1).T
-        return values
+        return ifelse(coords.shape[0] > 0, values, T.zeros((0, volume.shape[-1])))

@@ -1,9 +1,8 @@
-from os.path import join as pjoin
-
 import numpy as np
+from collections import OrderedDict
+
 import theano
 import theano.tensor as T
-from collections import OrderedDict
 
 from smartlearner.interfaces import Loss
 from smartlearner.utils import sharedX

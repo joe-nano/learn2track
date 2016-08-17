@@ -11,6 +11,7 @@ import numpy as np
 import argparse
 from os.path import join as pjoin
 
+import theano
 import theano.tensor as T
 
 from smartlearner import Trainer
@@ -115,6 +116,7 @@ def main():
     parser = build_argparser()
     args = parser.parse_args()
     print(args)
+    print("Using Theano v.{}".format(theano.version.short_version))
 
     hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view']
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude)
