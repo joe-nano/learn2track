@@ -15,6 +15,7 @@ python ~/research/src/scilpy/scripts/apply_crop_bb.py dwi_ras_b1000.nii.gz dwi_r
 
 # Cleaning up
 mv -f dwi_ras_brain_b1000.nii.gz dwi_ras_b1000.nii.gz
+mv -f dwi_ras_brain_b0.nii.gz dwi_ras_b0.nii.gz
 rm -f data.nii.gz bvals bvecs
 rm -f data_ras_b0.nii.gz bvals_ras bvecs_ras data_ras.nii.gz
 rm -rf ./$1
