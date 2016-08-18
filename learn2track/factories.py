@@ -1,6 +1,7 @@
 import theano.tensor as T
 
 import smartlearner.initializers as initer
+from learn2track.initializers import OrthogonalInitializer
 
 
 WEIGHTS_INITIALIZERS = ["uniform", "zeros", "diagonal", "orthogonal", "gaussian"]
@@ -14,7 +15,7 @@ def weigths_initializer_factory(name, seed=1234):
     elif name == "diagonal":
         return initer.DiagonalInitializer(seed)
     elif name == "orthogonal":
-        return initer.OrthogonalInitializer(seed)
+        return OrthogonalInitializer(seed)
     elif name == "gaussian":
         return initer.GaussienInitializer(seed)
 
@@ -40,7 +41,7 @@ def make_activation_function(name):
 
 
 def optimizer_factory(hyperparams, loss):
-    #Set learning rate method that will be used.
+    # Set learning rate method that will be used.
     if hyperparams["SGD"] is not None:
         from smartlearner.optimizers import SGD
         from smartlearner.direction_modifiers import ConstantLearningRate
@@ -73,3 +74,34 @@ def optimizer_factory(hyperparams, loss):
 
     else:
         raise ValueError("The optimizer is mandatory!")
+
+
+def model_factory(hyperparams, batch_scheduler):
+    if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
+        from learn2track.models import GRU_RegressionAndBinaryClassification
+        return GRU_RegressionAndBinaryClassification(batch_scheduler.input_size,
+                                                     hyperparams['hidden_sizes'],
+                                                     batch_scheduler.target_size)
+
+    elif hyperparams['model'] == 'gru_regression':
+        from learn2track.models import GRU_Regression
+        return GRU_Regression(dwis=batch_scheduler.dataset.volumes,
+                              input_size=batch_scheduler.input_size,
+                              hidden_sizes=hyperparams['hidden_sizes'],
+                              output_size=batch_scheduler.target_size)
+
+    else:
+        raise ValueError("Unknown model!")
+
+
+def loss_factory(hyperparams, model, dataset):
+    if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
+        from learn2track.models.gru_regression_and_binary_classification import L2DistancePlusBinaryCrossEntropy
+        return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize_output=True)
+
+    elif hyperparams['model'] == 'gru_regression':
+        from learn2track.models.gru_regression import L2DistanceForSequences
+        return L2DistanceForSequences(model, dataset, normalize_output=True)
+
+    else:
+        raise ValueError("Unknown model!")

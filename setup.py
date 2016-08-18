@@ -5,19 +5,19 @@ from os.path import join as pjoin
 from setuptools import setup, find_packages
 
 setup(
-    name='learn2track',',
-    version='0.0.1',
-    author='Marc-Alexandre Côté',
-    author_email='marc-alexandre.cote@usherbrooke.ca',
+    name='learn2track',
+    version='0.1.0',
+    author='Marc-Alexandre Côté, Philippe Poulin',
     url='https://github.com/MarcCote/learn2track',
     packages=find_packages(),
     license='LICENSE',
-    description='Learn how to do tractography directly from diffusion weighted images.',
+    description='Learn to do tractography directly from diffusion weighted images.',
     long_description=open('README.md').read(),
-    install_requires=['smartlearner', 'dipy', 'nibabel'],
-    dependency_links=['https://github.com/SMART-Lab/smartlearner/archive/master.zip#egg=smartlearner-0.0.1'],
-    scripts=[pjoin('scripts', 'generate_training_data_ismrm2015.py'),
-             pjoin('scripts', 'create_dataset_from_training_data.py'),
-             pjoin('scripts', 'train_learn2track.py'),
-             pjoin('scripts', 'use_learn2track.py')]
+    install_requires=['smartlearner', 'dipy', 'nibabel>=2.0.4'],
+    dependency_links=['https://github.com/SMART-Lab/smartlearner/archive/master.zip#egg=smartlearner-0.0.1',
+                      'https://github.com/MarcCote/nibabel/archive/streamlines_tck.zip#egg=nibabel-2.0.4'],
+    scripts=[pjoin('scripts', 'process_streamlines.py'),
+             pjoin('scripts', 'viz.py'),
+             pjoin('scripts', 'learn.py'),
+             pjoin('scripts', 'track.py')]
 )

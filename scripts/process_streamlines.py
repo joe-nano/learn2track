@@ -7,12 +7,16 @@ import sys
 # Hack so you don't have to put the library containing this script in the PYTHONPATH.
 sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
+import re
 import numpy as np
 import argparse
 import textwrap
 
 import nibabel as nib
+from dipy.core.gradients import gradient_table
+
 from learn2track.utils import Timer
+from learn2track.neurotools import TractographyData
 
 
 def build_argparser():
@@ -28,14 +32,19 @@ def build_argparser():
                 Number of points of each streamline. M is the total number of streamlines.
             'bundle_ids': ndarray of shape (M,) with dtype int16
                 ID of the bundle each streamline belongs to
-            'bundle_names': ndarray of shape (B,) with dtype str
-                Name of each bundle in order of their bundle ID. B is the number of bundles.
+            'name2id': dict
+                Mapping between bundle names and bundle IDs.
+            'signal': :class:`Nifti1Image` object (from nibabel)
+                Diffusion signal
+            'gradients': :class:`GradientTable` object (from dipy)
+                Diffusion gradients information
         """)
     p = argparse.ArgumentParser(description=DESCRIPTION, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    p.add_argument('bundles', metavar='bundle', type=str, nargs="+", help='list of ground truth bundle files.')
-    p.add_argument('--ref', metavar='FILE',
-                   help='If provided, streamlines will be transformed to fit in the voxel grid defined by this reference anatomy.')
+    p.add_argument('signal', help='Diffusion signal (.nii|.nii.gz).')
+    p.add_argument('bundles', metavar='bundle', type=str, nargs="+", help='list of streamlines bundle files.')
+    p.add_argument('--bvals', help='File containing diffusion gradient lengths (Default: guess it from `signal`).')
+    p.add_argument('--bvecs', help='File containing diffusion gradient directions (Default: guess it from `signal`).')
     p.add_argument('--out', metavar='FILE', default="dataset.npz", help='output filename (.npz). Default: dataset.npz')
     p.add_argument('--dtype', type=str, default="float32", help="'float16' or 'float32'. Default: 'float32'")
 
@@ -49,51 +58,43 @@ def main():
     parser = build_argparser()
     args = parser.parse_args()
 
-    precision_error = 0
-    streamlines = nib.streamlines.ArraySequence()
-    bundle_ids = np.zeros((0,), dtype=np.int16)
-    bundle_names = []
+    signal = nib.load(args.signal)
+    signal.get_data()  # Forces loading volume in-memory.
+    basename = re.sub('(\.gz|\.nii.gz)$', '', args.signal)
+    bvals = basename + '.bvals' if args.bvals is None else args.bvals
+    bvecs = basename + '.bvecs' if args.bvecs is None else args.bvecs
 
-    affine = None
-    if args.ref:
-        affine = nib.load(args.ref).affine  # vox->rasmm
-        affine = np.linalg.inv(affine)  # rasmm->vox
+    gradients = gradient_table(bvals, bvecs)
+    tracto_data = TractographyData(signal, gradients)
+
+    # Compute matrix that brings streamlines back to diffusion voxel space.
+    rasmm2vox_affine = np.linalg.inv(signal.affine)
 
     # Retrieve data.
     with Timer("Retrieving data", newline=args.verbose):
-        for i, filename in enumerate(args.bundles):
+        for filename in sorted(args.bundles):
             if args.verbose:
                 print("{}".format(filename))
 
+            # Load streamlines
             tfile = nib.streamlines.load(filename)
-            if affine is not None:
-                tfile.tractogram.apply_affine(affine)
+            tfile.tractogram.apply_affine(rasmm2vox_affine)
 
-            # Concatenate the points of the streamlines.
-            streamlines.extend(tfile.streamlines)
-
-            # Keep the bundle ID for every streamline.
-            size = len(bundle_ids)
-            new_size = size + len(tfile.streamlines)
-            bundle_ids.resize((new_size,))
-            bundle_ids[size:new_size] = i
-
-            # Keep the bundle name associated to every bundle ID.
+            # Add streamlines to the TractogramData
             bundle_name = os.path.splitext(os.path.basename(filename))[0]
-            bundle_names.append(bundle_name)
+            tracto_data.add(tfile.streamlines, bundle_name)
 
     if args.verbose:
-        diff = streamlines._data - streamlines._data.astype(args.dtype)
+        diff = tracto_data.streamlines._data - tracto_data.streamlines._data.astype(args.dtype)
         precision_error = np.sum(np.sqrt(np.sum(diff**2, axis=1)))
-        print("Precision error: {} (avg. {})".format(precision_error, precision_error/len(streamlines._data)))
+        avg_precision_error = precision_error/len(tracto_data.streamlines._data)
+        print("Precision error: {} (avg. {})".format(precision_error, avg_precision_error))
+
+    # Save streamlines coordinates using either float16 or float32.
+    tracto_data.streamlines._data = tracto_data.streamlines._data.astype(args.dtype)
 
     # Save dataset
-    np.savez(args.out,
-             coords=streamlines._data.astype(args.dtype),
-             offsets=streamlines._offsets,
-             lengths=streamlines._lengths.astype(np.int16),
-             bundle_ids=bundle_ids,
-             bundle_names=bundle_names)
+    tracto_data.save(args.out)
 
 if __name__ == '__main__':
     main()

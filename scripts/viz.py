@@ -1,54 +1,20 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import os
+import sys
+
+# Hack so you don't have to put the library containing this script in the PYTHONPATH.
+sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
+
 from dipy.workflows.base import IntrospectiveArgumentParser
 
 import numpy as np
 import nibabel as nib
-from dipy.tracking.streamline import transform_streamlines, length
 from dipy.viz import actor, window, widget
 from dipy.viz import fvtk
-from copy import copy, deepcopy
-import os.path as path
-from glob import glob
 
-
-class StreamlinesData(object):
-    def __init__(self, bundle_names):
-        self.streamlines = nib.streamlines.ArraySequence()
-        self.bundle_ids = np.zeros((0,), dtype=np.int16)
-        self.bundle_names = bundle_names
-
-    def add(self, streamlines, bundle_ids):
-        self.streamlines.extend(streamlines)
-        size = len(self.bundle_ids)
-        new_size = size + len(bundle_ids)
-        self.bundle_ids.resize((new_size,))
-        self.bundle_ids[size:new_size] = bundle_ids
-
-    @classmethod
-    def load(cls, filename):
-        data = np.load(filename)
-        streamlines_data = cls(data['bundle_names'])
-        streamlines_data.streamlines._data = data['coords']
-        streamlines_data.streamlines._offsets = data['offsets']
-        streamlines_data.streamlines._lengths = data['lengths']
-        streamlines_data.bundle_ids = data['bundle_ids']
-        return streamlines_data
-
-    def save(self, filename):
-        np.savez(filename,
-                 coords=self.streamlines._data.astype(np.float32),
-                 offsets=self.streamlines._offsets,
-                 lengths=self.streamlines._lengths.astype(np.int16),
-                 bundle_ids=self.bundle_ids,
-                 bundle_names=self.bundle_names)
-
-
-def check_range(streamline, lt, gt):
-    length_s = length(streamline)
-    if (length_s < gt) & (length_s > lt):
-        return True
-    else:
-        return False
+from learn2track.neurotools import TractographyData
 
 
 def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
@@ -65,39 +31,11 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
 
         print(' Number of streamlines loaded {} \n'.format(len(streamlines)))
 
-        if cluster:
-            pass
-            # print(' Clustering threshold {} \n'.format(cluster_thr))
-            # clusters = qbx_with_merge(streamlines,
-            #                           [40, 30, 25, 20, cluster_thr])
-            # centroids = clusters.centroids
-            # print(' Number of centroids is {}'.format(len(centroids)))
-            # sizes = np.array([len(c) for c in clusters])
-            # linewidths = np.interp(sizes,
-            #                        [sizes.min(), sizes.max()], [0.1, 2.])
-            # visible_cluster_id = []
-            # print(' Minimum number of streamlines in cluster {}'
-            #       .format(sizes.min()))
-
-            # print(' Maximum number of streamlines in cluster {}'
-            #       .format(sizes.max()))
-
-            # for (i, c) in enumerate(centroids):
-            #     if check_range(c, length_lt, length_gt):
-            #         if sizes[i] > clusters_lt and sizes[i] < clusters_gt:
-            #             act = actor.streamtube([c], linewidth=linewidths[i],
-            #                                    lod=False)
-            #             centroid_actors.append(act)
-            #             ren.add(act)
-            #             visible_cluster_id.append(i)
+        if not random_colors:
+            ren.add(actor.line(streamlines, opacity=1., lod_points=10 ** 5))
         else:
-            if not random_colors:
-                ren.add(actor.line(streamlines,
-                                   opacity=1., lod_points=10 ** 5))
-            else:
-                colors = rng.rand(3)
-                ren.add(actor.line(streamlines, colors,
-                                   opacity=1., lod_points=10 ** 5))
+            colors = rng.rand(3)
+            ren.add(actor.line(streamlines, colors, opacity=1., lod_points=10 ** 5))
 
     class SimpleTrackBallNoBB(window.vtk.vtkInteractorStyleTrackballCamera):
         def HighlightProp(self, p):
@@ -250,7 +188,11 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
             print('\n')
 
         if f.endswith('.trk') or f.endswith('.tck'):
-            streamlines = nib.streamlines.load(f).streamlines#[::100]
+            streamlines = nib.streamlines.load(f).streamlines
+            idx = np.arange(len(streamlines))
+            rng = np.random.RandomState(42)
+            rng.shuffle(idx)
+            streamlines = streamlines[idx[:100]]
 
             if noisy_streamlines_sigma > 0. and i > 0:
                 streamlines = add_noise_to_streamlines(streamlines, noisy_streamlines_sigma)
@@ -258,8 +200,17 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
             tractograms.append(streamlines)
 
         if f.endswith('.npz'):
-            streamlines_data = StreamlinesData.load(f)
-            tractograms.append(streamlines_data.streamlines)
+            tractography_data = TractographyData.load(f)
+            idx = np.arange(len(tractography_data.streamlines))
+            rng = np.random.RandomState(42)
+            rng.shuffle(idx)
+            tractography_data.streamlines = tractography_data.streamlines[idx[:200]]
+            tractograms.append(tractography_data.streamlines)
+
+            if hasattr(tractography_data, 'signal'):
+                signal = tractography_data.signal.get_data()
+                data = signal[:, :, :, 0]
+                affine = np.eye(4)
 
         if f.endswith('.nii.gz') or f.endswith('.nii'):
 
