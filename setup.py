@@ -17,6 +17,7 @@ setup(
     dependency_links=['https://github.com/SMART-Lab/smartlearner/archive/master.zip#egg=smartlearner-0.0.1',
                       'https://github.com/MarcCote/nibabel/archive/streamlines_tck.zip#egg=nibabel-2.0.4'],
     scripts=[pjoin('scripts', 'process_streamlines.py'),
+             pjoin('scripts', 'split_dataset.py'),
              pjoin('scripts', 'viz.py'),
              pjoin('scripts', 'learn.py'),
              pjoin('scripts', 'track.py')]
