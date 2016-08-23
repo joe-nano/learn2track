@@ -45,7 +45,7 @@ class StreamlinesData(object):
 
 
 class TractographyData(object):
-    def __init__(self, signal, gradients):
+    def __init__(self, signal, gradients, name2id=None):
         """
         Parameters
         ----------
@@ -56,16 +56,27 @@ class TractographyData(object):
         """
         self.streamlines = nib.streamlines.ArraySequence()
         self.bundle_ids = np.zeros((0,), dtype=np.int16)
-        self.name2id = OrderedDict()
+        self.name2id = OrderedDict() if name2id is None else name2id
         self.signal = signal
         self.gradients = gradients
-        self.volume = signal.get_data()
+
+    @property
+    def volume(self):
+        if self._volume is None:
+            # Returns original signal
+            return self.signal.get_data()
+
+        return self._volume
+
+    @volume.setter
+    def volume(self, value):
+        self._volume = value
 
     @property
     def bundle_names(self):
         return list(self.name2id.keys())
 
-    def add(self, streamlines, bundle_name):
+    def add(self, streamlines, bundle_name=None, bundle_ids=None):
         """ Adds a bundle of streamlines to this container.
 
         Parameters
@@ -76,10 +87,14 @@ class TractographyData(object):
             Name of the bundle the streamlines belong to.
         """
         # Get bundle ID, create one if it's new bundle.
-        if bundle_name not in self.name2id:
-            self.name2id[bundle_name] = len(self.name2id)
+        if bundle_name is not None:
+            if bundle_name not in self.name2id:
+                self.name2id[bundle_name] = len(self.name2id)
 
-        bundle_id = self.name2id[bundle_name]
+            bundle_id = self.name2id[bundle_name]
+
+        if bundle_ids is not None:
+            bundle_id = bundle_ids
 
         # Append streamlines
         self.streamlines.extend(streamlines)
@@ -96,7 +111,7 @@ class TractographyData(object):
         streamlines_data.streamlines._offsets = data['offsets']
         streamlines_data.streamlines._lengths = data['lengths']
         streamlines_data.bundle_ids = data['bundle_ids']
-        streamlines_data.name2id = OrderedDict(data['name2id'])
+        streamlines_data.name2id = OrderedDict([(str(k), int(v)) for k, v in data['name2id']])
         return streamlines_data
 
     def save(self, filename):

@@ -12,19 +12,28 @@ import numpy as np
 
 import nibabel as nib
 
-from learn2track.utils import Timer, StreamlinesData
+from learn2track.utils import Timer
+from learn2track.neurotools import TractographyData
 
 
 def buildArgsParser():
-    DESCRIPTION = "Script to split a dataset while making sure the split is similar every bundle."
-    p = argparse.ArgumentParser(description=DESCRIPTION, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    DESCRIPTION = """Script to split a dataset while making sure the split is similar every bundle.
+
+        Examples
+        --------
+        split_dataset.py ismrm15_challenge.npz -v
+        split_dataset.py ismrm15_challenge.npz -v --leave-one-out 0 1 2 3,4 5,6 7,8 9 10,11 12,13 14 15,16 17,18 19,20 21,22 23,24
+    """
+    p = argparse.ArgumentParser(description=DESCRIPTION, formatter_class=argparse.RawTextHelpFormatter)
 
     p.add_argument('dataset', help='training data (.npz).')
-    p.add_argument('--split', type=float, nargs=3, help='respectively the sizes of the split for trainset, validset and testset.', default=[0.8, 0.1, 0.1])
-    p.add_argument('--split_type', type=str, choices=["percentage", "count"], help='type of the split, either use percents or fixed counts.', default="percentage")
-    p.add_argument('--seed', type=int, help='seed to use to shuffle data.', default=1234)
-    p.add_argument('--delete', action="store_true", help='delete bundle file after being splitted.')
-    p.add_argument('--leave-one-out', metavar="BUNDLE_ID", nargs="+", type=str,
+    p.add_argument('--split', type=float, nargs=3, default=[0.8, 0.1, 0.1],
+                   help='respectively the sizes of the split for trainset, validset and testset. Default: %(default)s')
+    p.add_argument('--split_type', choices=["percentage", "count"], default="percentage",
+                   help='type of the split, either use percents or fixed counts. Default: %(default)s')
+    p.add_argument('--seed', type=int, default=1234, help='seed to use to shuffle data. Default: %(default)s')
+    p.add_argument('--delete', action="store_true", help='if specified, delete bundle file after being splitted.')
+    p.add_argument('--leave-one-out', metavar="BUNDLE_ID", nargs="+",
                    help='list of bundle_id (use comma to merge multiple into one), from which a leave-one-out split will be generated (i.e. remove one bundle from the trainset and generate a testset and a validset from it.')
 
     p.add_argument('--list-bundles-name', action="store_true",
@@ -39,12 +48,14 @@ def main():
     parser = buildArgsParser()
     args = parser.parse_args()
 
-    data = StreamlinesData.load(args.dataset)
+    data = TractographyData.load(args.dataset)
     streamlines = data.streamlines
+    print("{} has {:,} streamlines".format(args.dataset, len(streamlines)))
 
     if args.list_bundles_name:
-        for i, name in enumerate(data.bundle_names):
-            print("{}: {}".format(i, name))
+        for bundle_name in data.bundle_names:
+            bundle_id = data.name2id[bundle_name]
+            print("{}: {}".format(bundle_id, bundle_name))
 
         return
 
@@ -52,9 +63,9 @@ def main():
         with Timer("Splitting {} using a leave-one-out strategy".format(args.dataset), newline=True):
             for bundle in args.leave_one_out:
                 rng = np.random.RandomState(args.seed)
-                train_data = StreamlinesData(data.bundle_names)
-                valid_data = StreamlinesData(data.bundle_names)
-                test_data = StreamlinesData(data.bundle_names)
+                train_data = TractographyData(data.signal, data.gradients, data.name2id)
+                valid_data = TractographyData(data.signal, data.gradients, data.name2id)
+                test_data = TractographyData(data.signal, data.gradients, data.name2id)
 
                 bundle_ids_to_exclude = list(map(int, bundle.split(',')))
                 missing_bundles_name = [data.bundle_names[i] for i in bundle_ids_to_exclude]
@@ -77,9 +88,9 @@ def main():
                 validset_indices = exclude_idx[:len(exclude_idx)//2]
                 testset_indices = exclude_idx[len(exclude_idx)//2:]
 
-                train_data.add(streamlines[trainset_indices], data.bundle_ids[trainset_indices])
-                valid_data.add(streamlines[validset_indices], data.bundle_ids[validset_indices])
-                test_data.add(streamlines[testset_indices], data.bundle_ids[testset_indices])
+                train_data.add(streamlines[trainset_indices], bundle_ids=data.bundle_ids[trainset_indices])
+                valid_data.add(streamlines[validset_indices], bundle_ids=data.bundle_ids[validset_indices])
+                test_data.add(streamlines[testset_indices], bundle_ids=data.bundle_ids[testset_indices])
 
                 filename = "missing_{}.npz".format("_".join(missing_bundles_name))
                 with Timer("Saving dataset: {}".format(filename[:-4])):
@@ -89,16 +100,17 @@ def main():
 
     else:
         rng = np.random.RandomState(args.seed)
-        train_data = StreamlinesData(data.bundle_names)
-        valid_data = StreamlinesData(data.bundle_names)
-        test_data = StreamlinesData(data.bundle_names)
+        train_data = TractographyData(data.signal, data.gradients, data.name2id)
+        valid_data = TractographyData(data.signal, data.gradients, data.name2id)
+        test_data = TractographyData(data.signal, data.gradients, data.name2id)
 
         with Timer("Splitting {} as follow {} using {}".format(args.dataset, args.split, args.split_type), newline=args.verbose):
-            for i, name in enumerate(data.bundle_names):
+            for bundle_name in data.bundle_names:
                 if args.verbose:
-                    print("Splitting bundle {}...".format(name))
+                    print("Splitting bundle {}...".format(bundle_name))
 
-                indices = np.where(data.bundle_ids == i)[0]
+                bundle_id = data.name2id[bundle_name]
+                indices = np.where(data.bundle_ids == bundle_id)[0]
                 nb_examples = len(indices)
                 rng.shuffle(indices)
 
@@ -117,9 +129,9 @@ def main():
                 validset_indices = indices[trainset_size:-testset_size]
                 testset_indices = indices[-testset_size:]
 
-                train_data.add(streamlines[trainset_indices], data.bundle_ids[trainset_indices])
-                valid_data.add(streamlines[validset_indices], data.bundle_ids[validset_indices])
-                test_data.add(streamlines[testset_indices], data.bundle_ids[testset_indices])
+                train_data.add(streamlines[trainset_indices], bundle_name)
+                valid_data.add(streamlines[validset_indices], bundle_name)
+                test_data.add(streamlines[testset_indices], bundle_name)
 
         with Timer("Saving"):
             train_data.save(args.dataset[:-4] + "_trainset.npz")
