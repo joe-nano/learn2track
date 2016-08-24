@@ -159,6 +159,7 @@ class TractographyBatchScheduler(BatchScheduler):
                  "seed": self.seed,
                  "rng": pickle.dumps(self.rng),
                  "rng_noise": pickle.dumps(self.rng_noise),
+                 "indices": self.indices,
                  }
 
         np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)
@@ -170,6 +171,7 @@ class TractographyBatchScheduler(BatchScheduler):
         self.use_augment_by_flipping = state["use_augment_by_flipping"]
         self.rng = pickle.loads(state["rng"])
         self.rng_noise = pickle.loads(state["rng_noise"])
+        self.indices = state["indices"]
 
 
 class TractographyBatchSchedulerWithProportionalSamplingFromBundles(BatchScheduler):
