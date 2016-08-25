@@ -28,6 +28,7 @@ from learn2track.factories import loss_factory
 
 from learn2track import datasets
 from learn2track.batch_schedulers import TractographyBatchScheduler
+from learn2track.neurotools import VolumeManager
 
 
 def build_train_gru_argparser(subparser):
@@ -128,8 +129,9 @@ def main():
     print("Resuming:" if resuming else "Creating:", experiment_path)
 
     with Timer("Loading dataset", newline=True):
-        trainset = datasets.load_tractography_dataset(args.train_subjects)
-        validset = datasets.load_tractography_dataset(args.valid_subjects)
+        volume_manager = VolumeManager()
+        trainset = datasets.load_tractography_dataset(args.train_subjects, volume_manager, name="trainset")
+        validset = datasets.load_tractography_dataset(args.valid_subjects, volume_manager, name="validset")
         print("Dataset sizes:", len(trainset), " |", len(validset))
 
         batch_scheduler = TractographyBatchScheduler(trainset,
@@ -137,10 +139,13 @@ def main():
                                                      noisy_streamlines_sigma=args.noisy_streamlines_sigma,
                                                      seed=args.seed)
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
-        print (batch_scheduler.input_size, args.hidden_sizes, batch_scheduler.target_size)
+        print (volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
 
     with Timer("Creating model"):
-        model = model_factory(hyperparams, batch_scheduler)
+        model = model_factory(hyperparams,
+                              input_size=volume_manager.data_dimension,
+                              output_size=batch_scheduler.target_size,
+                              volume_manager=volume_manager)
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
 

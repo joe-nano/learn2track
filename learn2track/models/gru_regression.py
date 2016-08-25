@@ -5,11 +5,9 @@ import theano
 import theano.tensor as T
 
 from smartlearner.interfaces import Loss
-from smartlearner.utils import sharedX
 import smartlearner.initializers as initer
 
 from learn2track.models.layers import LayerRegression
-from learn2track.interpolation import eval_volume_at_3d_coordinates_in_theano
 from learn2track.models import GRU
 
 floatX = theano.config.floatX
@@ -18,12 +16,12 @@ floatX = theano.config.floatX
 class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
     """
-    def __init__(self, dwis, input_size, hidden_sizes, output_size, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, **_):
         """
         Parameters
         ----------
-        dwis : list of 4D arrays with shape (width, height, depth, nb_gradients)
-            Diffusion signal as weighted images.
+        volume_manager : :class:`VolumeManger` object
+            Use to evaluate the diffusion signal at specific coordinates.
         input_size : int
             Number of units each element Xi in the input sequence X has.
         hidden_sizes : int, list of int
@@ -32,16 +30,7 @@ class GRU_Regression(GRU):
             Number of units the regression layer should have.
         """
         super().__init__(input_size, hidden_sizes)
-
-        self.dwis = [sharedX(dwi, name='dwi', keep_on_cpu=False) for dwi in dwis]
-
-        # Precompute strides that will be used in the interpolation.
-        self.dwi_strides = []
-        for dwi in self.dwis:
-            shapes = T.cast(dwi.shape[:-1], dtype=floatX)
-            strides = T.concatenate([T.ones((1,)), T.cumprod(shapes[::-1])[:-1]], axis=0)[::-1]
-            self.dwi_strides.append(strides.eval())
-
+        self.volume_manager = volume_manager
         self.output_size = output_size
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
 
@@ -60,8 +49,6 @@ class GRU_Regression(GRU):
         return super().parameters + self.layer_regression.parameters
 
     def _fprop_step(self, Xi, *args):
-        batch_size = Xi.shape[0]
-
         # coords : streamlines 3D coordinates.
         # coords.shape : (batch_size, 4) where the last column is a dwi ID.
         # args.shape : n_layers * (batch_size, layer_size)
@@ -69,12 +56,7 @@ class GRU_Regression(GRU):
 
         # Get diffusion data.
         # data_at_coords.shape : (batch_size, input_size)
-        data_at_coords = T.zeros((batch_size, self.input_size))
-        for i, (dwi, dwi_stride) in enumerate(zip(self.dwis, self.dwi_strides)):
-            selection = T.eq(coords[:, 3], i).nonzero()[0]  # Theano's way of doing: coords[:, 3] == i
-            selected_coords = coords[selection, :3]
-            data_at_selected_coords = eval_volume_at_3d_coordinates_in_theano(dwi, selected_coords, strides=dwi_stride)
-            data_at_coords = T.set_subtensor(data_at_coords[selection], data_at_selected_coords)
+        data_at_coords = self.volume_manager.eval_at_coords(coords)
 
         # Hidden state to be passed to the next GRU iteration (next _fprop call)
         # next_hidden_state.shape : n_layers * (batch_size, layer_size)
@@ -97,7 +79,7 @@ class GRU_Regression(GRU):
                                        # We want to scan over sequence elements, not the examples.
                                        sequences=[T.transpose(X, axes=(1, 0, 2))],
                                        outputs_info=outputs_info_h + [None],
-                                       non_sequences=self.parameters + self.dwis,
+                                       non_sequences=self.parameters + self.volume_manager.volumes,
                                        strict=True)
 
         self.graph_updates = updates

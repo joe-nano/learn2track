@@ -1,4 +1,3 @@
-import hashlib
 import numpy as np
 from collections import OrderedDict
 
@@ -11,37 +10,13 @@ from dipy.data import get_sphere
 from dipy.core.sphere import Sphere, HemiSphere
 from dipy.reconst.shm import sph_harm_lookup, smooth_pinv
 
+import theano
+import theano.tensor as T
 
-class StreamlinesData(object):
-    def __init__(self, bundle_names):
-        self.streamlines = nib.streamlines.ArraySequence()
-        self.bundle_ids = np.zeros((0,), dtype=np.int16)
-        self.bundle_names = bundle_names
+from smartlearner.utils import sharedX
+from learn2track.interpolation import eval_volume_at_3d_coordinates_in_theano
 
-    def add(self, streamlines, bundle_ids):
-        self.streamlines.extend(streamlines)
-        size = len(self.bundle_ids)
-        new_size = size + len(bundle_ids)
-        self.bundle_ids.resize((new_size,))
-        self.bundle_ids[size:new_size] = bundle_ids
-
-    @classmethod
-    def load(cls, filename):
-        data = np.load(filename)
-        streamlines_data = cls(data['bundle_names'])
-        streamlines_data.streamlines._data = data['coords']
-        streamlines_data.streamlines._offsets = data['offsets']
-        streamlines_data.streamlines._lengths = data['lengths']
-        streamlines_data.bundle_ids = data['bundle_ids']
-        return streamlines_data
-
-    def save(self, filename):
-        np.savez(filename,
-                 coords=self.streamlines._data.astype(np.float32),
-                 offsets=self.streamlines._offsets,
-                 lengths=self.streamlines._lengths.astype(np.int16),
-                 bundle_ids=self.bundle_ids,
-                 bundle_names=self.bundle_names)
+floatX = theano.config.floatX
 
 
 class TractographyData(object):
@@ -59,6 +34,7 @@ class TractographyData(object):
         self.name2id = OrderedDict() if name2id is None else name2id
         self.signal = signal
         self.gradients = gradients
+        self.subject_id = None
 
     @property
     def volume(self):
@@ -125,6 +101,45 @@ class TractographyData(object):
                  name2id=list(self.name2id.items()))
 
 
+class VolumeManager(object):
+    # __instance = None
+
+    # def __new__(cls, val):
+    #     if VolumeManager.__instance is None:
+    #         VolumeManager.__instance = object.__new__(cls)
+    #     VolumeManager.__instance.val = val
+    #     return VolumeManager.__instance
+
+    def __init__(self):
+        self.volumes = []
+        self.volumes_strides = []
+
+    @property
+    def data_dimension(self):
+        return self.volumes[0].get_value().shape[-1]
+
+    def register(self, volume):
+        volume_id = len(self.volumes)
+        shape = np.array(volume.shape[:-1], dtype=floatX)
+        strides = np.r_[1, np.cumprod(shape[::-1])[:-1]][::-1]
+        self.volumes_strides.append(strides)
+        self.volumes.append(sharedX(volume, name='volume_{}'.format(volume_id)))
+
+        # Sanity check: make sure the size of the last dimension is the same for all volumes.
+        assert self.data_dimension == volume.shape[-1]
+        return volume_id
+
+    def eval_at_coords(self, coords):
+        data_at_coords = T.zeros((coords.shape[0], self.volumes[0].shape[-1]))
+        for i, (volume, strides) in enumerate(zip(self.volumes, self.volumes_strides)):
+            selection = T.eq(coords[:, 3], i).nonzero()[0]  # Theano's way of doing: coords[:, 3] == i
+            selected_coords = coords[selection, :3]
+            data_at_selected_coords = eval_volume_at_3d_coordinates_in_theano(volume, selected_coords, strides=strides)
+            data_at_coords = T.set_subtensor(data_at_coords[selection], data_at_selected_coords)
+
+        return data_at_coords
+
+
 def save_bundle(file, inputs, targets, indices=[]):
     """ Saves a bundle compatible with the learn2track framework.
 
@@ -182,11 +197,6 @@ def load_bundle(file):
     targets._lengths = data["targets_lengths"]
 
     return inputs, targets
-
-
-def generate_uid_from_string(value):
-    """ Creates unique identifier from a string. """
-    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def map_coordinates_3d_4d(input_array, indices, affine=None, order=1):
