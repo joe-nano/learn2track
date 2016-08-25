@@ -60,21 +60,21 @@ class GRU_Regression(GRU):
         return super().parameters + self.layer_regression.parameters
 
     def _fprop_step(self, Xi, *args):
+        batch_size = Xi.shape[0]
+
         # coords : streamlines 3D coordinates.
         # coords.shape : (batch_size, 4) where the last column is a dwi ID.
         # args.shape : n_layers * (batch_size, layer_size)
         coords = Xi
 
         # Get diffusion data.
-        data_at_coords = []
+        # data_at_coords.shape : (batch_size, input_size)
+        data_at_coords = T.zeros((batch_size, self.input_size))
         for i, (dwi, dwi_stride) in enumerate(zip(self.dwis, self.dwi_strides)):
             selection = T.eq(coords[:, 3], i).nonzero()[0]  # Theano's way of doing: coords[:, 3] == i
             selected_coords = coords[selection, :3]
             data_at_selected_coords = eval_volume_at_3d_coordinates_in_theano(dwi, selected_coords, strides=dwi_stride)
-            data_at_coords.append(data_at_selected_coords)
-
-        # data_at_coords.shape : (batch_size, input_size)
-        data_at_coords = T.concatenate(data_at_coords, axis=0)
+            data_at_coords = T.set_subtensor(data_at_coords[selection], data_at_selected_coords)
 
         # Hidden state to be passed to the next GRU iteration (next _fprop call)
         # next_hidden_state.shape : n_layers * (batch_size, layer_size)
