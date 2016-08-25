@@ -102,14 +102,6 @@ class TractographyData(object):
 
 
 class VolumeManager(object):
-    # __instance = None
-
-    # def __new__(cls, val):
-    #     if VolumeManager.__instance is None:
-    #         VolumeManager.__instance = object.__new__(cls)
-    #     VolumeManager.__instance.val = val
-    #     return VolumeManager.__instance
-
     def __init__(self):
         self.volumes = []
         self.volumes_strides = []

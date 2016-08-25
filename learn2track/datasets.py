@@ -146,7 +146,6 @@ class TractographyDataset(MaskedSequenceDataset):
         subjects: list of TractogramData
         """
         self.subjects = subjects
-        # self.volumes = [subject.volume for subject in self.subjects]
 
         # Combine all tractograms in one.
         self.streamlines = nib.streamlines.ArraySequence()
