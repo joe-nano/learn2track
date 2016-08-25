@@ -2,7 +2,6 @@ import numpy as np
 
 import theano
 import theano.tensor as T
-from theano.ifelse import ifelse
 
 
 B1 = np.array([[1, 0, 0, 0, 0, 0, 0, 0],
@@ -84,20 +83,10 @@ def eval_volume_at_3d_coordinates_in_theano(volume, coords, strides=None):
     elif volume.ndim == 4:
         indices = T.floor((coords[:, None, :] + idx).reshape((-1, 3)))
 
-        flag_compute_test_value = theano.config.compute_test_value
-        if flag_compute_test_value != 'off' and coords.tag.test_value.shape[0] == 0:
-            theano.config.compute_test_value = 'off'
-
-        P = advanced_indexing(volume, indices[:, 0], indices[:, 1], indices[:, 2], strides=strides).reshape((coords.shape[0], 8, -1)).T
+        P = advanced_indexing(volume, indices[:, 0], indices[:, 1], indices[:, 2], strides=strides).reshape((coords.shape[0], 8, volume.shape[-1])).T
 
         d = coords - T.floor(coords)
         dx, dy, dz = d[:, 0], d[:, 1], d[:, 2]
         Q1 = T.stack([T.ones_like(dx), d[:, 0], d[:, 1], d[:, 2], dx*dy, dy*dz, dx*dz, dx*dy*dz], axis=0)
         values = T.sum(P * T.dot(B1.T, Q1), axis=1).T
-
-        theano.config.compute_test_value = flag_compute_test_value
-        if flag_compute_test_value != 'off' and coords.tag.test_value.shape[0] == 0:
-            values.tag.test_value = T.zeros((0, volume.shape[-1])).tag.test_value
-
-        res = ifelse(coords.shape[0] > 0, values, T.zeros((0, volume.shape[-1])))
-        return res
+        return values
