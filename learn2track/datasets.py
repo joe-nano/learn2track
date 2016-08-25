@@ -146,7 +146,6 @@ class TractographyDataset(MaskedSequenceDataset):
         subjects: list of TractogramData
         """
         self.subjects = subjects
-        self.volumes = [subject.volume for subject in self.subjects]
 
         # Combine all tractograms in one.
         self.streamlines = nib.streamlines.ArraySequence()
@@ -159,20 +158,13 @@ class TractographyDataset(MaskedSequenceDataset):
         self.streamline_id_to_volume_id = np.nan * np.ones((len(self.streamlines),))
 
         start = 0
-        for i, subject in enumerate(self.subjects):
+        for subject in self.subjects:
             end = start + len(subject.streamlines)
-            self.streamline_id_to_volume_id[start:end] = i
+            self.streamline_id_to_volume_id[start:end] = subject.subject_id
             start = end
 
         assert not np.isnan(self.streamline_id_to_volume_id.sum())
         self.streamline_id_to_volume_id = self.streamline_id_to_volume_id.astype(floatX)
-
-        # self.streamlines = streamlines_data.streamlines
-        # self.bundle_ids = streamlines_data.bundle_ids
-        # self.bundle_names = streamlines_data.bundle_names
-        # self.bundle_counts = np.bincount(self.bundle_ids)
-        # self.bundle_indices = [np.where(self.bundle_ids == i)[0] for i in range(len(self.bundle_names))]
-        # super().__init__(self.streamlines, targets=None, name=name)
 
     def __len__(self):
         return len(self.streamlines)
@@ -181,7 +173,7 @@ class TractographyDataset(MaskedSequenceDataset):
         return self.streamlines[idx], self.streamline_id_to_volume_id[idx]
 
 
-def load_tractography_dataset(subject_files, name="HCP", use_sh_coeffs=False):
+def load_tractography_dataset(subject_files, volume_manager, name="HCP", use_sh_coeffs=False):
     subjects = []
     with Timer("  Loading subject(s)", newline=True):
         for subject_file in sorted(subject_files):
@@ -199,7 +191,8 @@ def load_tractography_dataset(subject_files, name="HCP", use_sh_coeffs=False):
                 volume = neurotools.resample_dwi(dwi, bvals, bvecs).astype(np.float32)
 
             tracto_data.signal.uncache()  # Free some memory as we don't need the original signal.
-            tracto_data.volume = volume
+            subject_id = volume_manager.register(volume)
+            tracto_data.subject_id = subject_id
             subjects.append(tracto_data)
 
     return TractographyDataset(subjects, name, keep_on_cpu=True)

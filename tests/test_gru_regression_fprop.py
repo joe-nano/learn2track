@@ -10,7 +10,7 @@ from learn2track.utils import Timer
 from learn2track import datasets, batch_schedulers, neurotools, factories
 
 
-def make_dummy_dataset(nb_subjects=3, seed=1234):
+def make_dummy_dataset(volume_manager, nb_subjects=3, seed=1234):
     rng = np.random.RandomState(seed)
     nb_bundles = 7
     nb_gradients = 64
@@ -34,10 +34,11 @@ def make_dummy_dataset(nb_subjects=3, seed=1234):
                            for i in range(rng.randint(30))]
             tracto_data.add(streamlines, "bundle_{}".format(bundle_id))
 
-        tracto_data.volume = volume
+        subject_id = volume_manager.register(volume)
+        tracto_data.subject_id = subject_id
         subjects.append(tracto_data)
 
-    return datasets.TractographyDataset(subjects, "test", keep_on_cpu=True)
+    return datasets.TractographyDataset(subjects, name="test", keep_on_cpu=True)
 
 
 
@@ -47,7 +48,8 @@ def test_gru_regression_fprop():
     hidden_sizes = 50
 
     with Timer("Creating dataset", newline=True):
-        trainset = make_dummy_dataset()
+        volume_manager = neurotools.VolumeManager()
+        trainset = make_dummy_dataset(volume_manager)
         print("Dataset sizes:", len(trainset))
 
         batch_scheduler = batch_schedulers.TractographyBatchScheduler(trainset,
@@ -55,14 +57,17 @@ def test_gru_regression_fprop():
                                                                       noisy_streamlines_sigma=None,
                                                                       seed=1234)
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
-        print (batch_scheduler.input_size, hidden_sizes, batch_scheduler.target_size)
+        print (volume_manager.data_dimension, hidden_sizes, batch_scheduler.target_size)
 
     with Timer("Creating model"):
         hyperparams = {'model': 'gru_regression',
                        'SGD': "1e-2",
                        'hidden_sizes': hidden_sizes,
                        'learn_to_stop': False}
-        model = factories.model_factory(hyperparams, batch_scheduler)
+        model = factories.model_factory(hyperparams,
+                                        input_size=volume_manager.data_dimension,
+                                        output_size=batch_scheduler.target_size,
+                                        volume_manager=volume_manager)
         model.initialize(factories.weigths_initializer_factory("orthogonal", seed=1234))
 
 
@@ -91,10 +96,6 @@ def test_gru_regression_fprop():
                                 updates=model.graph_updates)
 
     dirs = fct_optim(batch_inputs, batch_targets, batch_mask)
-
-
-    from ipdb import set_trace as dbg
-    dbg()
 
 
 if __name__ == "__main__":

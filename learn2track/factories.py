@@ -76,19 +76,20 @@ def optimizer_factory(hyperparams, loss):
         raise ValueError("The optimizer is mandatory!")
 
 
-def model_factory(hyperparams, batch_scheduler):
+def model_factory(hyperparams, input_size, output_size, volume_manager):
     if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
-        from learn2track.models import GRU_RegressionAndBinaryClassification
-        return GRU_RegressionAndBinaryClassification(batch_scheduler.input_size,
-                                                     hyperparams['hidden_sizes'],
-                                                     batch_scheduler.target_size)
+        raise NotImplementedError()
+        # from learn2track.models import GRU_RegressionAndBinaryClassification
+        # return GRU_RegressionAndBinaryClassification(batch_scheduler.input_size,
+        #                                              hyperparams['hidden_sizes'],
+        #                                              batch_scheduler.target_size)
 
     elif hyperparams['model'] == 'gru_regression':
         from learn2track.models import GRU_Regression
-        return GRU_Regression(dwis=batch_scheduler.dataset.volumes,
-                              input_size=batch_scheduler.input_size,
+        return GRU_Regression(volume_manager=volume_manager,
+                              input_size=input_size,
                               hidden_sizes=hyperparams['hidden_sizes'],
-                              output_size=batch_scheduler.target_size)
+                              output_size=output_size)
 
     else:
         raise ValueError("Unknown model!")

@@ -277,9 +277,6 @@ class MultistepSequenceBatchScheduler(BatchScheduler):
 
         self.dataset.symb_targets.tag.test_value = batch_targets
 
-    @property
-    def input_size(self):
-        return self.dataset.volume.shape[-1]  # Number of diffusion directions
 
     @property
     def target_size(self):
