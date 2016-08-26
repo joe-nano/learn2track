@@ -14,7 +14,7 @@ floatX = theano.config.floatX
 
 class TractographyBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines coming from multiple subjects. """
-    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True):
+    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False):
         """
         Parameters
         ----------
@@ -26,6 +26,7 @@ class TractographyBatchScheduler(BatchScheduler):
         self.dataset = dataset
         self.batch_size = batch_size
         self.use_augment_by_flipping = use_data_augment
+        self.normalize_target = normalize_target
 
         self.noisy_streamlines_sigma = noisy_streamlines_sigma
         self.use_noisy_streamlines = self.noisy_streamlines_sigma is not None
@@ -98,7 +99,8 @@ class TractographyBatchScheduler(BatchScheduler):
 
         inputs = streamlines._data  # Streamlines coordinates
         targets = streamlines._data[1:] - streamlines._data[:-1]  # Unnormalized directions
-        targets = targets / np.sqrt(np.sum(targets**2, axis=1, keepdims=True))  # Normalized directions
+        if self.normalize_target:
+            targets = targets / np.sqrt(np.sum(targets**2, axis=1, keepdims=True))  # Normalized directions
 
         batch_size = len(streamlines)
         if self.use_augment_by_flipping:
@@ -152,10 +154,11 @@ class TractographyBatchScheduler(BatchScheduler):
         return {}  # No updates
 
     def save(self, savedir):
-        state = {"version": 1,
+        state = {"version": 2,
                  "batch_size": self.batch_size,
                  "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
                  "use_augment_by_flipping": self.use_augment_by_flipping,
+                 "normalize_target": self.normalize_target,
                  "seed": self.seed,
                  "rng": pickle.dumps(self.rng),
                  "rng_noise": pickle.dumps(self.rng_noise),
@@ -172,6 +175,7 @@ class TractographyBatchScheduler(BatchScheduler):
         self.rng = pickle.loads(state["rng"])
         self.rng_noise = pickle.loads(state["rng_noise"])
         self.indices = state["indices"]
+        self.normalize_target = state.get("normalize_target", True)
 
 
 class TractographyBatchSchedulerWithProportionalSamplingFromBundles(BatchScheduler):
