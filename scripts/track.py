@@ -120,7 +120,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
         last_directions[undone] = normalized_directions[undone].copy()
 
         # Make a step
-        # directions[undone] = directions[undone] * step_size  # Model should have learned the step size.
+        directions[undone] = directions[undone] * step_size  # TODO: Model should have learned the step size.
         directions[np.logical_not(undone)] = np.nan  # Help debugging
         sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
         streamlines_lengths[:] += undone[:]
@@ -251,6 +251,8 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
             last_directions[undone] = normalized_directions[undone].copy()
 
             # Make a step
+            directions[undone] = directions[undone] * step_size  # TODO: Model should have learned the step size.
+            directions[np.logical_not(undone)] = np.nan  # Help debugging
             sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
             streamlines_lengths[:] += undone[:]
 
@@ -286,8 +288,6 @@ def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78,
                                         mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
                                         backward_tracking_algo=backward_tracking_algo)
 
-                from ipdb import set_trace as dbg
-                dbg()
                 new_streamlines = compress_streamlines(new_streamlines)
                 tractogram.streamlines.extend(new_streamlines)
 
@@ -439,7 +439,9 @@ def main():
         if hyperparams["model"] == "gru_regression":
             from learn2track.models import GRU_Regression
             model_class = GRU_Regression
-            kwargs['dwis'] = [weights]
+            volume_manager = neurotools.VolumeManager()
+            volume_manager.register(weights)
+            kwargs['volume_manager'] = volume_manager
 
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path), **kwargs)  # Create new instance and restore model.

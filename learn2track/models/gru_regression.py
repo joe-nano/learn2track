@@ -88,21 +88,21 @@ class GRU_Regression(GRU):
         self.regression_out = T.transpose(results[-1], axes=(1, 0, 2))
         return self.regression_out
 
-    def seq_next(self, x_t, dwi_ids=None):
+    def seq_next(self, x_t, subject_ids=None):
         """ Returns the prediction for x_{t+1} for every sequence in the batch.
 
         Parameters
         ----------
         x_t : ndarray with shape (batch_size, 3)
             Streamline coordinate (x, y, z).
-        dwi_ids : ndarray with shape (batch_size, 1), optional
-            ID of the DWIs to use among `self.dwis`. Default: [0]*len(x_t)
+        subject_ids : ndarray with shape (batch_size, 1), optional
+            ID of the subject from which its diffusion data will be used. Default: [0]*len(x_t)
         """
-        if dwi_ids is None:
-            dwi_ids = np.array([0] * len(x_t), dtype=floatX)[:, None]
+        if subject_ids is None:
+            subject_ids = np.array([0] * len(x_t), dtype=floatX)[:, None]
 
         # Append the DWI ID of each sequence after the 3D coordinates.
-        x_t = np.c_[x_t, dwi_ids]
+        x_t = np.c_[x_t, subject_ids]
 
         if self._gen is None:
             # Build theano function and cache it.
