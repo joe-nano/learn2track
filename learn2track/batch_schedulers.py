@@ -175,7 +175,10 @@ class TractographyBatchScheduler(BatchScheduler):
         self.rng = pickle.loads(state["rng"])
         self.rng_noise = pickle.loads(state["rng_noise"])
         self.indices = state["indices"]
-        self.normalize_target = state.get("normalize_target", True)
+        if state["version"] < 2:
+            self.normalize_target = True
+        else:
+            self.normalize_target = state["normalize_target"]
 
 
 class TractographyBatchSchedulerWithProportionalSamplingFromBundles(BatchScheduler):
