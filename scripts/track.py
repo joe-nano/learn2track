@@ -55,7 +55,7 @@ def build_argparser():
 
     p.add_argument('--min-length', type=int, help="minimum length (in mm) for a streamline. Default: 10 mm", default=10)
     p.add_argument('--max-length', type=int, help="maximum length (in mm) for a streamline. Default: 300 mm", default=300)
-    p.add_argument('--step-size', type=float, help="step size between two consecutive points in a streamlines (in mm). Default: 0.5mm", default=0.5)
+    p.add_argument('--step-size', type=float, help="step size between two consecutive points in a streamlines (in mm). Default: use model's output as-is")
     p.add_argument('--mask', type=str,
                    help="if provided, streamlines will stop if going outside this mask (.nii|.nii.gz).")
     p.add_argument('--mask-threshold', type=float, default=0.05,
@@ -80,7 +80,7 @@ def build_argparser():
 floatX = theano.config.floatX
 
 
-def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0):
+def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0):
     # Forward tracking
     # Prepare some data container and reset the model.
     sequences = seeds.copy()
@@ -105,6 +105,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
 
         directions[undone] = model.seq_next(sequences[undone, -1, :])   # Get next unnormalized directions
         normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
+        # print(np.sqrt(np.sum(directions[undone]**2, axis=1, keepdims=True)))
 
         # If a streamline makes a turn to tight, stop it.
         if sequences.shape[1] > 1:
@@ -116,11 +117,13 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
             stopping_types_count['curv'] += np.sum(angles[undone] > theta)
             undone = np.logical_and(undone, angles <= theta)
 
+        if step_size is not None:
+            directions[undone] = normalized_directions[undone] * step_size
+
         all_directions = np.concatenate([all_directions, directions[:, None, :]], axis=1)
         last_directions[undone] = normalized_directions[undone].copy()
 
         # Make a step
-        directions[undone] = directions[undone] * step_size  # TODO: Model should have learned the step size.
         directions[np.logical_not(undone)] = np.nan  # Help debugging
         sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
         streamlines_lengths[:] += undone[:]
@@ -138,7 +141,9 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
             break
 
     print("Max length: {}".format(streamlines_lengths.max()))
-    print("Stopping - mask: {:,}\t curv: {:,}".format(stopping_types_count['mask'], stopping_types_count['curv']))
+    print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(stopping_types_count['mask'],
+                                                                                            stopping_types_count['curv'],
+                                                                                            undone.sum()))
 
     # Trim sequences to obtain the streamlines.
     streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_lengths)]
@@ -187,6 +192,9 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
             last_directions[undone] = normalized_directions[undone].copy()
 
             # Make a step
+            if step_size is not None:
+                directions[undone] = normalized_directions[undone] * step_size  # TODO: Model should have learned the step size.
+            directions[np.logical_not(undone)] = np.nan  # Help debugging
             sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
             streamlines_lengths[:] += undone[:]
 
@@ -248,10 +256,12 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
             # Overwrite directions for all streamlines still being kickstarted (resumed).
             if i < r_directions.shape[1]:
                 directions[resuming] = r_directions[resuming, i, :]
+            else:
+                if step_size is not None:
+                    directions[undone] = normalized_directions[undone] * step_size  # TODO: Model should have learned the step size.
             last_directions[undone] = normalized_directions[undone].copy()
 
             # Make a step
-            directions[undone] = directions[undone] * step_size  # TODO: Model should have learned the step size.
             directions[np.logical_not(undone)] = np.nan  # Help debugging
             sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
             streamlines_lengths[:] += undone[:]
@@ -270,7 +280,7 @@ def track(model, dwi, seeds, step_size=0.5, max_nb_points=1000, theta=0.78, mask
         return streamlines
 
 
-def batch_track(model, dwi, seeds, step_size=0.5, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0, batch_size=None):
+def batch_track(model, dwi, seeds, step_size=None, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0, batch_size=None):
     if batch_size is None:
         batch_size = len(seeds)
 
@@ -491,9 +501,14 @@ def main():
         if not np.all(voxel_sizes == dwi.header.get_zooms()[0]):
             print("* Careful voxel are anisotropic {}!".format(tuple(voxel_sizes)))
         # Since we are tracking in diffusion voxel space, convert step_size (in mm) to voxel.
-        step_size = np.float32(args.step_size / voxel_sizes.max())
-        # Also convert max length (in mm) to voxel.
-        max_nb_points = int(args.max_length / step_size)
+
+        if args.step_size is not None:
+            step_size = np.float32(args.step_size / voxel_sizes.max())
+            # Also convert max length (in mm) to voxel.
+            max_nb_points = int(args.max_length / step_size)
+        else:
+            step_size = None
+            max_nb_points = args.max_length
 
         if args.theta is not None:
             theta = np.deg2rad(args.theta)

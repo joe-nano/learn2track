@@ -198,7 +198,7 @@ def main():
 
         valid_loss = loss_factory(hyperparams, model, validset)
         valid_batch_scheduler = TractographyBatchScheduler(validset,
-                                                           batch_size=1000,
+                                                           batch_size=args.batch_size,
                                                            noisy_streamlines_sigma=None,
                                                            seed=1234,
                                                            normalize_target=hyperparams['normalize'])
