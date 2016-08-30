@@ -52,6 +52,9 @@ def build_train_gru_argparser(subparser):
     model.add_argument('--learn-to-stop', action="store_true",
                        help='if specified, the model will be trained to learn when to stop tracking')
 
+    model.add_argument('--normalize', action="store_true",
+                       help='if specified, output direction the model produces will have unit length.')
+
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -137,7 +140,8 @@ def main():
         batch_scheduler = TractographyBatchScheduler(trainset,
                                                      batch_size=args.batch_size,
                                                      noisy_streamlines_sigma=args.noisy_streamlines_sigma,
-                                                     seed=args.seed)
+                                                     seed=args.seed,
+                                                     normalize_target=hyperparams['normalize'])
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
         print (volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
 
@@ -194,9 +198,10 @@ def main():
 
         valid_loss = loss_factory(hyperparams, model, validset)
         valid_batch_scheduler = TractographyBatchScheduler(validset,
-                                                           batch_size=1000,
+                                                           batch_size=args.batch_size,
                                                            noisy_streamlines_sigma=None,
-                                                           seed=1234)
+                                                           seed=1234,
+                                                           normalize_target=hyperparams['normalize'])
 
         valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
         trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))
