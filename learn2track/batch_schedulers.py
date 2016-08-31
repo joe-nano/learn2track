@@ -26,6 +26,7 @@ class TractographyBatchScheduler(BatchScheduler):
             Shuffle streamlines in the dataset between each epoch.
         resample_streamlines : bool
             Streamlines in a same batch will all have the same number of points.
+            Should be always set to True for now (until the method _process_batch supports it).
         """
         self.dataset = dataset
         self.batch_size = batch_size
@@ -116,21 +117,21 @@ class TractographyBatchScheduler(BatchScheduler):
         batch_masks = np.zeros((batch_size, max_streamline_length-1), dtype=floatX)
         batch_inputs = np.zeros((batch_size, max_streamline_length-1, inputs.shape[1]), dtype=floatX)
         batch_targets = np.zeros((batch_size, max_streamline_length-1, 3), dtype=floatX)
-        batch_volume_ids = np.zeros((batch_size, max_streamline_length-1, 1), dtype=floatX)
+        # batch_volume_ids = np.zeros((batch_size, max_streamline_length-1, 1), dtype=floatX)
 
         for i, (offset, length, volume_id) in enumerate(zip(streamlines._offsets, streamlines._lengths, volume_ids)):
             batch_masks[i, :length-1] = 1
             batch_inputs[i, :length-1] = inputs[offset:offset+length-1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
             batch_targets[i, :length-1] = targets[offset:offset+length-1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
-            batch_volume_ids[i, :length-1] = volume_id
+            # batch_volume_ids[i, :length-1] = volume_id
 
             if self.use_augment_by_flipping:
                 batch_masks[i+len(streamlines), :length-1] = 1
                 batch_inputs[i+len(streamlines), :length-1] = inputs[offset+1:offset+length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
                 batch_targets[i+len(streamlines), :length-1] = -targets[offset:offset+length-1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
-                batch_volume_ids[i+len(streamlines), :length-1] = volume_id
+                # batch_volume_ids[i+len(streamlines), :length-1] = volume_id
 
-        # volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length-1, 1))
+        batch_volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length-1, 1))
         batch_inputs = np.concatenate([batch_inputs, batch_volume_ids], axis=2)  # Streamlines coords + dwi ID
         return batch_inputs, batch_targets, batch_masks
 
