@@ -229,9 +229,17 @@ def normalize_dwi(dwi, bvals):
     # Make sure in every voxels weights are lower than ones from the b0.
     # Should not happen, but with the noise we never know!
     weights = np.minimum(weights, b0)
+
     # Normalize dwi using the b0.
     weights_normed = weights / b0
     weights_normed[np.logical_not(np.isfinite(weights_normed))] = 0.
+
+    # Gradient Standardization (remove mean, divide by std)
+    idx = weights_normed.sum(axis=-1).nonzero()
+    weights_means = weights_normed[idx].mean(axis=0)
+    weights_stds = weights_normed[idx].std(axis=0)
+    weights_normed[idx] -= weights_means
+    weights_normed[idx] /= weights_stds
 
     return weights_normed
 
