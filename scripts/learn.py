@@ -201,6 +201,7 @@ def main():
                                                            batch_size=args.batch_size,
                                                            noisy_streamlines_sigma=None,
                                                            seed=1234,
+                                                           shuffle_streamlines=False,
                                                            normalize_target=hyperparams['normalize'])
 
         valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)

@@ -14,14 +14,18 @@ floatX = theano.config.floatX
 
 class TractographyBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines coming from multiple subjects. """
-    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False):
+    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False, shuffle_streamlines=True, resample_streamlines=True):
         """
-        Parameters
+        Parametersw
         ----------
         dataset : :class:`TractographyDataset`
         batch_size : int
         use_data_augment : bool
             If true, perform data augmentation by flipping streamlines.
+        shuffle_streamlines : bool
+            Shuffle streamlines in the dataset between each epoch.
+        resample_streamlines : bool
+            Streamlines in a same batch will all have the same number of points.
         """
         self.dataset = dataset
         self.batch_size = batch_size
@@ -34,7 +38,8 @@ class TractographyBatchScheduler(BatchScheduler):
         self.seed = seed
         self.rng = np.random.RandomState(self.seed)
         self.rng_noise = np.random.RandomState(self.seed+1)
-        self.shuffle_streamlines = True
+        self.shuffle_streamlines = shuffle_streamlines
+        self.resample_streamlines = resample_streamlines
         self.indices = np.arange(len(self.dataset))
 
         # Shared variables
@@ -92,10 +97,11 @@ class TractographyBatchScheduler(BatchScheduler):
         orig_streamlines, volume_ids = self.dataset[indices]
         streamlines = self._add_noise_to_streamlines(orig_streamlines.copy())
 
-        # streamline_length = np.max(streamlines._lengths)  # Sequences are resampled so that they have the same length.
-        streamline_length = np.min(streamlines._lengths)  # Sequences are resampled so that they have the same length.
         streamlines._lengths = streamlines._lengths.astype("int64")
-        streamlines = set_number_of_points(streamlines, nb_points=streamline_length)
+        if self.resample_streamlines:
+            # streamline_length = np.max(streamlines._lengths)  # Sequences are resampled so that they have the same length.
+            streamline_length = np.min(streamlines._lengths)  # Sequences are resampled so that they have the same length.
+            streamlines = set_number_of_points(streamlines, nb_points=streamline_length)
 
         inputs = streamlines._data  # Streamlines coordinates
         targets = streamlines._data[1:] - streamlines._data[:-1]  # Unnormalized directions
@@ -110,19 +116,22 @@ class TractographyBatchScheduler(BatchScheduler):
         batch_masks = np.zeros((batch_size, max_streamline_length-1), dtype=floatX)
         batch_inputs = np.zeros((batch_size, max_streamline_length-1, inputs.shape[1]), dtype=floatX)
         batch_targets = np.zeros((batch_size, max_streamline_length-1, 3), dtype=floatX)
+        batch_volume_ids = np.zeros((batch_size, max_streamline_length-1, 1), dtype=floatX)
 
-        for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
+        for i, (offset, length, volume_id) in enumerate(zip(streamlines._offsets, streamlines._lengths, volume_ids)):
             batch_masks[i, :length-1] = 1
             batch_inputs[i, :length-1] = inputs[offset:offset+length-1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
             batch_targets[i, :length-1] = targets[offset:offset+length-1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
+            batch_volume_ids[i, :length-1] = volume_id
 
             if self.use_augment_by_flipping:
                 batch_masks[i+len(streamlines), :length-1] = 1
                 batch_inputs[i+len(streamlines), :length-1] = inputs[offset+1:offset+length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
                 batch_targets[i+len(streamlines), :length-1] = -targets[offset:offset+length-1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
+                batch_volume_ids[i+len(streamlines), :length-1] = volume_id
 
-        volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length-1, 1))
-        batch_inputs = np.concatenate([batch_inputs, volume_ids], axis=2)  # Streamlines coords + dwi ID
+        # volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length-1, 1))
+        batch_inputs = np.concatenate([batch_inputs, batch_volume_ids], axis=2)  # Streamlines coords + dwi ID
         return batch_inputs, batch_targets, batch_masks
 
     def _next_batch(self, batch_count):
@@ -154,11 +163,13 @@ class TractographyBatchScheduler(BatchScheduler):
         return {}  # No updates
 
     def save(self, savedir):
-        state = {"version": 2,
+        state = {"version": 3,
                  "batch_size": self.batch_size,
                  "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
                  "use_augment_by_flipping": self.use_augment_by_flipping,
                  "normalize_target": self.normalize_target,
+                 "shuffle_streamlines": self.shuffle_streamlines,
+                 "resample_streamlines": self.resample_streamlines,
                  "seed": self.seed,
                  "rng": pickle.dumps(self.rng),
                  "rng_noise": pickle.dumps(self.rng_noise),
@@ -179,6 +190,10 @@ class TractographyBatchScheduler(BatchScheduler):
             self.normalize_target = True
         else:
             self.normalize_target = state["normalize_target"]
+
+        if state["version"] < 3:
+            self.shuffle_streamlines = state["shuffle_streamlines"]
+            self.resample_streamlines = state["resample_streamlines"]
 
 
 class TractographyBatchSchedulerWithProportionalSamplingFromBundles(BatchScheduler):
