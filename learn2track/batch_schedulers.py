@@ -16,7 +16,7 @@ class TractographyBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines coming from multiple subjects. """
     def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False, shuffle_streamlines=True, resample_streamlines=True):
         """
-        Parametersw
+        Parameters
         ----------
         dataset : :class:`TractographyDataset`
         batch_size : int

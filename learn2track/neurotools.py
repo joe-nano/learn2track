@@ -132,65 +132,6 @@ class VolumeManager(object):
         return data_at_coords
 
 
-def save_bundle(file, inputs, targets, indices=[]):
-    """ Saves a bundle compatible with the learn2track framework.
-
-    Parameters
-    ----------
-    file : str or file
-        Either the file name (string) or an open file (file-like object)
-        where the data will be saved. If file is a string, the ``.npz``
-        extension will be appended to the file name if it is not already there.
-    inputs : `nibabel.streamlines.ArraySequence` object
-        the interpolated dwi data for every 3D point of every streamline found in
-        `tractogram.streamlines`.
-    targets : `nib.streamlines.ArraySequence` object
-        the direction leading from any 3D point to the next in every streamline.
-    """
-    np.savez(file,
-             inputs_data=inputs._data,
-             inputs_offsets=inputs._offsets,
-             inputs_lengths=inputs._lengths,
-             targets_data=targets._data,
-             targets_offsets=targets._offsets,
-             targets_lengths=targets._lengths,
-             indices=indices
-             )
-
-
-def load_bundle(file):
-    """ Loads a bundle compatible with the learn2track framework.
-
-    Parameters
-    ----------
-    file : str or file
-        Either the file name (string) or an open file (file-like object)
-        where the data will be saved. If file is a string, the ``.npz``
-        extension will be appended to the file name if it is not already there.
-
-    Returns
-    -------
-    inputs : `nibabel.streamlines.ArraySequence` object
-        the interpolated dwi data for every 3D point of every streamline found in
-        `tractogram.streamlines`.
-    targets : `nib.streamlines.ArraySequence` object
-        the direction leading from any 3D point to the next in every streamline.
-    """
-    data = np.load(file)
-
-    inputs = ArraySequence()
-    inputs._data = data["inputs_data"]
-    inputs._offsets = data["inputs_offsets"]
-    inputs._lengths = data["inputs_lengths"]
-
-    targets = ArraySequence()
-    targets._data = data["targets_data"]
-    targets._offsets = data["targets_offsets"]
-    targets._lengths = data["targets_lengths"]
-
-    return inputs, targets
-
-
 def map_coordinates_3d_4d(input_array, indices, affine=None, order=1):
     """ Evaluate the input_array data at the given indices
     using trilinear interpolation
