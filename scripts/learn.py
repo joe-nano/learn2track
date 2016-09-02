@@ -58,6 +58,7 @@ def build_train_gru_argparser(subparser):
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+    general.add_argument('--view', action='store_true', help='display learning curves.')
 
 
 def build_argparser():
@@ -138,6 +139,58 @@ def main():
         trainset = datasets.load_tractography_dataset(args.train_subjects, volume_manager, name="trainset", use_sh_coeffs=args.use_sh_coeffs)
         validset = datasets.load_tractography_dataset(args.valid_subjects, volume_manager, name="validset", use_sh_coeffs=args.use_sh_coeffs)
         print("Dataset sizes:", len(trainset), " |", len(validset))
+
+        if args.view:
+            with Timer("Computing T-SNE"):
+                from dipy.tracking.streamline import set_number_of_points
+                from learn2track import tsne
+
+                coords = T.matrix()
+                subject_id = T.iscalar()
+                coords_with_subject_id = T.zeros((coords.shape[0], 4))
+                coords_with_subject_id = T.set_subtensor(coords_with_subject_id[:, :3], coords)
+                coords_with_subject_id = T.set_subtensor(coords_with_subject_id[:, 3], subject_id)
+                data = volume_manager.eval_at_coords(coords_with_subject_id)
+                eval_at_coords = theano.function([subject_id, coords], data)
+
+                data = []
+                nb_points_per_subject = {}
+                for i, subject in enumerate(trainset.subjects + validset.subjects):
+                    nb_points_per_subject[i] = 0
+                    cpt = 0
+                    subject.streamlines._lengths = subject.streamlines._lengths.astype("int64")
+                    streamlines = set_number_of_points(subject.streamlines[::500], nb_points=40)
+                    for coords in utils.chunk(streamlines._data, n=10000):
+                        print("{}-{}".format(i, cpt))
+                        data_at_coords = eval_at_coords(i, coords)
+                        if np.isnan(data_at_coords).sum() != 0:
+                            print("NaN found:", np.isnan(data_at_coords).sum())
+                            from ipdb import set_trace as dbg
+                            dbg()
+
+                        data.append(data_at_coords)
+                        cpt += len(coords)
+                        nb_points_per_subject[i] += len(coords)
+
+                    del streamlines
+
+                data = np.concatenate(data, axis=0)
+                del trainset, validset
+                Y = tsne.tsne(data, no_dims=2, initial_dims=50, perplexity=30.0)
+
+                nb_points_per_subject = np.array([nb_points_per_subject[i] for i in range(4)])
+                ends = nb_points_per_subject.cumsum()
+                import pylab as plt
+                plt.scatter(Y[0:ends[0], 0], Y[0:ends[0], 1], 20, 'r', 'o', label='Train #1')
+                plt.scatter(Y[ends[0]:ends[1], 0], Y[ends[0]:ends[1], 1], 20, 'g', '+', label='Train #2')
+                plt.scatter(Y[ends[1]:ends[2], 0], Y[ends[1]:ends[2], 1], 20, 'b', 's', label='Train #3')
+                plt.scatter(Y[ends[2]:ends[3], 0], Y[ends[2]:ends[3], 1], 20, 'darkorange', '^', label='Valid')
+                plt.legend()
+                plt.show()
+
+                from ipdb import set_trace as dbg
+                dbg()
+                sys.exit(0)
 
         batch_scheduler = TractographyBatchScheduler(trainset,
                                                      batch_size=args.batch_size,
