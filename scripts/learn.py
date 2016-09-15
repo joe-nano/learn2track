@@ -119,6 +119,48 @@ def build_argparser():
     return p
 
 
+def tsne_view(trainset, volume_manager):
+
+    batch_scheduler = TractographyBatchScheduler(trainset,
+                                                 batch_size=20000,
+                                                 noisy_streamlines_sigma=False,
+                                                 seed=1234,
+                                                 normalize_target=True)
+    rng = np.random.RandomState(42)
+    rng.shuffle(batch_scheduler.indices)
+
+    bundle_name_pattern = "CST_Left"
+    # batch_inputs, batch_targets, batch_mask = batch_scheduler._prepare_batch(trainset.get_bundle(bundle_name_pattern, return_idx=True))
+    inputs, targets, mask = batch_scheduler._next_batch(3)
+    mask = mask.astype(bool)
+    idx = np.arange(mask.sum())
+    rng.shuffle(idx)
+
+    coords = T.matrix('coords')
+    eval_at_coords = theano.function([coords], volume_manager.eval_at_coords(coords))
+
+    M = 2000 * len(trainset.subjects)
+    coords = inputs[mask][idx[:M]]
+    X = eval_at_coords(coords)
+
+    from sklearn.manifold.t_sne import TSNE
+    tsne = TSNE(n_components=2, verbose=2, random_state=42)
+    Y = tsne.fit_transform(X)
+
+    import matplotlib.pyplot as plt
+    plt.figure()
+    ids = range(len(trainset.subjects))
+    markers = ['s', 'o', '^', 'v']
+    colors = ['cyan', 'darkorange', 'darkgreen', 'purple']
+    for i, marker, color in zip(ids, markers, colors):
+        idx = coords[:, -1] == i
+        print("Subject #{}: ".format(i), idx.sum())
+        plt.scatter(Y[idx, 0], Y[idx, 1], 20, color=color, marker=marker, label="Subject #{}".format(i))
+
+    plt.legend()
+    plt.show()
+
+
 def main():
     parser = build_argparser()
     args = parser.parse_args()
@@ -141,56 +183,8 @@ def main():
         print("Dataset sizes:", len(trainset), " |", len(validset))
 
         if args.view:
-            with Timer("Computing T-SNE"):
-                from dipy.tracking.streamline import set_number_of_points
-                from learn2track import tsne
-
-                coords = T.matrix()
-                subject_id = T.iscalar()
-                coords_with_subject_id = T.zeros((coords.shape[0], 4))
-                coords_with_subject_id = T.set_subtensor(coords_with_subject_id[:, :3], coords)
-                coords_with_subject_id = T.set_subtensor(coords_with_subject_id[:, 3], subject_id)
-                data = volume_manager.eval_at_coords(coords_with_subject_id)
-                eval_at_coords = theano.function([subject_id, coords], data)
-
-                data = []
-                nb_points_per_subject = {}
-                for i, subject in enumerate(trainset.subjects + validset.subjects):
-                    nb_points_per_subject[i] = 0
-                    cpt = 0
-                    subject.streamlines._lengths = subject.streamlines._lengths.astype("int64")
-                    streamlines = set_number_of_points(subject.streamlines[::500], nb_points=40)
-                    for coords in utils.chunk(streamlines._data, n=10000):
-                        print("{}-{}".format(i, cpt))
-                        data_at_coords = eval_at_coords(i, coords)
-                        if np.isnan(data_at_coords).sum() != 0:
-                            print("NaN found:", np.isnan(data_at_coords).sum())
-                            from ipdb import set_trace as dbg
-                            dbg()
-
-                        data.append(data_at_coords)
-                        cpt += len(coords)
-                        nb_points_per_subject[i] += len(coords)
-
-                    del streamlines
-
-                data = np.concatenate(data, axis=0)
-                del trainset, validset
-                Y = tsne.tsne(data, no_dims=2, initial_dims=50, perplexity=30.0)
-
-                nb_points_per_subject = np.array([nb_points_per_subject[i] for i in range(4)])
-                ends = nb_points_per_subject.cumsum()
-                import pylab as plt
-                plt.scatter(Y[0:ends[0], 0], Y[0:ends[0], 1], 20, 'r', 'o', label='Train #1')
-                plt.scatter(Y[ends[0]:ends[1], 0], Y[ends[0]:ends[1], 1], 20, 'g', '+', label='Train #2')
-                plt.scatter(Y[ends[1]:ends[2], 0], Y[ends[1]:ends[2], 1], 20, 'b', 's', label='Train #3')
-                plt.scatter(Y[ends[2]:ends[3], 0], Y[ends[2]:ends[3], 1], 20, 'darkorange', '^', label='Valid')
-                plt.legend()
-                plt.show()
-
-                from ipdb import set_trace as dbg
-                dbg()
-                sys.exit(0)
+            tsne_view(trainset, volume_manager)
+            sys.exit(0)
 
         batch_scheduler = TractographyBatchScheduler(trainset,
                                                      batch_size=args.batch_size,
