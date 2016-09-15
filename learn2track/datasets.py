@@ -148,9 +148,15 @@ class TractographyDataset(MaskedSequenceDataset):
         self.subjects = subjects
 
         # Combine all tractograms in one.
+        self.nb_streamlines_per_sujet = []
+        self.streamlines_per_sujet_offsets = []
+        offset = 0
         self.streamlines = nib.streamlines.ArraySequence()
         for i, subject in enumerate(self.subjects):
             self.streamlines.extend(subject.streamlines)
+            self.nb_streamlines_per_sujet.append(len(subject.streamlines))
+            self.streamlines_per_sujet_offsets.append(offset)
+            offset += len(subject.streamlines)
 
         super().__init__(self.streamlines, targets=None, name=name, keep_on_cpu=keep_on_cpu)
 
@@ -165,6 +171,23 @@ class TractographyDataset(MaskedSequenceDataset):
 
         assert not np.isnan(self.streamline_id_to_volume_id.sum())
         self.streamline_id_to_volume_id = self.streamline_id_to_volume_id.astype(floatX)
+
+    def get_bundle(self, bundle_name, return_idx=False):
+        idx = []
+        for i, subject in enumerate(self.subjects):
+            for k in sorted(subject.name2id.keys()):
+                if bundle_name not in k:
+                    continue
+
+                bundle_id = subject.name2id[k]
+                subject_idx = np.arange(len(subject.streamlines))[subject.bundle_ids == bundle_id]
+                subject_idx += self.streamlines_per_sujet_offsets[i]
+                idx += subject_idx.tolist()
+
+        if return_idx:
+            return idx
+
+        return self[idx]
 
     def __len__(self):
         return len(self.streamlines)

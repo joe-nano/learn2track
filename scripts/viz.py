@@ -13,6 +13,7 @@ import numpy as np
 import nibabel as nib
 from dipy.viz import actor, window, widget
 from dipy.viz import fvtk
+from dipy.tracking.streamline import set_number_of_points
 
 from learn2track.neurotools import TractographyData
 
@@ -201,13 +202,22 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
 
         if f.endswith('.npz'):
             tractography_data = TractographyData.load(f)
-            idx = np.arange(len(tractography_data.streamlines))
-            rng = np.random.RandomState(42)
-            rng.shuffle(idx)
-            tractography_data.streamlines = tractography_data.streamlines[idx[:200]]
-            tractograms.append(tractography_data.streamlines)
+            # idx = np.arange(len(tractography_data.streamlines))
+            # rng = np.random.RandomState(42)
+            # rng.shuffle(idx)
+            # tractography_data.streamlines = tractography_data.streamlines[idx[:200]]
+            # tractograms.append(tractography_data.streamlines)
 
-            if hasattr(tractography_data, 'signal'):
+            M = 2
+            # Take M streamlines per bundle
+            for k in sorted(tractography_data.name2id.keys()):
+                bundle_id = tractography_data.name2id[k]
+                streamlines = tractography_data.streamlines[tractography_data.bundle_ids == bundle_id][:M].copy()
+                streamlines._lengths = streamlines._lengths.astype("int64")
+                streamlines = set_number_of_points(streamlines, nb_points=40)
+                tractograms.append(streamlines)
+
+            if False and hasattr(tractography_data, 'signal'):
                 signal = tractography_data.signal.get_data()
                 data = signal[:, :, :, 0]
                 affine = np.eye(4)

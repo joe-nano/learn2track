@@ -367,7 +367,13 @@ def main():
         bvals, bvecs = dipy.io.gradients.read_bvals_bvecs(bvals_filename, bvecs_filename)
 
         dwi = nib.load(args.dwi)
-        weights = neurotools.resample_dwi(dwi, bvals, bvecs).astype(np.float32)  # Resample to 100 directions
+        if hyperparams["use_sh_coeffs"]:
+            # Use 45 spherical harmonic coefficients to represent the diffusion signal.
+            weights = neurotools.get_spherical_harmonics_coefficients(dwi, bvals, bvecs).astype(np.float32)
+        else:
+            # Resample the diffusion signal to have 100 directions.
+            weights = neurotools.resample_dwi(dwi, bvals, bvecs).astype(np.float32)
+
         affine_rasmm2dwivox = np.linalg.inv(dwi.affine)
 
         if args.ref_dwi is not None:

@@ -58,6 +58,7 @@ def build_train_gru_argparser(subparser):
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+    general.add_argument('--view', action='store_true', help='display learning curves.')
 
 
 def build_argparser():
@@ -118,6 +119,48 @@ def build_argparser():
     return p
 
 
+def tsne_view(trainset, volume_manager):
+
+    batch_scheduler = TractographyBatchScheduler(trainset,
+                                                 batch_size=20000,
+                                                 noisy_streamlines_sigma=False,
+                                                 seed=1234,
+                                                 normalize_target=True)
+    rng = np.random.RandomState(42)
+    rng.shuffle(batch_scheduler.indices)
+
+    bundle_name_pattern = "CST_Left"
+    # batch_inputs, batch_targets, batch_mask = batch_scheduler._prepare_batch(trainset.get_bundle(bundle_name_pattern, return_idx=True))
+    inputs, targets, mask = batch_scheduler._next_batch(3)
+    mask = mask.astype(bool)
+    idx = np.arange(mask.sum())
+    rng.shuffle(idx)
+
+    coords = T.matrix('coords')
+    eval_at_coords = theano.function([coords], volume_manager.eval_at_coords(coords))
+
+    M = 2000 * len(trainset.subjects)
+    coords = inputs[mask][idx[:M]]
+    X = eval_at_coords(coords)
+
+    from sklearn.manifold.t_sne import TSNE
+    tsne = TSNE(n_components=2, verbose=2, random_state=42)
+    Y = tsne.fit_transform(X)
+
+    import matplotlib.pyplot as plt
+    plt.figure()
+    ids = range(len(trainset.subjects))
+    markers = ['s', 'o', '^', 'v']
+    colors = ['cyan', 'darkorange', 'darkgreen', 'purple']
+    for i, marker, color in zip(ids, markers, colors):
+        idx = coords[:, -1] == i
+        print("Subject #{}: ".format(i), idx.sum())
+        plt.scatter(Y[idx, 0], Y[idx, 1], 20, color=color, marker=marker, label="Subject #{}".format(i))
+
+    plt.legend()
+    plt.show()
+
+
 def main():
     parser = build_argparser()
     args = parser.parse_args()
@@ -138,6 +181,10 @@ def main():
         trainset = datasets.load_tractography_dataset(args.train_subjects, volume_manager, name="trainset", use_sh_coeffs=args.use_sh_coeffs)
         validset = datasets.load_tractography_dataset(args.valid_subjects, volume_manager, name="validset", use_sh_coeffs=args.use_sh_coeffs)
         print("Dataset sizes:", len(trainset), " |", len(validset))
+
+        if args.view:
+            tsne_view(trainset, volume_manager)
+            sys.exit(0)
 
         batch_scheduler = TractographyBatchScheduler(trainset,
                                                      batch_size=args.batch_size,
