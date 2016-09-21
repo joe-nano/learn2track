@@ -8,8 +8,13 @@ smart-dispatch -q qwork@mp2 -c 4 -t 24:00:00 launch source ~/env/p34/bin/activat
 # Compute attributes for the Tractometer and move tractograms to ./{experiment_name}/tractometer/tracks
 ~/research/src/learn2track/scripts/tractometer/compute_attributes.sh experiments/*
 
-# Generate command for Tractometer evaluation
+# Generate command for Tractometer evaluation and execute them
 python ~/research/src/learn2track/scripts/tractometer/gen_tractometer_commands.py experiments/*/tractometer/tracks/roi_2seeds_0.5mm.tck > scoring_roi_2seeds_0.5mm.cmd
 
 smart-dispatch -q qwork@mp2 -c 4 -t 12:00:00 -f scoring_roi_2seeds_0.5mm.cmd launch
 
+# Compute overreach and overlap
+ipy-db ~/research/src/tractometer/scripts/scil_compute_bundle_overlap_overreach.py experiments/*/tractometer/scores/*.pkl ./ismrm15_challenge/scoring_data/masks/bundles/ -v
+
+# Export results to a CSV file (Python 3)
+python ~/research/src/learn2track/scripts/view_results.py experiments/* -v --tractography-names wm roi_2seeds_0.5mm
