@@ -15,9 +15,8 @@ smart-dispatch -q qwork@mp2 -c 4 -t 24:00:00 launch source ~/env/p34/bin/activat
 # Generate command for Tractometer evaluation and execute them
 ```
 python ~/research/src/learn2track/scripts/tractometer/gen_tractometer_commands.py experiments/*/tractometer/tracks/roi_2seeds_0.5mm.tck > scoring_roi_2seeds_0.5mm.cmd
-```
-
 smart-dispatch -q qwork@mp2 -c 4 -t 12:00:00 -f scoring_roi_2seeds_0.5mm.cmd launch
+```
 
 # Compute overreach and overlap
 ```
