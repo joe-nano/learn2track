@@ -47,7 +47,10 @@ class Experiment(object):
         self.status_file = pjoin(self.experiment_path, "training", "status.json")
         self.early_stopping_file = pjoin(self.experiment_path, "training", "tasks", "early_stopping.json")
 
-        self.results = load_dict_from_json_file(self.results_file)
+        self.results = {}
+        if os.path.isfile(self.results_file):
+            self.results = load_dict_from_json_file(self.results_file)
+
         self.hyperparams = load_dict_from_json_file(self.hyperparams_file)
         # self.model_hyperparams = load_dict_from_json_file(self.model_hyperparams_file)
         self.status = load_dict_from_json_file(self.status_file)
@@ -91,7 +94,7 @@ def get_optimizer(e):
 def extract_result_from_experiment(e):
     """e: `Experiment` object"""
     entry = OrderedDict()
-    entry["Hidden Size(s)"] = ",".join(map(str, e.hyperparams.get("hidden_sizes", [])))
+    entry["Hidden Size(s)"] = "-".join(map(str, e.hyperparams.get("hidden_sizes", [])))
     entry["Regression"] = e.hyperparams.get("regression", "")
     entry["Classification"] = e.hyperparams.get("classification", "")
     entry["Weights Initialization"] = e.hyperparams.get("weights_initialization", "")
@@ -107,9 +110,9 @@ def extract_result_from_experiment(e):
     entry["Max Epoch"] = e.status.get("current_epoch", "")
 
     # Results
-    entry["Train L2 error"] = e.results["trainset"]["sequences_mean_loss_avg"]
-    entry["Valid L2 error"] = e.results["validset"]["sequences_mean_loss_avg"]
-    entry["Test L2 error"] = e.results["testset"]["sequences_mean_loss_avg"]
+    # entry["Train L2 error"] = e.results["trainset"]["sequences_mean_loss_avg"]
+    # entry["Valid L2 error"] = e.results["validset"]["sequences_mean_loss_avg"]
+    # entry["Test L2 error"] = e.results["testset"]["sequences_mean_loss_avg"]
 
     # Tractometer results
     entry["VC"] = str(e.tractometer_scores.get("VC", ""))
@@ -157,15 +160,15 @@ def extract_result_from_experiment(e):
     entry['UF_right'] = str(streamlines_per_bundle.get("UF_right", ""))
 
     # Other results
-    entry["Train L2 error std"] = e.results["trainset"]["sequences_mean_loss_stderr"]
-    entry["Valid L2 error std"] = e.results["validset"]["sequences_mean_loss_stderr"]
-    entry["Test L2 error std"] = e.results["testset"]["sequences_mean_loss_stderr"]
-    entry["Train L2 error (per timestep)"] = e.results["trainset"]["timesteps_loss_avg"]
-    entry["Valid L2 error (per timestep)"] = e.results["validset"]["timesteps_loss_avg"]
-    entry["Test L2 error (per timestep)"] = e.results["testset"]["timesteps_loss_avg"]
-    entry["Train L2 error (per timestep) std"] = e.results["trainset"]["timesteps_loss_std"]
-    entry["Valid L2 error (per timestep) std"] = e.results["validset"]["timesteps_loss_std"]
-    entry["Test L2 error (per timestep) std"] = e.results["testset"]["timesteps_loss_std"]
+    # entry["Train L2 error std"] = e.results["trainset"]["sequences_mean_loss_stderr"]
+    # entry["Valid L2 error std"] = e.results["validset"]["sequences_mean_loss_stderr"]
+    # entry["Test L2 error std"] = e.results["testset"]["sequences_mean_loss_stderr"]
+    # entry["Train L2 error (per timestep)"] = e.results["trainset"]["timesteps_loss_avg"]
+    # entry["Valid L2 error (per timestep)"] = e.results["validset"]["timesteps_loss_avg"]
+    # entry["Test L2 error (per timestep)"] = e.results["testset"]["timesteps_loss_avg"]
+    # entry["Train L2 error (per timestep) std"] = e.results["trainset"]["timesteps_loss_std"]
+    # entry["Valid L2 error (per timestep) std"] = e.results["validset"]["timesteps_loss_std"]
+    # entry["Test L2 error (per timestep) std"] = e.results["testset"]["timesteps_loss_std"]
 
     entry["Training Time"] = e.status.get("training_time", "")
     entry["Dataset"] = os.path.basename(e.hyperparams.get("dataset", ""))
