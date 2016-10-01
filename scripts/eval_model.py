@@ -4,8 +4,8 @@
 import os
 import sys
 
-# Hack so you don't have to put the library containing this script in the PYTHONPATH.
-sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
+# # Hack so you don't have to put the library containing this script in the PYTHONPATH.
+# sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
 import numpy as np
 from os.path import join as pjoin
@@ -15,6 +15,8 @@ import theano
 import time
 from nibabel.streamlines import ArraySequence
 
+from smartlearner import views
+from smartlearner.status import Status
 from smartlearner import utils as smartutils
 
 from learn2track.utils import Timer, log_variables
@@ -42,67 +44,6 @@ def build_parser():
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
-
-
-def get_regression_results(model, dataset, batch_size):
-    loss = L2DistanceForSequences(model, dataset)
-    batch_scheduler = StreamlinesBatchScheduler(dataset, batch_size=batch_size,
-                                                # patch_shape=args.neighborhood_patch,
-                                                noisy_streamlines_sigma=None,
-                                                nb_updates_per_epoch=None,
-                                                seed=1234)
-
-    loss.losses  # Hack to generate update dict in loss :(
-    losses, masks = log_variables(batch_scheduler, loss.L2_error_per_item, dataset.symb_mask*1)
-
-    timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(losses, masks)])
-    sequences_mean_loss = np.array([l.mean() for l in timesteps_loss])
-
-    results = {"type": "L2",
-               "timesteps_loss_sum": float(timesteps_loss._data.sum()),
-               "timesteps_loss_avg": float(timesteps_loss._data.mean()),
-               "timesteps_loss_std": float(timesteps_loss._data.std()),
-               "sequences_mean_loss_avg": float(sequences_mean_loss.mean()),
-               "sequences_mean_loss_stderr": float(sequences_mean_loss.std(ddof=1)/np.sqrt(len(sequences_mean_loss)))}
-
-    return results
-
-
-def batch_get_regression_results(model, dataset, batch_size=None):
-    if batch_size is None:
-        batch_size = len(dataset)
-
-    while True:
-        try:
-            time.sleep(1)
-            print("Trying to evaluate {:,} streamlines at the same time.".format(batch_size))
-            return get_regression_results(model, dataset, batch_size), batch_size
-
-        except MemoryError:
-            print("{:,} streamlines is too much!".format(batch_size))
-            batch_size //= 2
-            if batch_size < 0:
-                raise MemoryError("Might needs a bigger graphic card!")
-
-        except OSError as e:
-            if "allocate memory" in e.args[0]:
-                print("{:,} streamlines is too much!".format(batch_size))
-                batch_size //= 2
-                if batch_size < 0:
-                    raise MemoryError("Might needs a bigger graphic card!")
-
-            else:
-                raise e
-
-        except RuntimeError as e:
-            if "out of memory" in e.args[0] or "allocation failed" in e.args[0]:
-                print("{:,} streamlines is too much!".format(batch_size))
-                batch_size //= 2
-                if batch_size < 0:
-                    raise MemoryError("Might needs a bigger graphic card!")
-
-            else:
-                raise e
 
 
 def main():
@@ -134,7 +75,7 @@ def main():
     with Timer("Loading model"):
         if hyperparams['model'] == 'gru_regression':
             from learn2track.models import GRU_Regression
-            GRU_Regression.create(experiment_path, volume_manager=volume_manager)
+            model = GRU_Regression.create(experiment_path, volume_manager=volume_manager)
         else:
             raise NameError("Unknown model: {}".format(hyperparams['model']))
 
