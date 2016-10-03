@@ -276,8 +276,9 @@ class TractographyBatchSchedulerWithProportionalSamplingFromSubjects(Tractograph
             weighted_partition = subject_relative_sizes * self.batch_size
             remainder, discrete_partition = np.modf(weighted_partition)
             missing = int(self.batch_size - np.sum(discrete_partition))
-            sorted_remainder = np.argsort(remainder)
-            discrete_partition[sorted_remainder[-missing:]] += 1
+            if missing > 0:
+                sorted_remainder = np.argsort(remainder)
+                discrete_partition[sorted_remainder[-missing:]] += 1
             self._batch_size_per_subject = discrete_partition.astype(int)
 
             assert np.sum(self._batch_size_per_subject) == self.batch_size, "batch_size_per_subject does not sum to batch_size: {}".format(
