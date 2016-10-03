@@ -262,23 +262,35 @@ class TractographyBatchSchedulerWithProportionalSamplingFromSubjects(Tractograph
 
     @property
     def indices_per_subject(self):
-        if self._indices_per_subject is None:
-            subject_offsets = self.dataset.streamlines_per_sujet_offset + [len(self.dataset)]
-            self._indices_per_subject = [np.arange(subject_offsets[i], subject_offsets[i+1]) for i in range(self.dataset.subjects)]
+        if not hasattr(self, '_indices_per_subject'):
+            subject_offsets = self.dataset.streamlines_per_sujet_offsets + [len(self.dataset)]
+            self._indices_per_subject = [np.arange(subject_offsets[i], subject_offsets[i + 1]) for i in range(len(self.dataset.subjects))]
         return self._indices_per_subject
 
     @property
     def batch_size_per_subject(self):
-        if self._batch_size_per_subject is None:
+        if not hasattr(self, '_batch_size_per_subject'):
             subject_relative_sizes = np.array(self.dataset.nb_streamlines_per_sujet) / sum(self.dataset.nb_streamlines_per_sujet)
-            self._batch_size_per_subject = np.round(subject_relative_sizes * self.batch_size)
+
+            # Largest remainder method to make sure `np.sum(self._batch_size_per_subject) == self.batch_size`
+            weighted_partition = subject_relative_sizes * self.batch_size
+            remainder, discrete_partition = np.modf(weighted_partition)
+            missing = int(self.batch_size - np.sum(discrete_partition))
+            sorted_remainder = np.argsort(remainder)
+            discrete_partition[sorted_remainder[-missing:]] += 1
+            self._batch_size_per_subject = discrete_partition.astype(int)
+
+            assert np.sum(self._batch_size_per_subject) == self.batch_size, "batch_size_per_subject does not sum to batch_size: {}".format(
+                self._batch_size_per_subject)
+            assert np.all(self._batch_size_per_subject > 1), "Not all subjects will be present in a batch: {}".format(self._batch_size_per_subject)
+
         return self._batch_size_per_subject
 
     def _next_batch(self, batch_count):
         start_per_subject = batch_count * self.batch_size_per_subject
         end_per_subject = (batch_count + 1) * self.batch_size_per_subject
         batch_indices = []
-        for i, start, end in enumerate(zip(start_per_subject, end_per_subject)):
+        for i, (start, end) in enumerate(zip(start_per_subject, end_per_subject)):
             batch_indices.extend(self.indices_per_subject[i][slice(start, end)])
 
         return self._prepare_batch(batch_indices)
