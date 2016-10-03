@@ -405,7 +405,7 @@ class MultistepSequenceBatchScheduler(TractographyBatchScheduler):
     def _window_stack(x, width):
         return np.hstack(x[i:1 + i - width or None] for i in range(width))
 
-    def get_sate(self):
+    def get_state(self):
         state = super().get_state()
         state["k"] = self.k
         return state
