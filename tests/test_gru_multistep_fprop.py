@@ -1,3 +1,9 @@
+import os
+import sys
+
+# Hack so you don't have to put the library containing this script in the PYTHONPATH.
+sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
+
 import theano
 
 from learn2track import neurotools, factories
@@ -5,7 +11,7 @@ from learn2track.utils import Timer
 from tests.utils import make_dummy_dataset
 
 
-def test_gru_multistep_fprop_k1():
+def test_gru_multistep_fprop_k1_single_subject():
     hidden_sizes = 50
 
     hyperparams = {
@@ -21,7 +27,7 @@ def test_gru_multistep_fprop_k1():
 
     with Timer("Creating dataset", newline=True):
         volume_manager = neurotools.VolumeManager()
-        trainset = make_dummy_dataset(volume_manager)
+        trainset = make_dummy_dataset(volume_manager, nb_subjects=1)
         print("Dataset sizes:", len(trainset))
 
         batch_scheduler = factories.batch_scheduler_factory(hyperparams, trainset, noisy_streamlines_sigma=None, shuffle_streamlines=True)
@@ -106,8 +112,8 @@ def test_gru_multistep_fprop_k3():
 
 
 if __name__ == "__main__":
-    test_gru_multistep_fprop_k1()
-    print("*** Test passed: K1 ***")
+    test_gru_multistep_fprop_k1_single_subject()
+    print("*** Test passed: K1/single subject ***")
 
     test_gru_multistep_fprop_k3()
     print("*** Test passed: K3 ***")

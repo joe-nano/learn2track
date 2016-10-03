@@ -1,3 +1,9 @@
+import os
+import sys
+
+# Hack so you don't have to put the library containing this script in the PYTHONPATH.
+sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
+
 import theano
 
 from learn2track import batch_schedulers, neurotools, factories

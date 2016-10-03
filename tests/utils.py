@@ -25,8 +25,8 @@ def make_dummy_dataset(volume_manager, nb_subjects=3, seed=1234):
         tracto_data = neurotools.TractographyData(dwi, gradients)
 
         for bundle_id in range(nb_bundles):
-            streamlines = [rng.randn(rng.randint(100), 3) * 5 + volume_shape[:3]/2.
-                           for i in range(rng.randint(30))]
+            streamlines = [rng.randn(rng.randint(5, 100), 3) * 5 + volume_shape[:3]/2.
+                           for i in range(rng.randint(5, 30))]
             tracto_data.add(streamlines, "bundle_{}".format(bundle_id))
 
         subject_id = volume_manager.register(volume)
