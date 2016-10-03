@@ -322,7 +322,7 @@ class TractographyBatchSchedulerWithProportionalSamplingFromSubjects(Tractograph
             yield batch_count + 1
 
 
-class MultistepSequenceBatchScheduler(TractographyBatchScheduler):
+class MultistepSequenceBatchScheduler(TractographyBatchSchedulerWithProportionalSamplingFromSubjects):
     """ Multistep batch scheduler for streamlines dataset.
     """
 
