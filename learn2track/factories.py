@@ -91,6 +91,16 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                               hidden_sizes=hyperparams['hidden_sizes'],
                               output_size=output_size)
 
+    elif hyperparams['model'] == 'gru_multistep':
+        from learn2track.models import GRU_Multistep_Gaussian
+        return GRU_Multistep_Gaussian(volume_manager=volume_manager,
+                                      input_size=input_size,
+                                      hidden_sizes=hyperparams['hidden_sizes'],
+                                      target_dims=output_size,
+                                      k=hyperparams['k'],
+                                      m=hyperparams['m'],
+                                      seed=hyperparams['seed'])
+
     else:
         raise ValueError("Unknown model!")
 
@@ -105,5 +115,31 @@ def loss_factory(hyperparams, model, dataset):
         from learn2track.models.gru_regression import L2DistanceForSequences
         return L2DistanceForSequences(model, dataset, normalize_output=hyperparams["normalize"])
 
+    elif hyperparams['model'] == 'gru_multistep':
+        from learn2track.models.gru_msp import MultistepMultivariateGaussianLossForSequences
+        return MultistepMultivariateGaussianLossForSequences(model, dataset)
+
+    else:
+        raise ValueError("Unknown model!")
+
+
+def batch_scheduler_factory(hyperparams, dataset, noisy_streamlines_sigma, shuffle_streamlines):
+    if hyperparams['model'] == 'gru_regression':
+        from learn2track.batch_schedulers import TractographyBatchScheduler
+        return TractographyBatchScheduler(dataset,
+                                          batch_size=hyperparams['batch_size'],
+                                          noisy_streamlines_sigma=noisy_streamlines_sigma,
+                                          seed=hyperparams['seed'],
+                                          normalize_target=hyperparams['normalize'],
+                                          shuffle_streamlines=shuffle_streamlines)
+
+    elif hyperparams['model'] == 'gru_multistep':
+        from learn2track.batch_schedulers import MultistepSequenceBatchScheduler
+        return MultistepSequenceBatchScheduler(dataset,
+                                               batch_size=hyperparams['batch_size'],
+                                               k=hyperparams['k'],
+                                               noisy_streamlines_sigma=noisy_streamlines_sigma,
+                                               seed=hyperparams['seed'],
+                                               shuffle_streamlines=shuffle_streamlines)
     else:
         raise ValueError("Unknown model!")

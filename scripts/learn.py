@@ -21,7 +21,7 @@ from smartlearner.direction_modifiers import DirectionClipping
 
 from learn2track import utils
 from learn2track.utils import Timer
-from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory
+from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory, batch_scheduler_factory
 from learn2track.factories import optimizer_factory
 from learn2track.factories import model_factory
 from learn2track.factories import loss_factory
@@ -60,6 +60,30 @@ def build_train_gru_argparser(subparser):
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     general.add_argument('--view', action='store_true', help='display learning curves.')
 
+def build_train_gru_multistep_argparser(subparser):
+    DESCRIPTION = "Train a multistep GRU."
+
+    p = subparser.add_parser("gru_multistep", description=DESCRIPTION, help=DESCRIPTION)
+
+    # Model options (GRU)
+    model = p.add_argument_group("GRU arguments")
+
+    model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
+                       help="Size of the hidden layers. Default: 500")
+
+    model.add_argument('-k', type=int, required=True, help="Prediction horizon for multistep training")
+    model.add_argument('-m', type=int, required=True, help="Number of samples used in the Monte-Carlo estimate")
+
+    model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
+                       help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
+    model.add_argument('--initialization-seed', type=int, default=1234,
+                       help='seed used to generate random numbers. Default=1234')
+
+    # General parameters (optional)
+    general = p.add_argument_group("General arguments")
+    general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+    general.add_argument('--view', action='store_true', help='display learning curves.')
+
 
 def build_argparser():
     DESCRIPTION = ("Script to train a GRU model from a dataset of streamlines coordinates and a DWI on a regression task.")
@@ -90,6 +114,7 @@ def build_argparser():
     #                       help='if specified, patch (as a cube, i.e. NxNxN) around each streamlines coordinates will be concatenated to the input.')
     training.add_argument('--noisy-streamlines-sigma', type=float,
                           help='if specified, it is the standard deviation of the gaussian noise added independently to every point of every streamlines at each batch.')
+    training.add_argument('--shuffle-streamlines', action="store_true", help='Shuffle streamlines between each batch update')
     training.add_argument('--clip-gradient', type=float,
                           help='if provided, gradient norms will be clipped to this value (if it exceeds it).')
     training.add_argument('--seed', type=int, default=1234,
@@ -115,6 +140,7 @@ def build_argparser():
     subparser = p.add_subparsers(title="Models", dest="model")
     subparser.required = True   # force 'required' testing
     build_train_gru_argparser(subparser)
+    build_train_gru_multistep_argparser(subparser)
 
     return p
 
@@ -186,11 +212,10 @@ def main():
             tsne_view(trainset, volume_manager)
             sys.exit(0)
 
-        batch_scheduler = TractographyBatchScheduler(trainset,
-                                                     batch_size=args.batch_size,
-                                                     noisy_streamlines_sigma=args.noisy_streamlines_sigma,
-                                                     seed=args.seed,
-                                                     normalize_target=hyperparams['normalize'])
+        batch_scheduler = batch_scheduler_factory(hyperparams,
+                                                  dataset=trainset,
+                                                  noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'],
+                                                  shuffle_streamlines=hyperparams['shuffle_streamlines'])
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
         print (volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
 
@@ -221,19 +246,19 @@ def main():
         # Print average training loss.
         trainer.append_task(tasks.Print("Avg. training loss:         : {}", avg_loss))
 
-        if args.learn_to_stop:
-            l2err_monitor = views.MonitorVariable(T.mean(loss.mean_sqr_error))
-            avg_l2err = tasks.AveragePerEpoch(l2err_monitor)
-            trainer.append_task(avg_l2err)
-
-            crossentropy_monitor = views.MonitorVariable(T.mean(loss.cross_entropy))
-            avg_crossentropy = tasks.AveragePerEpoch(crossentropy_monitor)
-            trainer.append_task(avg_crossentropy)
-
-            trainer.append_task(tasks.Print("Avg. training L2 err:       : {}", avg_l2err))
-            trainer.append_task(tasks.Print("Avg. training stopping:     : {}", avg_crossentropy))
-            trainer.append_task(tasks.Print("L2 err : {0:.4f}", l2err_monitor, each_k_update=100))
-            trainer.append_task(tasks.Print("stopping : {0:.4f}", crossentropy_monitor, each_k_update=100))
+        # if args.learn_to_stop:
+        #     l2err_monitor = views.MonitorVariable(T.mean(loss.mean_sqr_error))
+        #     avg_l2err = tasks.AveragePerEpoch(l2err_monitor)
+        #     trainer.append_task(avg_l2err)
+        #
+        #     crossentropy_monitor = views.MonitorVariable(T.mean(loss.cross_entropy))
+        #     avg_crossentropy = tasks.AveragePerEpoch(crossentropy_monitor)
+        #     trainer.append_task(avg_crossentropy)
+        #
+        #     trainer.append_task(tasks.Print("Avg. training L2 err:       : {}", avg_l2err))
+        #     trainer.append_task(tasks.Print("Avg. training stopping:     : {}", avg_crossentropy))
+        #     trainer.append_task(tasks.Print("L2 err : {0:.4f}", l2err_monitor, each_k_update=100))
+        #     trainer.append_task(tasks.Print("stopping : {0:.4f}", crossentropy_monitor, each_k_update=100))
 
         # Print NLL mean/stderror.
         # train_loss = L2DistanceForSequences(model, trainset)
@@ -246,12 +271,10 @@ def main():
         # trainer.append_task(tasks.Print("Trainset - Error        : {0:.2f} | {1:.2f}", train_error.sum, train_error.mean))
 
         valid_loss = loss_factory(hyperparams, model, validset)
-        valid_batch_scheduler = TractographyBatchScheduler(validset,
-                                                           batch_size=args.batch_size,
-                                                           noisy_streamlines_sigma=None,
-                                                           seed=1234,
-                                                           shuffle_streamlines=False,
-                                                           normalize_target=hyperparams['normalize'])
+        valid_batch_scheduler = batch_scheduler_factory(hyperparams,
+                                                        dataset=validset,
+                                                        noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'],
+                                                        shuffle_streamlines=hyperparams['shuffle_streamlines'])
 
         valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
         trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))
