@@ -1,47 +1,14 @@
-import numpy as np
+import os
+import sys
 
-import dipy
-import nibabel as nib
-from dipy.core.gradients import gradient_table
+# Hack so you don't have to put the library containing this script in the PYTHONPATH.
+sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
 import theano
 
+from learn2track import batch_schedulers, neurotools, factories
 from learn2track.utils import Timer
-from learn2track import datasets, batch_schedulers, neurotools, factories
-
-
-def make_dummy_dataset(volume_manager, nb_subjects=3, seed=1234):
-    rng = np.random.RandomState(seed)
-    nb_bundles = 7
-    nb_gradients = 64
-
-    subjects = []
-    for subject_id in range(nb_subjects):
-
-        volume_shape = np.array((rng.randint(5, 30), rng.randint(5, 30), rng.randint(5, 30), nb_gradients))
-
-        dwi = nib.Nifti1Image(rng.rand(*volume_shape), affine=np.eye(4))
-        bvals = [0] + [1000] * (nb_gradients-1)
-        bvecs = rng.randn(nb_gradients, 3)
-        bvecs /= np.sqrt(np.sum(bvecs**2, axis=1, keepdims=True))
-        gradients = gradient_table(bvals, bvecs)
-
-        volume = neurotools.resample_dwi(dwi, gradients.bvals, gradients.bvecs).astype(np.float32)
-        tracto_data = neurotools.TractographyData(dwi, gradients)
-
-        for bundle_id in range(nb_bundles):
-            streamlines = [rng.randn(rng.randint(100), 3) * 5 + volume_shape[:3]/2.
-                           for i in range(rng.randint(30))]
-            tracto_data.add(streamlines, "bundle_{}".format(bundle_id))
-
-        subject_id = volume_manager.register(volume)
-        tracto_data.subject_id = subject_id
-        subjects.append(tracto_data)
-
-    return datasets.TractographyDataset(subjects, name="test", keep_on_cpu=True)
-
-
-
+from tests.utils import make_dummy_dataset
 
 
 def test_gru_regression_fprop():
@@ -63,7 +30,8 @@ def test_gru_regression_fprop():
         hyperparams = {'model': 'gru_regression',
                        'SGD': "1e-2",
                        'hidden_sizes': hidden_sizes,
-                       'learn_to_stop': False}
+                       'learn_to_stop': False,
+                       'normalize': False}
         model = factories.model_factory(hyperparams,
                                         input_size=volume_manager.data_dimension,
                                         output_size=batch_scheduler.target_size,
