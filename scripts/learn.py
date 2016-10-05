@@ -203,13 +203,14 @@ def main():
     print("Resuming:" if resuming else "Creating:", experiment_path)
 
     with Timer("Loading dataset", newline=True):
-        volume_manager = VolumeManager()
-        trainset = datasets.load_tractography_dataset(args.train_subjects, volume_manager, name="trainset", use_sh_coeffs=args.use_sh_coeffs)
-        validset = datasets.load_tractography_dataset(args.valid_subjects, volume_manager, name="validset", use_sh_coeffs=args.use_sh_coeffs)
+        trainset_volume_manager = VolumeManager()
+        validset_volume_manager = VolumeManager()
+        trainset = datasets.load_tractography_dataset(args.train_subjects, trainset_volume_manager, name="trainset", use_sh_coeffs=args.use_sh_coeffs)
+        validset = datasets.load_tractography_dataset(args.valid_subjects, validset_volume_manager, name="validset", use_sh_coeffs=args.use_sh_coeffs)
         print("Dataset sizes:", len(trainset), " |", len(validset))
 
         if args.view:
-            tsne_view(trainset, volume_manager)
+            tsne_view(trainset, trainset_volume_manager)
             sys.exit(0)
 
         batch_scheduler = batch_scheduler_factory(hyperparams,
@@ -217,13 +218,13 @@ def main():
                                                   noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'],
                                                   shuffle_streamlines=hyperparams['shuffle_streamlines'])
         print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
-        print (volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
+        print (trainset_volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
 
     with Timer("Creating model"):
         model = model_factory(hyperparams,
-                              input_size=volume_manager.data_dimension,
+                              input_size=trainset_volume_manager.data_dimension,
                               output_size=batch_scheduler.target_size,
-                              volume_manager=volume_manager)
+                              volume_manager=trainset_volume_manager)
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
 
@@ -270,6 +271,8 @@ def main():
         # train_error = views.LossView(loss=train_loss, batch_scheduler=train_batch_scheduler)
         # trainer.append_task(tasks.Print("Trainset - Error        : {0:.2f} | {1:.2f}", train_error.sum, train_error.mean))
 
+        # HACK: To make sure all subjects in the volume_manager are used in a batch, we have to split the trainset/validset in 2 volume managers
+        model.volume_manager = validset_volume_manager
         valid_loss = loss_factory(hyperparams, model, validset)
         valid_batch_scheduler = batch_scheduler_factory(hyperparams,
                                                         dataset=validset,
@@ -278,6 +281,9 @@ def main():
 
         valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
         trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))
+
+        # HACK: Restore trainset volume manager
+        model.volume_manager = trainset_volume_manager
 
         lookahead_loss = valid_error.sum
 
