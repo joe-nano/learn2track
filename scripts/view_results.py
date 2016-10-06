@@ -28,14 +28,14 @@ DESCRIPTION = 'Gather experiments results and save them in a CSV file.'
 def buildArgsParser():
     p = argparse.ArgumentParser(description=DESCRIPTION)
     p.add_argument('names', type=str, nargs='+', help='name/path of the experiments.')
-    p.add_argument('--tractography-names', type=str, nargs='+', help='name of the tractography scores results. Default: wm', default=['wm'])
+    p.add_argument('--tractography-names', type=str, nargs='+', help='name of the tractography scores results. Default: auto-detect')
     p.add_argument('--out', default="results.csv", help='save table in a CSV file. Default: results.csv')
     p.add_argument('-v', '--verbose', action="store_true", help='verbose mode')
     return p
 
 
 class Experiment(object):
-    def __init__(self, experiment_path, tractography_name="wm"):
+    def __init__(self, experiment_path, tractography_name):
         self.description = tractography_name
         self.experiment_path = experiment_path
         self.name = os.path.basename(self.experiment_path)
@@ -77,49 +77,51 @@ def list_of_dict_to_csv_file(csv_file, list_of_dicts):
 
 
 def get_optimizer(e):
-        if e.hyperparams.get("SGD") is not None:
-            return "SGD"
-        elif e.hyperparams.get("AdaGrad") is not None:
-            return "AdaGrad"
-        elif e.hyperparams.get("Adam") is not None:
-            return "Adam"
-        elif e.hyperparams.get("RMSProp") is not None:
-            return "RMSProp"
-        elif e.hyperparams.get("Adadelta") is not None:
-            return "Adadelta"
+    if e.hyperparams.get("SGD") is not None:
+        return "SGD"
+    elif e.hyperparams.get("AdaGrad") is not None:
+        return "AdaGrad"
+    elif e.hyperparams.get("Adam") is not None:
+        return "Adam"
+    elif e.hyperparams.get("RMSProp") is not None:
+        return "RMSProp"
+    elif e.hyperparams.get("Adadelta") is not None:
+        return "Adadelta"
 
+    return ""
+
+def extract_L2_error(results, dataset, metric):
+    if dataset not in results:
         return ""
+
+    return str(results[dataset][metric])
 
 
 def extract_result_from_experiment(e):
     """e: `Experiment` object"""
     entry = OrderedDict()
     entry["Hidden Size(s)"] = "-".join(map(str, e.hyperparams.get("hidden_sizes", [])))
-    entry["Regression"] = e.hyperparams.get("regression", "")
-    entry["Classification"] = e.hyperparams.get("classification", "")
+    entry["Optimizer"] = get_optimizer(e)
+    entry["Optimizer params"] = e.hyperparams.get(get_optimizer(e), "")
+    entry["Noise sigma"] = e.hyperparams.get("noisy_streamlines_sigma", "")
+    entry["Clip Gradient"] = e.hyperparams.get("clip_gradient", "")
+    entry["Batch Size"] = e.hyperparams.get("batch_size", "")
     entry["Weights Initialization"] = e.hyperparams.get("weights_initialization", "")
     entry["Look Ahead"] = e.hyperparams.get("lookahead", "")
     entry["Look Ahead eps"] = e.hyperparams.get("lookahead_eps", "")
-    entry["Batch Size"] = e.hyperparams.get("batch_size", "")
-    entry["Optimizer"] = get_optimizer(e)
-    entry["Optimizer params"] = e.hyperparams.get(get_optimizer(e), "")
-    entry["Nb. updates/epoch"] = e.hyperparams.get("nb_updates_per_epoch", "")
-    entry["Noise sigma"] = e.hyperparams.get("noisy_streamlines_sigma", "")
-    entry["Clip Gradient"] = e.hyperparams.get("clip_gradient", "")
     entry["Best Epoch"] = e.early_stopping.get("best_epoch", "")
     entry["Max Epoch"] = e.status.get("current_epoch", "")
 
     # Results
-    # entry["Train L2 error"] = e.results["trainset"]["sequences_mean_loss_avg"]
-    # entry["Valid L2 error"] = e.results["validset"]["sequences_mean_loss_avg"]
-    # entry["Test L2 error"] = e.results["testset"]["sequences_mean_loss_avg"]
+    entry["Train L2 error"] = extract_L2_error(e.results, "trainset_L2_error", "mean")
+    entry["Valid L2 error"] = extract_L2_error(e.results, "validset_L2_error", "mean")
 
     # Tractometer results
-    entry["VC"] = str(e.tractometer_scores.get("VC", ""))
-    entry["IC"] = str(e.tractometer_scores.get("IC", ""))
-    entry["NC"] = str(e.tractometer_scores.get("NC", ""))
-    entry["VB"] = str(e.tractometer_scores.get("VB", ""))
-    entry["IB"] = str(e.tractometer_scores.get("IB", ""))
+    entry["VC"] = str(e.tractometer_scores.get("VC", "0"))
+    entry["IC"] = str(e.tractometer_scores.get("IC", "0"))
+    entry["NC"] = str(e.tractometer_scores.get("NC", "0"))
+    entry["VB"] = str(e.tractometer_scores.get("VB", "0"))
+    entry["IB"] = str(e.tractometer_scores.get("IB", "0"))
     entry["count"] = str(e.tractometer_scores.get("total_streamlines_count", ""))
     entry["VCCR"] = ""
     if len(e.tractometer_scores) > 0:
@@ -129,51 +131,45 @@ def extract_result_from_experiment(e):
     overreach_per_bundle = e.tractometer_scores.get("overreach_per_bundle", {})
     entry["Avg. Overlap"] = str(np.mean(list(map(float, overlap_per_bundle.values()))))
     entry["Avg. Overreach"] = str(np.mean(list(map(float, overreach_per_bundle.values()))))
-    entry["Std. Overlap"] = str(np.std(list(map(float, overlap_per_bundle.values()))))
-    entry["Std. Overreach"] = str(np.std(list(map(float, overreach_per_bundle.values()))))
+
+    entry["Description"] = e.description
 
     streamlines_per_bundle = e.tractometer_scores.get("streamlines_per_bundle", {})
-    entry['CA'] = str(streamlines_per_bundle.get("CA", ""))
-    entry['CC'] = str(streamlines_per_bundle.get("CC", ""))
-    entry['CP'] = str(streamlines_per_bundle.get("CP", ""))
-    entry['CST_left'] = str(streamlines_per_bundle.get("CST_left", ""))
-    entry['CST_right'] = str(streamlines_per_bundle.get("CST_right", ""))
-    entry['Cingulum_left'] = str(streamlines_per_bundle.get("Cingulum_left", ""))
-    entry['Cingulum_right'] = str(streamlines_per_bundle.get("Cingulum_right", ""))
-    entry['FPT_left'] = str(streamlines_per_bundle.get("FPT_left", ""))
-    entry['FPT_right'] = str(streamlines_per_bundle.get("FPT_right", ""))
-    entry['Fornix'] = str(streamlines_per_bundle.get("Fornix", ""))
-    entry['ICP_left'] = str(streamlines_per_bundle.get("ICP_left", ""))
-    entry['ICP_right'] = str(streamlines_per_bundle.get("ICP_right", ""))
-    entry['ILF_left'] = str(streamlines_per_bundle.get("ILF_left", ""))
-    entry['ILF_right'] = str(streamlines_per_bundle.get("ILF_right", ""))
-    entry['MCP'] = str(streamlines_per_bundle.get("MCP", ""))
-    entry['OR_left'] = str(streamlines_per_bundle.get("OR_left", ""))
-    entry['OR_right'] = str(streamlines_per_bundle.get("OR_right", ""))
-    entry['POPT_left'] = str(streamlines_per_bundle.get("POPT_left", ""))
-    entry['POPT_right'] = str(streamlines_per_bundle.get("POPT_right", ""))
-    entry['SCP_left'] = str(streamlines_per_bundle.get("SCP_left", ""))
-    entry['SCP_right'] = str(streamlines_per_bundle.get("SCP_right", ""))
-    entry['SLF_left'] = str(streamlines_per_bundle.get("SLF_left", ""))
-    entry['SLF_right'] = str(streamlines_per_bundle.get("SLF_right", ""))
-    entry['UF_left'] = str(streamlines_per_bundle.get("UF_left", ""))
-    entry['UF_right'] = str(streamlines_per_bundle.get("UF_right", ""))
+    entry['CA'] = str(streamlines_per_bundle.get("CA", "0"))
+    entry['CC'] = str(streamlines_per_bundle.get("CC", "0"))
+    entry['CP'] = str(streamlines_per_bundle.get("CP", "0"))
+    entry['CST_left'] = str(streamlines_per_bundle.get("CST_left", "0"))
+    entry['CST_right'] = str(streamlines_per_bundle.get("CST_right", "0"))
+    entry['Cingulum_left'] = str(streamlines_per_bundle.get("Cingulum_left", "0"))
+    entry['Cingulum_right'] = str(streamlines_per_bundle.get("Cingulum_right", "0"))
+    entry['FPT_left'] = str(streamlines_per_bundle.get("FPT_left", "0"))
+    entry['FPT_right'] = str(streamlines_per_bundle.get("FPT_right", "0"))
+    entry['Fornix'] = str(streamlines_per_bundle.get("Fornix", "0"))
+    entry['ICP_left'] = str(streamlines_per_bundle.get("ICP_left", "0"))
+    entry['ICP_right'] = str(streamlines_per_bundle.get("ICP_right", "0"))
+    entry['ILF_left'] = str(streamlines_per_bundle.get("ILF_left", "0"))
+    entry['ILF_right'] = str(streamlines_per_bundle.get("ILF_right", "0"))
+    entry['MCP'] = str(streamlines_per_bundle.get("MCP", "0"))
+    entry['OR_left'] = str(streamlines_per_bundle.get("OR_left", "0"))
+    entry['OR_right'] = str(streamlines_per_bundle.get("OR_right", "0"))
+    entry['POPT_left'] = str(streamlines_per_bundle.get("POPT_left", "0"))
+    entry['POPT_right'] = str(streamlines_per_bundle.get("POPT_right", "0"))
+    entry['SCP_left'] = str(streamlines_per_bundle.get("SCP_left", "0"))
+    entry['SCP_right'] = str(streamlines_per_bundle.get("SCP_right", "0"))
+    entry['SLF_left'] = str(streamlines_per_bundle.get("SLF_left", "0"))
+    entry['SLF_right'] = str(streamlines_per_bundle.get("SLF_right", "0"))
+    entry['UF_left'] = str(streamlines_per_bundle.get("UF_left", "0"))
+    entry['UF_right'] = str(streamlines_per_bundle.get("UF_right", "0"))
 
     # Other results
-    # entry["Train L2 error std"] = e.results["trainset"]["sequences_mean_loss_stderr"]
-    # entry["Valid L2 error std"] = e.results["validset"]["sequences_mean_loss_stderr"]
-    # entry["Test L2 error std"] = e.results["testset"]["sequences_mean_loss_stderr"]
-    # entry["Train L2 error (per timestep)"] = e.results["trainset"]["timesteps_loss_avg"]
-    # entry["Valid L2 error (per timestep)"] = e.results["validset"]["timesteps_loss_avg"]
-    # entry["Test L2 error (per timestep)"] = e.results["testset"]["timesteps_loss_avg"]
-    # entry["Train L2 error (per timestep) std"] = e.results["trainset"]["timesteps_loss_std"]
-    # entry["Valid L2 error (per timestep) std"] = e.results["validset"]["timesteps_loss_std"]
-    # entry["Test L2 error (per timestep) std"] = e.results["testset"]["timesteps_loss_std"]
+    entry["Std. Train L2 error"] = extract_L2_error(e.results, "trainset_L2_error", "stderror")
+    entry["Std. Valid L2 error"] = extract_L2_error(e.results, "validset_L2_error", "stderror")
+    entry["Std. Overlap"] = str(np.std(list(map(float, overlap_per_bundle.values()))))
+    entry["Std. Overreach"] = str(np.std(list(map(float, overreach_per_bundle.values()))))
 
     entry["Training Time"] = e.status.get("training_time", "")
     entry["Dataset"] = os.path.basename(e.hyperparams.get("dataset", ""))
     entry["Experiment"] = e.name
-    entry["Description"] = e.description
 
     if "missing" in entry["Dataset"]:
         bundle_name = entry["Dataset"][:-4].split("_")[-1]
@@ -199,8 +195,26 @@ def main():
 
     experiments_results = []
 
+    tractography_names = args.tractography_names
+    if tractography_names is None:
+        tractography_names = set()
+        for experiment_path in args.names:
+            scores_dir = pjoin(experiment_path, "tractometer", "scores")
+
+            if not os.path.isdir(scores_dir):
+                continue
+
+            scores_files = [f[:-5] for f in os.listdir(scores_dir) if f.endswith(".json")]
+            tractography_names |= set(scores_files)
+
+        tractography_names = sorted(tractography_names)
+
+        if args.verbose:
+            print("Detected the following tractograms:")
+            print("  " + "\n  ".join(tractography_names))
+
     for experiment_path in args.names:
-        for tractography_name in args.tractography_names:
+        for tractography_name in tractography_names:
             try:
                 experiment = Experiment(experiment_path, tractography_name)
                 experiments_results.append(extract_result_from_experiment(experiment))
