@@ -176,8 +176,8 @@ def tsne_view(trainset, volume_manager):
     import matplotlib.pyplot as plt
     plt.figure()
     ids = range(len(trainset.subjects))
-    markers = ['s', 'o', '^', 'v']
-    colors = ['cyan', 'darkorange', 'darkgreen', 'purple']
+    markers = ['s', 'o', '^', 'v', '<', '>', 'h']
+    colors = ['cyan', 'darkorange', 'darkgreen', 'magenta', 'pink', 'k']
     for i, marker, color in zip(ids, markers, colors):
         idx = coords[:, -1] == i
         print("Subject #{}: ".format(i), idx.sum())
