@@ -19,10 +19,12 @@ import dipy
 import nibabel as nib
 from dipy.tracking.streamline import compress_streamlines
 
-from smartlearner import Dataset
+from smartlearner import Dataset, views
 from smartlearner import utils as smartutils
 
 from learn2track import utils
+from learn2track import datasets, batch_schedulers
+from learn2track.factories import loss_factory
 from learn2track.utils import Timer
 from smartlearner.utils import load_dict_from_json_file
 
@@ -64,6 +66,9 @@ def build_argparser():
     p.add_argument('--backward-tracking-algo', type=int,
                    help="if specified, both senses of the direction obtained from the seed point will be explored. Default: 0, (i.e. only do tracking one direction) ", default=0)
 
+    p.add_argument('--filter-threshold', type=float,
+                   help="If specified, only streamlines with a loss value lower than the specified value will be kept.")
+
     p.add_argument('--batch-size', type=int, help="number of streamlines to process at the same time. Default: the biggest possible")
 
     p.add_argument('--dilate-mask', action="store_true",
@@ -78,6 +83,26 @@ def build_argparser():
     return p
 
 floatX = theano.config.floatX
+
+
+def compute_loss_errors(streamlines, model, hyperparams):
+    # Create dummy dataset for these new streamlines.
+    tracto_data = neurotools.TractographyData(None, None, None)
+    tracto_data.add(streamlines, bundle_name="Generated")
+    tracto_data.subject_id = 0
+    dataset = datasets.TractographyDataset([tracto_data], "Generated", keep_on_cpu=True)
+
+    loss = loss_factory(hyperparams, model, dataset)
+    batch_scheduler = batch_schedulers.TractographyBatchScheduler(dataset,
+                                                                  batch_size=1000,
+                                                                  noisy_streamlines_sigma=None,
+                                                                  use_data_augment=False,  # Otherwise it doubles the number of losses :-/
+                                                                  seed=1234,
+                                                                  shuffle_streamlines=False,
+                                                                  normalize_target=hyperparams['normalize'])
+
+    loss_view = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
+    return loss_view.losses.view()
 
 
 def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0):
@@ -536,16 +561,35 @@ def main():
                                  backward_tracking_algo=args.backward_tracking_algo,
                                  batch_size=args.batch_size)
 
-    with Timer("Saving streamlines"):
+    nb_streamlines = len(tractogram)
+    print("Generated {:,} (compressed) streamlines".format(nb_streamlines))
+    with Timer("Cleaning streamlines", newline=True):
         # Flush streamlines that has no points.
         tractogram = tractogram[np.array(list(map(len, tractogram))) > 0]
-        tractogram.affine_to_rasmm = dwi.affine
-        # tractogram.apply_affine(dwi.affine)  # Streamlines were generated in diffusion voxel space.
+        print("Removed {:,} empty streamlines".format(nb_streamlines - len(tractogram)))
+
         # Remove small streamlines
+        nb_streamlines = len(tractogram)
         lengths = dipy.tracking.streamline.length(tractogram.streamlines)
         tractogram = tractogram[lengths >= args.min_length]
         lengths = lengths[lengths >= args.min_length]
+        print("Average length: {:.2f} mm.".format(lengths.mean()))
+        print("Minimum length: {:.2f} mm. Maximum length: {:.2f}".format(lengths.min(), lengths.max()))
+        print("Removed {:,} streamlines smaller than {:.2f} mm".format(nb_streamlines - len(tractogram),
+                                                                       args.min_length))
 
+        if args.filter_threshold is not None:
+            # Remove streamlines that produces a reconstruction error higher than a certain threshold.
+            nb_streamlines = len(tractogram)
+            losses = compute_loss_errors(tractogram.streamlines, model, hyperparams)
+            print("Mean loss: {:.4f} ± {:.4f}".format(np.mean(losses), np.std(losses, ddof=1) / np.sqrt(len(losses))))
+            tractogram = tractogram[losses <= args.filter_threshold]
+            print("Removed {:,} streamlines producing a loss lower than {:.2f} mm".format(nb_streamlines - len(tractogram),
+                                                                                          args.filter_threshold))
+
+    with Timer("Saving streamlines"):
+        print("Saving {:,} (compressed) streamlines".format(len(tractogram)))
+        tractogram.affine_to_rasmm = dwi.affine
         save_path = pjoin(experiment_path, args.out)
         try:  # Create dirs, if needed.
             os.makedirs(os.path.dirname(save_path))
@@ -553,10 +597,6 @@ def main():
             pass
 
         nib.streamlines.save(tractogram, save_path)
-
-    print("{:,} streamlines (compressed) were generated.".format(len(tractogram)))
-    print("Average length: {:.2f} mm.".format(lengths.mean()))
-    print("Minimum length: {:.2f} mm. Maximum length: {:.2f}".format(lengths.min(), lengths.max()))
 
 if __name__ == "__main__":
     main()
