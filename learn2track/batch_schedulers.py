@@ -306,6 +306,12 @@ class TractographyBatchSchedulerWithProportionalSamplingFromSubjects(Tractograph
         for i, (start, end) in enumerate(zip(start_per_subject, end_per_subject)):
             batch_indices.extend(self.indices_per_subject[i][slice(start, end)])
 
+            if end > len(self.indices_per_subject[i]):
+                # Not enough streamlines for subject i; sample from already seen streamlines
+                needed = end - max(start, len(self.indices_per_subject[i]))
+                sampled_ids = np.random.randint(0, len(self.indices_per_subject[i]), needed)
+                batch_indices.extend(self.indices_per_subject[i][sampled_ids])
+
         return self._prepare_batch(batch_indices)
 
     def __iter__(self):
