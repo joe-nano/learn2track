@@ -387,8 +387,8 @@ def main():
 
     with Timer("Loading DWIs"):
         # Load gradients table
-        bvals_filename = args.dwi.split('.')[0] + ".bvals"
-        bvecs_filename = args.dwi.split('.')[0] + ".bvecs"
+        bvals_filename = args.dwi.rstrip(".nii.gz") + ".bvals"
+        bvecs_filename = args.dwi.rstrip(".nii.gz") + ".bvecs"
         bvals, bvecs = dipy.io.gradients.read_bvals_bvecs(bvals_filename, bvecs_filename)
 
         dwi = nib.load(args.dwi)
