@@ -76,11 +76,18 @@ def main():
         if hyperparams['model'] == 'gru_regression':
             from learn2track.models import GRU_Regression
             model = GRU_Regression.create(experiment_path, volume_manager=volume_manager)
+        elif hyperparams['model'] == 'gru_mixture':
+            from learn2track.models import GRU_Mixture
+            model = GRU_Mixture.create(experiment_path, volume_manager=volume_manager)
         else:
             raise NameError("Unknown model: {}".format(hyperparams['model']))
 
     with Timer("Building evaluation function"):
-        loss = loss_factory(hyperparams, model, dataset)
+        if hyperparams['model'] == 'gru_mixture':
+            from learn2track.models.gru_mixture import MultivariateGaussianMixtureExpectedValueL2Distance
+            loss = MultivariateGaussianMixtureExpectedValueL2Distance(model, dataset)
+        else:
+            loss = loss_factory(hyperparams, model, dataset)
         batch_scheduler = TractographyBatchScheduler(dataset,
                                                      batch_size=args.batch_size,
                                                      noisy_streamlines_sigma=None,

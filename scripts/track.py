@@ -476,13 +476,19 @@ def main():
             # plt.show()
 
     with Timer("Loading model"):
-        kwargs = {}
         if hyperparams["model"] == "gru_regression":
             from learn2track.models import GRU_Regression
             model_class = GRU_Regression
-            volume_manager = neurotools.VolumeManager()
-            volume_manager.register(weights)
-            kwargs['volume_manager'] = volume_manager
+        elif hyperparams['model'] == 'gru_mixture':
+            from learn2track.models import GRU_Mixture
+            model_class = GRU_Mixture
+        else:
+            raise ValueError("Unknown model!")
+
+        kwargs = {}
+        volume_manager = neurotools.VolumeManager()
+        volume_manager.register(weights)
+        kwargs['volume_manager'] = volume_manager
 
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path), **kwargs)  # Create new instance and restore model.
