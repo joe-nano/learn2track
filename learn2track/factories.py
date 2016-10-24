@@ -101,6 +101,14 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                                       m=hyperparams['m'],
                                       seed=hyperparams['seed'])
 
+    elif hyperparams['model'] == 'gru_mixture':
+        from learn2track.models import GRU_Mixture
+        return GRU_Mixture(volume_manager=volume_manager,
+                           input_size=input_size,
+                           hidden_sizes=hyperparams['hidden_sizes'],
+                           output_size=output_size,
+                           n_gaussians=hyperparams['n_gaussians'])
+
     else:
         raise ValueError("Unknown model!")
 
@@ -118,6 +126,10 @@ def loss_factory(hyperparams, model, dataset):
     elif hyperparams['model'] == 'gru_multistep':
         from learn2track.models.gru_msp import MultistepMultivariateGaussianLossForSequences
         return MultistepMultivariateGaussianLossForSequences(model, dataset)
+
+    elif hyperparams['model'] == 'gru_mixture':
+        from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
+        return MultivariateGaussianMixtureNLL(model, dataset)
 
     else:
         raise ValueError("Unknown model!")
@@ -141,5 +153,13 @@ def batch_scheduler_factory(hyperparams, dataset, noisy_streamlines_sigma, shuff
                                                noisy_streamlines_sigma=noisy_streamlines_sigma,
                                                seed=hyperparams['seed'],
                                                shuffle_streamlines=shuffle_streamlines)
+    elif hyperparams['model'] == 'gru_mixture':
+        from learn2track.batch_schedulers import TractographyBatchScheduler
+        return TractographyBatchScheduler(dataset,
+                                          batch_size=hyperparams['batch_size'],
+                                          noisy_streamlines_sigma=noisy_streamlines_sigma,
+                                          seed=hyperparams['seed'],
+                                          normalize_target=hyperparams['normalize'],
+                                          shuffle_streamlines=shuffle_streamlines)
     else:
         raise ValueError("Unknown model!")

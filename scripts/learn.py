@@ -60,6 +60,36 @@ def build_train_gru_argparser(subparser):
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     general.add_argument('--view', action='store_true', help='display learning curves.')
 
+
+def build_train_gru_mixture_argparser(subparser):
+    DESCRIPTION = "Train a gaussian mixture GRU."
+
+    p = subparser.add_parser("gru_mixture", description=DESCRIPTION, help=DESCRIPTION)
+
+    # p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
+
+    # Model options (GRU)
+    model = p.add_argument_group("GRU arguments")
+
+    model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
+                       help="Size of the hidden layers. Default: 500")
+
+    model.add_argument('-n', '--n-gaussians', type=int, default=2, help='Number of gaussians in the mixture. Default: 2')
+
+    model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
+                       help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
+    model.add_argument('--initialization-seed', type=int, default=1234,
+                       help='seed used to generate random numbers. Default=1234')
+
+    model.add_argument('--normalize', action="store_true",
+                       help='if specified, output direction the model produces will have unit length.')
+
+    # General parameters (optional)
+    general = p.add_argument_group("General arguments")
+    general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+    general.add_argument('--view', action='store_true', help='display learning curves.')
+
+
 def build_train_gru_multistep_argparser(subparser):
     DESCRIPTION = "Train a multistep GRU."
 
@@ -140,6 +170,7 @@ def build_argparser():
     subparser = p.add_subparsers(title="Models", dest="model")
     subparser.required = True   # force 'required' testing
     build_train_gru_argparser(subparser)
+    build_train_gru_mixture_argparser(subparser)
     build_train_gru_multistep_argparser(subparser)
 
     return p
