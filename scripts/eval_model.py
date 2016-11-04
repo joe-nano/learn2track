@@ -2,30 +2,22 @@
 # -*- coding: utf-8 -*-
 
 import os
-import sys
 
 # # Hack so you don't have to put the library containing this script in the PYTHONPATH.
 # sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
-import numpy as np
 from os.path import join as pjoin
 import argparse
-import itertools
-import theano
-import time
-from nibabel.streamlines import ArraySequence
 
 from smartlearner import views
 from smartlearner.status import Status
 from smartlearner import utils as smartutils
 
-from learn2track.utils import Timer, log_variables
-from learn2track.factories import model_factory
+from learn2track.utils import Timer
 from learn2track.factories import loss_factory
 
 from learn2track import datasets
-from learn2track import utils
-from learn2track.batch_schedulers import TractographyBatchScheduler
+from learn2track.batch_schedulers import TractographyBatchScheduler, MultistepSequenceBatchScheduler
 from learn2track.neurotools import VolumeManager
 
 
@@ -79,22 +71,32 @@ def main():
         elif hyperparams['model'] == 'gru_mixture':
             from learn2track.models import GRU_Mixture
             model = GRU_Mixture.create(experiment_path, volume_manager=volume_manager)
+        elif hyperparams['model'] == 'gru_multistep':
+            from learn2track.models import GRU_Multistep_Gaussian
+            model = GRU_Multistep_Gaussian.create(experiment_path, volume_manager=volume_manager)
+            model.k = 1
+            model.m = 1
         else:
             raise NameError("Unknown model: {}".format(hyperparams['model']))
 
     with Timer("Building evaluation function"):
-        if hyperparams['model'] == 'gru_mixture':
-            from learn2track.models.gru_mixture import MultivariateGaussianMixtureExpectedValueL2Distance
-            loss = MultivariateGaussianMixtureExpectedValueL2Distance(model, dataset)
+        if hyperparams['model'] == 'gru_multistep':
+            batch_scheduler = MultistepSequenceBatchScheduler(dataset,
+                                                              batch_size=args.batch_size,
+                                                              k=1,
+                                                              noisy_streamlines_sigma=None,
+                                                              seed=1234,
+                                                              normalize_target=False,
+                                                              shuffle_streamlines=False)
         else:
-            loss = loss_factory(hyperparams, model, dataset)
-        batch_scheduler = TractographyBatchScheduler(dataset,
-                                                     batch_size=args.batch_size,
-                                                     noisy_streamlines_sigma=None,
-                                                     seed=1234,
-                                                     shuffle_streamlines=False,
-                                                     normalize_target=hyperparams['normalize'])
+            batch_scheduler = TractographyBatchScheduler(dataset,
+                                                         batch_size=args.batch_size,
+                                                         noisy_streamlines_sigma=None,
+                                                         seed=1234,
+                                                         shuffle_streamlines=False,
+                                                         normalize_target=hyperparams['normalize'])
 
+        loss = loss_factory(hyperparams, model, dataset, use_expected_value=True)
         l2_error = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
 
     with Timer("Evaluating...", newline=True):

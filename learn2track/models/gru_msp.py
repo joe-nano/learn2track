@@ -217,7 +217,7 @@ class GRU_Multistep_Gaussian(GRU):
             # Sample value from distribution
             srng = MRG_RandomStreams(seed=1234)
 
-            batch_size = x_t.shape[0]
+            batch_size = symb_x_t.shape[0]
             noise = srng.normal((batch_size, self.target_dims))
 
             # next_step_predictions.shape : (batch_size, target_dims)
@@ -255,7 +255,7 @@ class GRU_Multistep_Gaussian(GRU):
             state_update[0].set_value(saved_state)
 
 
-class MultistepMultivariateGaussianLossForSequences(Loss):
+class MultistepMultivariateGaussianNLL(Loss):
     """ Compute multistep loss for a multivariate gaussian distribution using a monte-carlo estimate of the likelihood
     """
 
@@ -314,3 +314,40 @@ class MultistepMultivariateGaussianLossForSequences(Loss):
         # nlls.shape :(batch_size,)
         self.nlls = T.mean(self.k_nlls_per_seq, axis=1)
         return self.nlls
+
+
+class MultistepMultivariateGaussianExpectedValueL2Distance(Loss):
+    """ Compute the L2 distance loss based on the expected value
+    """
+
+    def __init__(self, model, dataset):
+        super().__init__(model, dataset)
+        self._graph_updates = {}
+        self.m = np.float32(model.m)
+        self.target_dims = np.float32(model.target_dims)
+
+    def _get_updates(self):
+        return {}
+
+    def _compute_losses(self, model_output):
+        # model_output.shape : shape : (batch_size, seq_len, K, M, target_size)
+        # self.dataset.symb_targets.shape = (batch_size, seq_len, K, target_dims)
+
+        # mask.shape : (batch_size, seq_len) or None
+        mask = self.dataset.symb_mask
+
+        # mu.shape = (batch_size, seq_len, K, M, target_dims)
+        mu = model_output[:, :, :, :, 0:3]
+
+        # expected_value.shape : (batch_size, seq_len, 3)
+        expected_value = mu[:, :, 0, 0, :]
+
+        # targets.shape = (batch_size, seq_len, 3)
+        targets = self.dataset.symb_targets[:, :, 0, :]
+
+        # L2_errors_per_time_step.shape = (batch_size, seq_len)
+        self.L2_errors_per_time_step = T.sqrt(T.sum(((expected_value - targets) ** 2), axis=2))
+        # avg_L2_error_per_seq.shape = (batch_size,)
+        self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step * mask, axis=1) / T.sum(mask, axis=1)
+
+        return self.avg_L2_error_per_seq
