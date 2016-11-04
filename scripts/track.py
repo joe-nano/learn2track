@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import os
 import sys
+
+import os
 
 # Hack so you don't have to put the library containing this script in the PYTHONPATH.
 sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
@@ -12,21 +13,18 @@ import argparse
 from os.path import join as pjoin
 
 import theano
-import theano.tensor as T
 import time
 
 import dipy
 import nibabel as nib
 from dipy.tracking.streamline import compress_streamlines
 
-from smartlearner import Dataset, views
+from smartlearner import views
 from smartlearner import utils as smartutils
 
-from learn2track import utils
 from learn2track import datasets, batch_schedulers
 from learn2track.factories import loss_factory
 from learn2track.utils import Timer
-from smartlearner.utils import load_dict_from_json_file
 
 from learn2track import neurotools
 
@@ -93,13 +91,23 @@ def compute_loss_errors(streamlines, model, hyperparams):
     dataset = datasets.TractographyDataset([tracto_data], "Generated", keep_on_cpu=True)
 
     loss = loss_factory(hyperparams, model, dataset)
-    batch_scheduler = batch_schedulers.TractographyBatchScheduler(dataset,
-                                                                  batch_size=1000,
-                                                                  noisy_streamlines_sigma=None,
-                                                                  use_data_augment=False,  # Otherwise it doubles the number of losses :-/
-                                                                  seed=1234,
-                                                                  shuffle_streamlines=False,
-                                                                  normalize_target=hyperparams['normalize'])
+    if hyperparams['model'] == 'gru_multistep':
+        batch_scheduler = batch_schedulers.MultistepSequenceBatchScheduler(dataset,
+                                                                           batch_size=1000,
+                                                                           k=1,
+                                                                           noisy_streamlines_sigma=None,
+                                                                           use_data_augment=False,  # Otherwise it doubles the number of losses :-/
+                                                                           seed=1234,
+                                                                           shuffle_streamlines=False,
+                                                                           normalize_target=False)
+    else:
+        batch_scheduler = batch_schedulers.TractographyBatchScheduler(dataset,
+                                                                      batch_size=1000,
+                                                                      noisy_streamlines_sigma=None,
+                                                                      use_data_augment=False,  # Otherwise it doubles the number of losses :-/
+                                                                      seed=1234,
+                                                                      shuffle_streamlines=False,
+                                                                      normalize_target=hyperparams['normalize'])
 
     loss_view = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
     return loss_view.losses.view()
@@ -482,6 +490,9 @@ def main():
         elif hyperparams['model'] == 'gru_mixture':
             from learn2track.models import GRU_Mixture
             model_class = GRU_Mixture
+        elif hyperparams['model'] == 'gru_multistep':
+            from learn2track.models import GRU_Multistep_Gaussian
+            model_class = GRU_Multistep_Gaussian
         else:
             raise ValueError("Unknown model!")
 
