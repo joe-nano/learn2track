@@ -1,0 +1,32 @@
+{
+    "AdaGrad": null,
+    "Adadelta": false,
+    "Adam": "1e-4",
+    "RMSProp": null,
+    "SGD": null,
+    "batch_size": 64,
+    "clip_gradient": 5.0,
+    "hidden_sizes": [
+        500,
+        500
+    ],
+    "initialization_seed": 1234,
+    "lookahead": 20,
+    "lookahead_eps": 0.001,
+    "model": "gru_mixture",
+    "n_gaussians": 5,
+    "noisy_streamlines_sigma": null,
+    "normalize": false,
+    "seed": 1234,
+    "shuffle_streamlines": true,
+    "train_subjects": [
+        "hcp/trainset/152831.npz",
+        "hcp/trainset/210011.npz",
+        "hcp/trainset/734045.npz"
+    ],
+    "use_sh_coeffs": false,
+    "valid_subjects": [
+        "hcp/validset/594156.npz"
+    ],
+    "weights_initialization": "orthogonal"
+}
