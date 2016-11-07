@@ -1,0 +1,11 @@
+{
+    "hidden_sizes": [
+        500,
+        500
+    ],
+    "version": 1,
+    "input_size": 100,
+    "layer_regression_size": 35,
+    "output_size": 3,
+    "n_gaussians": 5
+}
