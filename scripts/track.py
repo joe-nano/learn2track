@@ -28,6 +28,8 @@ from learn2track.utils import Timer
 
 from learn2track import neurotools
 
+floatX = theano.config.floatX
+
 # Constant
 STOPPING_MASK =       int('00000001', 2)
 STOPPING_LENGTH =     int('00000010', 2)
@@ -35,8 +37,13 @@ STOPPING_CURVATURE =  int('00000100', 2)
 STOPPING_LIKELIHOOD = int('00001000', 2)
 
 
-def count_flags(flag, ref_flag):
-    return np.sum((flag & ref_flag) >> np.log2(ref_flag).astype(np.uint8))
+def is_flag_set(flags, ref_flag):
+    """ Checks which flags have the `ref_flag` set. """
+    return ((flags & ref_flag) >> np.log2(ref_flag).astype(np.uint8)).astype(bool)
+
+def count_flags(flags, ref_flag):
+    """ Counts how many flags have the `ref_flag` set. """
+    return is_flag_set(flags, ref_flag).sum()
 
 
 def build_argparser():
@@ -92,8 +99,6 @@ def build_argparser():
 
     return p
 
-floatX = theano.config.floatX
-
 
 def compute_loss_errors(streamlines, model, hyperparams):
     # Create dummy dataset for these new streamlines.
@@ -126,7 +131,7 @@ def compute_loss_errors(streamlines, model, hyperparams):
 
 
 def make_is_outside_mask(mask, affine, threshold=0):
-    """ Make a function checking if the last coordinates is outside a mask.
+    """ Makes a function that checks which streamlines have their last coordinates outside a mask.
 
     Parameters
     ----------
@@ -139,33 +144,121 @@ def make_is_outside_mask(mask, affine, threshold=0):
 
     Returns
     -------
-
+    function
     """
-
     def _is_outside_mask(streamlines):
         """
         Parameters
         ----------
         streamlines : 3D array of shape (n_streamlines, n_points, 3)
-            Streamlines coordinates.
+            Streamlines information.
 
         Returns
         -------
-        in_idx : 1D array
-            Array containing the indices of the coordinates inside the mask.
-        out_idx : 1D array
-            Array containing the indices of the coordinates outside the mask.
+        outside : 1D array of shape (n_streamlines,)
+            Array telling whether a streamline last coordinate is outside the mask.
         """
         last_coordinates = streamlines[:, -1, :]
         mask_values = neurotools.map_coordinates_3d_4d(mask, last_coordinates, affine=affine, order=1)
-        # in_idx = np.where(mask_values >= threshold)[0]
-        # out_idx = np.where(mask_values < threshold)[0]
         return mask_values < threshold
 
     return _is_outside_mask
 
 
-def make_is_stopping(stopping_criteria, stopping_flags):
+def make_is_too_long(max_length):
+    """ Makes a function that checks which streamlines are exceedingly long.
+
+    Parameters
+    ----------
+    max_length : int
+        Maximum number of points a streamline can have.
+
+    Returns
+    -------
+    function
+
+    Notes
+    -----
+    That's what she said!
+    """
+
+    def _is_too_long(streamlines):
+        """
+        Parameters
+        ----------
+        streamlines : 3D array of shape (n_streamlines, n_points, 3)
+            Streamlines information.
+
+        Returns
+        -------
+        too_long : 1D array of shape (n_streamlines,)
+            Array telling wheter a streamline is too long or not.
+        """
+        # np.isfinite(streamlines[:, :, 0]) > max_length
+        return np.asarray([streamlines.shape[1] > max_length] * len(streamlines))
+
+    return _is_too_long
+
+
+def make_is_too_curvy(max_theta):
+    """ Makes a function that checks which streamlines are exceedingly curvy.
+
+    Parameters
+    ----------
+    max_theta : float
+        Maximum angle, in degree, two consecutive segments can have with each other.
+
+    Returns
+    -------
+    function
+
+    Notes
+    -----
+    That's what she said!
+    """
+    max_theta = np.deg2rad(max_theta)  # Internally use radian.
+
+    def _is_too_curvy(streamlines):
+        """
+        Parameters
+        ----------
+        streamlines : 3D array of shape (n_streamlines, n_points, 3)
+            Streamlines information.
+
+        Returns
+        -------
+        too_long : 1D array of shape (n_streamlines,)
+            Array telling wheter a streamline is too long or not.
+        """
+        if streamlines.shape[1] < 3:
+            # Not enough segments to test curvature.
+            return [False] * len(streamlines)
+
+        last_segments = streamlines[:, -1] - streamlines[:, -2]
+        before_last_segments = streamlines[:, -2] - streamlines[:, -3]
+
+        # Normalized segments.
+        last_segments /= np.sum(last_segments**2, axis=1, keepdims=True)
+        before_last_segments /= np.sum(before_last_segments**2, axis=1, keepdims=True)
+
+        # Compute angles.
+        angles = np.arccos(np.sum(last_segments * before_last_segments, axis=1))
+        return angles > max_theta
+
+    return _is_too_curvy
+
+
+def make_is_stopping(stopping_criteria):
+    """ Makes a function that checks which streamlines should we stop tracking.
+
+    Parameters
+    ----------
+    stopping_criteria : dict
+        Dictionnary containing all stopping criteria to check. The key is one the
+        flags constant variable defined above. The value can be any function
+        that expect `streamlines` as input and returns a boolean array indicating
+        which streamlines should be stopped..
+    """
 
     def _is_stopping(streamlines, to_check=None):
         """
@@ -199,7 +292,7 @@ def make_is_stopping(stopping_criteria, stopping_flags):
 
         undone = np.ones(len(idx), dtype=bool)
         flags = np.zeros(len(idx), dtype=np.uint8)
-        for stopping_criterion, flag in zip(stopping_criteria, stopping_flags):
+        for flag, stopping_criterion in stopping_criteria.items():
             done = stopping_criterion(streamlines[idx])
             undone[done] = False
             flags[done] |= flag
@@ -235,7 +328,8 @@ def track(model, dwi, seeds, step_size, is_stopping, max_nb_points=1000):
     stopping_flags = np.zeros(len(seeds), dtype=np.uint8)
 
     # Tracking
-    for i in range(max_nb_points):
+    i = 0
+    while len(undone) > 0:
         if (i+1) % 1 == 0:
             print("pts: {}/{}".format(i+1, max_nb_points))
 
@@ -259,32 +353,28 @@ def track(model, dwi, seeds, step_size, is_stopping, max_nb_points=1000):
         # Check which streamlines should be stopped.
         undone, done, flags = is_stopping(sequences, to_check=undone)
         stopping_flags[done] = flags
-
-        # sequences[np.logical_not(undone), i+1] = np.nan  # Help debugging
-
-        if len(undone) == 0:
-            break
+        i += 1
 
     streamlines_lengths = sequences.shape[1] - np.sum(np.isnan(sequences[..., 0]), axis=1)
     print("Max length: {}".format(streamlines_lengths.max()))
     print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
                                                                                             count_flags(stopping_flags, STOPPING_CURVATURE),
                                                                                             len(undone)))
-    # Trim sequences to obtain the streamlines.
+    # Trim sequences to get the final streamlines.
     streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_lengths)]
 
     norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
     avg_step_sizes = [np.mean(norm(s[1:]-s[:-1])) for s in streamlines]
     print("Average step sizes: {:.2f} mm.".format(np.nanmean(avg_step_sizes)))
 
-    # if discard_stopped_by_curvature:
-    #     streamlines = [s for s, discard in zip(streamlines, stopped_curv) if not discard]
+    # Compress stremalines and add metadata.
+    streamlines = compress_streamlines(streamlines)
+    tractogram = nib.streamlines.Tractogram(streamlines, data_per_streamline={"stopping_flags": stopping_flags})
 
-    return streamlines
+    return tractogram
 
 
-def track_old(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05,
-          backward_tracking_algo=0, discard_stopped_by_curvature=False):
+def track_old(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0, discard_stopped_by_curvature=False):
     # Forward tracking
     # Prepare some data container and reset the model.
     sequences = seeds.copy()
@@ -510,21 +600,25 @@ def batch_track(model, dwi, seeds, step_size=None, max_nb_points=500, theta=0.78
         try:
             time.sleep(1)
             print("Trying to track {:,} streamlines at the same time.".format(batch_size))
-            tractogram = nib.streamlines.Tractogram()
+            tractogram = None#nib.streamlines.Tractogram()
 
             for start in range(0, len(seeds), batch_size):
                 print("{:,} / {:,}".format(start, len(seeds)))
                 end = start+batch_size
-                new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
-                                        max_nb_points=max_nb_points, is_stopping=is_stopping)
+                batch_tractogram = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping)
+
+                if tractogram is None:
+                    tractogram = batch_tractogram
+                else:
+                    tractogram.streamlines.extend(batch_tractogram)
+
                 # new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
                 #                         max_nb_points=max_nb_points, theta=theta,
                 #                         mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
                 #                         backward_tracking_algo=backward_tracking_algo,
                 #                         discard_stopped_by_curvature=discard_stopped_by_curvature)
-
-                new_streamlines = compress_streamlines(new_streamlines)
-                tractogram.streamlines.extend(new_streamlines)
+                # new_streamlines = compress_streamlines(new_streamlines)
+                # tractogram.streamlines.extend(new_streamlines)
 
             return tractogram
 
@@ -698,12 +792,15 @@ def main():
 
 
         is_outside_mask = make_is_outside_mask(mask, affine_maskvox2dwivox, threshold=args.mask_threshold)
-        is_stopping = make_is_stopping([is_outside_mask], [STOPPING_MASK])
+        is_too_long = make_is_too_long(max_nb_points)
+        is_too_curvy = make_is_too_curvy(theta)
+        is_stopping = make_is_stopping({STOPPING_MASK: is_outside_mask,
+                                        STOPPING_LENGTH: is_too_long,
+                                        STOPPING_CURVATURE: is_too_curvy})
 
         tractogram = batch_track(model, weights, seeds,
                                  step_size=step_size,
                                  is_stopping=is_stopping,
-                                 max_nb_points=max_nb_points,
                                  batch_size=args.batch_size)
 
         # tractogram = batch_track(model, weights, seeds,
@@ -732,6 +829,12 @@ def main():
         print("Minimum length: {:.2f} mm. Maximum length: {:.2f}".format(lengths.min(), lengths.max()))
         print("Removed {:,} streamlines smaller than {:.2f} mm".format(nb_streamlines - len(tractogram),
                                                                        args.min_length))
+        if args.discard_stopped_by_curvature:
+            nb_streamlines = len(tractogram)
+            stopping_curvature_flag_is_set = is_flag_set(tractogram.data_per_streamline['stopping_flags'], STOPPING_CURVATURE)
+            tractogram = tractogram[stopping_curvature_flag_is_set]
+            print("Removed {:,} streamlines stopped for having a curvature higher than {:.2f} degree".format(nb_streamlines - len(tractogram),
+                                                                                                             np.rad2deg(theta)))
 
         if args.filter_threshold is not None:
             # Remove streamlines that produces a reconstruction error higher than a certain threshold.
