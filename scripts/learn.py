@@ -116,7 +116,8 @@ def build_train_gru_multistep_argparser(subparser):
 
 
 def build_argparser():
-    DESCRIPTION = ("Script to train a GRU model from a dataset of streamlines coordinates and a DWI on a regression task.")
+    DESCRIPTION = ("Script to train a GRU model from a dataset of streamlines"
+                   " coordinates expressed in voxel space and a DWI on a regression task.")
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
     # Dataset options

@@ -28,6 +28,16 @@ from learn2track.utils import Timer
 
 from learn2track import neurotools
 
+# Constant
+STOPPING_MASK =       int('00000001', 2)
+STOPPING_LENGTH =     int('00000010', 2)
+STOPPING_CURVATURE =  int('00000100', 2)
+STOPPING_LIKELIHOOD = int('00001000', 2)
+
+
+def count_flags(flag, ref_flag):
+    return np.sum((flag & ref_flag) >> np.log2(ref_flag).astype(np.uint8))
+
 
 def build_argparser():
     DESCRIPTION = "Generate a tractogram from a LSTM model trained on ismrm2015 challenge data."
@@ -72,6 +82,8 @@ def build_argparser():
     p.add_argument('--dilate-mask', action="store_true",
                    help="if specified, apply binary dilation on the tracking mask.")
 
+    p.add_argument('--discard-stopped-by-curvature', action="store_true",
+                   help='if specified, discard streamlines having a too high curvature (i.e. tracking stopped because of that).')
     p.add_argument('--append-previous-direction', action="store_true",
                    help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
 
@@ -113,7 +125,166 @@ def compute_loss_errors(streamlines, model, hyperparams):
     return loss_view.losses.view()
 
 
-def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0):
+def make_is_outside_mask(mask, affine, threshold=0):
+    """ Make a function checking if the last coordinates is outside a mask.
+
+    Parameters
+    ----------
+    mask : 3D array
+        3D image defining a mask. The interior of the mask is defined by voxels with value higher or equal to `threshold`.
+    affine : ndarray of shape (4, 4)
+        Matrix representing the affine transformation that aligns streamlines coordinates on top of `mask`.
+    threshold : float
+        Voxels value higher or equal to this threshold are considered as part of the interior of the mask.
+
+    Returns
+    -------
+
+    """
+
+    def _is_outside_mask(streamlines):
+        """
+        Parameters
+        ----------
+        streamlines : 3D array of shape (n_streamlines, n_points, 3)
+            Streamlines coordinates.
+
+        Returns
+        -------
+        in_idx : 1D array
+            Array containing the indices of the coordinates inside the mask.
+        out_idx : 1D array
+            Array containing the indices of the coordinates outside the mask.
+        """
+        last_coordinates = streamlines[:, -1, :]
+        mask_values = neurotools.map_coordinates_3d_4d(mask, last_coordinates, affine=affine, order=1)
+        # in_idx = np.where(mask_values >= threshold)[0]
+        # out_idx = np.where(mask_values < threshold)[0]
+        return mask_values < threshold
+
+    return _is_outside_mask
+
+
+def make_is_stopping(stopping_criteria, stopping_flags):
+
+    def _is_stopping(streamlines, to_check=None):
+        """
+        Parameters
+        ----------
+        streamlines : 3D array of shape (n_streamlines, n_points, 3)
+            Streamlines coordinates.
+        to_check : 1D array, optional
+            Only check specific streamlines.
+            If array of bool, check only streamlines marked as True.
+            If array of int, check only streamlines at specified index.
+            By default, check every coordinate.
+
+        Returns
+        -------
+        undone : 1D array
+            Array containing the indices of ongoing streamlines.
+        done : 1D array
+            Array containing the indices of streamlines that should be stopped.
+        flags : 1D array
+            Array containing a flag explaining why a streamline should be stopped.
+        """
+
+        if to_check is None:
+            idx = np.arange(len(streamlines))
+        elif isinstance(to_check, np.ndarray) and to_check.dtype == np.bool:
+            assert len(to_check) == len(streamlines)
+            idx = np.where(to_check)[0]
+        else:
+            idx = to_check
+
+        undone = np.ones(len(idx), dtype=bool)
+        flags = np.zeros(len(idx), dtype=np.uint8)
+        for stopping_criterion, flag in zip(stopping_criteria, stopping_flags):
+            done = stopping_criterion(streamlines[idx])
+            undone[done] = False
+            flags[done] |= flag
+
+        done = np.logical_not(undone)
+        return idx[np.where(undone)[0]], idx[np.where(done)[0]], flags[done]
+
+    return _is_stopping
+
+
+def track(model, dwi, seeds, step_size, is_stopping, max_nb_points=1000):
+
+    """
+    Parameters
+    ----------
+    is_stopping : function
+        Tells whether a streamlines should stop being tracked.
+        This function expects a list of streamlines and returns a 3-tuple:
+          the indices of the streamlines that are undone,
+          the indices of the streamlines that are done,
+          the reasons why the streamlines should be stopped.
+    """
+    # Prepare some data container and reset the model.
+    sequences = seeds.copy()
+    if sequences.ndim == 2:
+        sequences = sequences[:, None, :]
+
+    seq_next = model.make_sequence_generator()
+    states = model.get_init_states(batch_size=len(seeds))
+
+    directions = np.zeros((len(seeds), 3), dtype=np.float32)
+    undone = np.ones(len(sequences), dtype=bool)
+    stopping_flags = np.zeros(len(seeds), dtype=np.uint8)
+
+    # Tracking
+    for i in range(max_nb_points):
+        if (i+1) % 1 == 0:
+            print("pts: {}/{}".format(i+1, max_nb_points))
+
+        directions[:] = np.nan  # Help debugging
+        # Get next unnormalized directions
+        assert not np.any(np.isnan(sequences[undone, -1, :]))
+        directions[undone], new_states = seq_next(x_t=sequences[undone, -1, :],
+                                                  states=[s[undone] for s in states])
+
+        # Update states for all undone streamlines.
+        for state, new_state in zip(states, new_states):
+            state[undone, :] = new_state[:, :]
+
+        if step_size is not None:
+            normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
+            directions[undone] = normalized_directions[undone] * step_size
+
+        # Make a step
+        sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
+
+        # Check which streamlines should be stopped.
+        undone, done, flags = is_stopping(sequences, to_check=undone)
+        stopping_flags[done] = flags
+
+        # sequences[np.logical_not(undone), i+1] = np.nan  # Help debugging
+
+        if len(undone) == 0:
+            break
+
+    streamlines_lengths = sequences.shape[1] - np.sum(np.isnan(sequences[..., 0]), axis=1)
+    print("Max length: {}".format(streamlines_lengths.max()))
+    print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
+                                                                                            count_flags(stopping_flags, STOPPING_CURVATURE),
+                                                                                            len(undone)))
+    # Trim sequences to obtain the streamlines.
+    streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_lengths)]
+
+    norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
+    avg_step_sizes = [np.mean(norm(s[1:]-s[:-1])) for s in streamlines]
+    print("Average step sizes: {:.2f} mm.".format(np.nanmean(avg_step_sizes)))
+
+    # if discard_stopped_by_curvature:
+    #     streamlines = [s for s, discard in zip(streamlines, stopped_curv) if not discard]
+
+    return streamlines
+
+
+def track_old(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05,
+          backward_tracking_algo=0, discard_stopped_by_curvature=False):
     # Forward tracking
     # Prepare some data container and reset the model.
     sequences = seeds.copy()
@@ -131,6 +302,8 @@ def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mas
     stopping_types_count = {'curv': 0,
                             'mask': 0}
 
+    stopped_curv = np.zeros(len(sequences), dtype=bool)
+
     # Tracking
     for i in range(max_nb_points):
         if (i+1) % 100 == 0:
@@ -147,6 +320,7 @@ def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mas
 
             angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
             model.seq_squeeze(tokeep=angles[undone] <= theta)
+            stopped_curv[undone] = angles[undone] > theta
             stopping_types_count['curv'] += np.sum(angles[undone] > theta)
             undone = np.logical_and(undone, angles <= theta)
 
@@ -173,11 +347,11 @@ def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mas
         if undone.sum() == 0:
             break
 
+    assert stopping_types_count['curv'] == np.sum(stopped_curv)
     print("Max length: {}".format(streamlines_lengths.max()))
     print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(stopping_types_count['mask'],
                                                                                             stopping_types_count['curv'],
                                                                                             undone.sum()))
-
     # Trim sequences to obtain the streamlines.
     streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_lengths)]
 
@@ -186,6 +360,9 @@ def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mas
     print("Average step sizes: {:.2f} mm.".format(np.nanmean(avg_step_sizes)))
 
     if backward_tracking_algo == 0:
+        if discard_stopped_by_curvature:
+            streamlines = [s for s, discard in zip(streamlines, stopped_curv) if not discard]
+
         return streamlines
 
     if backward_tracking_algo == 1:
@@ -219,6 +396,7 @@ def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mas
             # If a streamline makes a turn to tight, stop it.
             if sequences.shape[1] > 1:
                 angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
+                stopped_curv[undone] = angles[undone] > theta
                 model.seq_squeeze(tokeep=angles[undone] <= theta)
                 undone = np.logical_and(undone, angles <= theta)
 
@@ -283,6 +461,7 @@ def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mas
                 # directions[undone] = 0.5*last_directions[undone] + 0.5*directions[undone]
 
                 angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
+                stopped_curv[undone] = np.logical_and(angles[undone] > theta, np.logical_not(resuming[undone]))
                 model.seq_squeeze(tokeep=np.logical_or(angles[undone] <= theta, resuming[undone]))
                 undone = np.logical_or(np.logical_and(undone, angles <= theta), resuming)
 
@@ -310,10 +489,20 @@ def track(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mas
 
         # Trim sequences to obtain the streamlines.
         streamlines = [s[:l] for s, l in zip(sequences, streamlines_lengths)]
+
+        print("Max length: {}".format(streamlines_lengths.max()))
+        print("Tracking stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(len(sequences) - (stopped_curv.sum() + undone.sum()),
+                                                                                            stopped_curv.sum(),
+                                                                                            undone.sum()))
+
+        if discard_stopped_by_curvature:
+            streamlines = [s for s, discard in zip(streamlines, stopped_curv) if not discard]
+
         return streamlines
 
 
-def batch_track(model, dwi, seeds, step_size=None, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0, batch_size=None):
+def batch_track(model, dwi, seeds, step_size=None, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0, batch_size=None,
+                discard_stopped_by_curvature=False, is_stopping=None):
     if batch_size is None:
         batch_size = len(seeds)
 
@@ -327,9 +516,12 @@ def batch_track(model, dwi, seeds, step_size=None, max_nb_points=500, theta=0.78
                 print("{:,} / {:,}".format(start, len(seeds)))
                 end = start+batch_size
                 new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
-                                        max_nb_points=max_nb_points, theta=theta,
-                                        mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
-                                        backward_tracking_algo=backward_tracking_algo)
+                                        max_nb_points=max_nb_points, is_stopping=is_stopping)
+                # new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
+                #                         max_nb_points=max_nb_points, theta=theta,
+                #                         mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
+                #                         backward_tracking_algo=backward_tracking_algo,
+                #                         discard_stopped_by_curvature=discard_stopped_by_curvature)
 
                 new_streamlines = compress_streamlines(new_streamlines)
                 tractogram.streamlines.extend(new_streamlines)
@@ -395,8 +587,13 @@ def main():
 
     with Timer("Loading DWIs"):
         # Load gradients table
-        bvals_filename = args.dwi.rstrip(".nii.gz") + ".bvals"
-        bvecs_filename = args.dwi.rstrip(".nii.gz") + ".bvecs"
+        dwi_name = args.dwi
+        if dwi_name.endswith(".gz"):
+            dwi_name = dwi_name[:-3]
+        if dwi_name.endswith(".nii"):
+            dwi_name = dwi_name[:-4]
+        bvals_filename = dwi_name + ".bvals"
+        bvecs_filename = dwi_name + ".bvecs"
         bvals, bvecs = dipy.io.gradients.read_bvals_bvecs(bvals_filename, bvecs_filename)
 
         dwi = nib.load(args.dwi)
@@ -408,80 +605,6 @@ def main():
             weights = neurotools.resample_dwi(dwi, bvals, bvecs).astype(np.float32)
 
         affine_rasmm2dwivox = np.linalg.inv(dwi.affine)
-
-        if args.ref_dwi is not None:
-            # Load gradients table
-            ref_bvals_filename = args.ref_dwi.split('.')[0] + ".bvals"
-            ref_bvecs_filename = args.ref_dwi.split('.')[0] + ".bvecs"
-            ref_bvals, ref_bvecs = dipy.io.gradients.read_bvals_bvecs(ref_bvals_filename, ref_bvecs_filename)
-
-            ref_dwi = nib.load(args.ref_dwi)
-            ref_dwi2 = nib.load(args.ref_dwi2)
-            ref_weights = neurotools.resample_dwi(ref_dwi, ref_bvals, ref_bvecs).astype(np.float32)  # Resample to 100 directions
-            ref_weights2 = neurotools.resample_dwi(ref_dwi2, ref_bvals, ref_bvecs).astype(np.float32)  # Resample to 100 directions
-            #affine_rasmm2dwivox = np.linalg.inv(dwi.affine)
-
-            print ("Minmax:      ", weights.min(), weights.max())
-            print ("Minmax (ref):", ref_weights.min(), ref_weights.max())
-
-            import pylab as plt
-            # plt.hist(weights[weights!=0], normed=True, bins=np.linspace(0, 1), alpha=0.5)
-            # plt.hist(ref_weights[ref_weights!=0], normed=True, bins=np.linspace(0, 1), alpha=0.5)
-
-            # Normalization over all voxels and all directions
-            # non_zero = weights > 0
-            # std = weights[non_zero].std()
-            # mean = weights[non_zero].mean()
-            # ref_std = ref_weights[ref_weights!=0].std()
-            # ref_mean = ref_weights[ref_weights!=0].mean()
-            # standardized_weights = (weights[non_zero] - mean) / std
-            # weights[non_zero] = (standardized_weights * ref_std) + ref_mean
-
-            non_zero = weights > 0
-            std = weights.std()
-            mean = weights.mean()
-            ref_std = ref_weights.std()
-            ref_mean = ref_weights.mean()
-            standardized_weights = (weights - mean) / std
-            weights = (standardized_weights * ref_std) + ref_mean
-
-            # # Normalization over all voxels
-            # std = weights.std(axis=-1, keepdims=True)
-            # mean = weights.mean(axis=-1, keepdims=True)
-            # ref_std = ref_weights.std(axis=-1, keepdims=True)
-            # ref_mean = ref_weights.mean(axis=-1, keepdims=True)
-            # standardized_weights = (weights - mean) / std
-            # weights = (standardized_weights * ref_std) + ref_mean
-            # print (weights.sum())
-            # weights[np.isnan(weights)] = 0
-
-            # # Normalization over all directions
-            # std = weights.std(axis=(0,1,2), keepdims=True)
-            # mean = weights.mean(axis=(0,1,2), keepdims=True)
-            # ref_std = ref_weights.std(axis=(0,1,2), keepdims=True)
-            # ref_mean = ref_weights.mean(axis=(0,1,2), keepdims=True)
-            # standardized_weights = (weights - mean) / std
-            # weights = (standardized_weights * ref_std) + ref_mean
-            # print (weights.sum())
-            # weights[np.isnan(weights)] = 0
-
-            # for i in range(weights.shape[-1]):
-            #     std = weights[..., i][weights[..., i]>1e-2].std()
-            #     mean = weights[..., i][weights[..., i]!=0].mean()
-            #     ref_std = ref_weights[..., i][ref_weights[..., i]!=0].std()
-            #     ref_mean = ref_weights[..., i][ref_weights[..., i]!=0].mean()
-            #     standardized_weights = (weights[..., i][weights[..., i]!=0] - mean) / std
-            #     weights[..., i][weights[..., i]!=0] = (standardized_weights * ref_std) + ref_mean
-            #     print (weights.sum())
-
-            # weights[np.isnan(weights)] = 0
-            # weights[ref_weights==0] = 0
-
-            plt.figure()
-            # plt.hist(weights[weights!=0], normed=True, bins=np.linspace(0, 1), alpha=0.5)
-            # plt.hist(ref_weights[ref_weights!=0], normed=True, bins=np.linspace(0, 1), alpha=0.5)
-
-            # plt.show()
 
     with Timer("Loading model"):
         if hyperparams["model"] == "gru_regression":
@@ -512,7 +635,8 @@ def main():
             mask = mask_nii.get_data()
             # Compute the affine allowing to evaluate the mask at some coordinates correctly.
 
-            mask_affine = np.dot(affine_rasmm2dwivox, mask_nii.affine)
+            # affine_maskvox2dwivox = mask_vox => rasmm space => dwi_vox
+            affine_maskvox2dwivox = np.dot(affine_rasmm2dwivox, mask_nii.affine)
             if args.dilate_mask:
                 import scipy
                 mask = scipy.ndimage.morphology.binary_dilation(mask).astype(mask.dtype)
@@ -534,12 +658,14 @@ def main():
                 # Assume it is a binary mask.
                 rng = np.random.RandomState(args.seeding_rng_seed)
                 nii_seeds = nib.load(filename)
-                seeds_affine = np.dot(affine_rasmm2dwivox, nii_seeds.affine)
+
+                # affine_seedsvox2dwivox = mask_vox => rasmm space => dwi_vox
+                affine_seedsvox2dwivox = np.dot(affine_rasmm2dwivox, nii_seeds.affine)
 
                 indices = np.array(np.where(nii_seeds.get_data())).T
                 for idx in indices:
                     seeds_in_voxel = idx + rng.uniform(-0.5, 0.5, size=(args.nb_seeds_per_voxel, 3))
-                    seeds_in_voxel = nib.affines.apply_affine(seeds_affine, seeds_in_voxel)
+                    seeds_in_voxel = nib.affines.apply_affine(affine_seedsvox2dwivox, seeds_in_voxel)
                     seeds.extend(seeds_in_voxel)
 
         seeds = np.array(seeds, dtype=theano.config.floatX)
@@ -569,14 +695,26 @@ def main():
         print("Step size (vox): {}".format(step_size))
         print("Max nb. points: {}".format(max_nb_points))
 
+
+
+        is_outside_mask = make_is_outside_mask(mask, affine_maskvox2dwivox, threshold=args.mask_threshold)
+        is_stopping = make_is_stopping([is_outside_mask], [STOPPING_MASK])
+
         tractogram = batch_track(model, weights, seeds,
                                  step_size=step_size,
+                                 is_stopping=is_stopping,
                                  max_nb_points=max_nb_points,
-                                 theta=theta,
-                                 mask=mask, mask_affine=mask_affine,
-                                 mask_threshold=args.mask_threshold,
-                                 backward_tracking_algo=args.backward_tracking_algo,
                                  batch_size=args.batch_size)
+
+        # tractogram = batch_track(model, weights, seeds,
+        #                          step_size=step_size,
+        #                          max_nb_points=max_nb_points,
+        #                          theta=theta,
+        #                          mask=mask, mask_affine=affine_maskvox2dwivox,
+        #                          mask_threshold=args.mask_threshold,
+        #                          backward_tracking_algo=args.backward_tracking_algo,
+        #                          batch_size=args.batch_size,
+        #                          discard_stopped_by_curvature=args.discard_stopped_by_curvature)
 
     nb_streamlines = len(tractogram)
     print("Generated {:,} (compressed) streamlines".format(nb_streamlines))
@@ -605,6 +743,9 @@ def main():
                                                                                           args.filter_threshold))
 
     with Timer("Saving streamlines"):
+        # Streamlines have been generated in the voxel space where (0, 0, 0)
+        # corresponds to the corner of a voxel. We need to shift by half a voxel.
+
         print("Saving {:,} (compressed) streamlines".format(len(tractogram)))
         tractogram.affine_to_rasmm = dwi.affine
         save_path = pjoin(experiment_path, args.out)

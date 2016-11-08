@@ -119,6 +119,75 @@ class GRU_Mixture(GRU_Regression):
 
         return self._gen(x_t)
 
+    def get_init_states(self, batch_size):
+        states_h = []
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            state_h = np.zeros((batch_size, hidden_size), dtype=floatX)
+            states_h.append(state_h)
+
+        return states_h
+
+    def make_sequence_generator(self, subject_id=0):
+        """ Makes functions that return the prediction for x_{t+1} for every
+        sequence in the batch given x_{t} and the current state of the model h^{l}_{t}.
+
+        Parameters
+        ----------
+        subject_id : int, optional
+            ID of the subject from which its diffusion data will be used. Default: 0.
+        """
+
+        # Build the sequence generator as a theano function.
+        states_h = []
+        for i in range(len(self.hidden_sizes)):
+            state_h = T.matrix(name="layer{}_state_h".format(i))
+            states_h.append(state_h)
+
+        symb_x_t = T.matrix(name="x_t")
+
+        new_states = self._fprop_step(symb_x_t, *states_h)
+        new_states_h = new_states[:len(self.hidden_sizes)]
+
+        # regression_output.shape : (batch_size, target_size)
+        regression_output = new_states[-1]
+        mixture_params = self.get_mixture_parameters(regression_output)
+
+        srng = MRG_RandomStreams(1234)
+        predictions = self._get_mixture_samples(srng, *mixture_params)
+
+        f = theano.function(inputs=[symb_x_t] + states_h,
+                            outputs=[predictions] + list(new_states_h))
+
+        def _gen(x_t, states):
+            """ Returns the prediction for x_{t+1} for every
+                sequence in the batch given x_{t} and the current states
+                of the model h^{l}_{t}.
+
+            Parameters
+            ----------
+            x_t : ndarray with shape (batch_size, 3)
+                Streamline coordinate (x, y, z).
+            states : list of 2D array of shape (batch_size, hidden_size)
+                Currrent states of the network.
+
+            Returns
+            -------
+            next_x_t : ndarray with shape (batch_size, 3)
+                Directions to follow.
+            new_states : list of 2D array of shape (batch_size, hidden_size)
+                Updated states of the network after seeing x_t.
+            """
+            # Append the DWI ID of each sequence after the 3D coordinates.
+            subject_ids = np.array([subject_id] * len(x_t), dtype=floatX)[:, None]
+            x_t = np.c_[x_t, subject_ids]
+
+            results = f(x_t, *states)
+            next_x_t = results[0]
+            new_states = results[1:]
+            return next_x_t, new_states
+
+        return _gen
+
 
 class MultivariateGaussianMixtureNLL(Loss):
     """ Computes the likelihood of a multivariate gaussian mixture
