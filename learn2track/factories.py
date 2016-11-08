@@ -113,7 +113,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
         raise ValueError("Unknown model!")
 
 
-def loss_factory(hyperparams, model, dataset, use_expected_value=False):
+def loss_factory(hyperparams, model, dataset, loss_type=None):
     if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
         raise NotImplementedError()
         # from learn2track.models.gru_regression_and_binary_classification import L2DistancePlusBinaryCrossEntropy
@@ -124,7 +124,7 @@ def loss_factory(hyperparams, model, dataset, use_expected_value=False):
         return L2DistanceForSequences(model, dataset, normalize_output=hyperparams["normalize"])
 
     elif hyperparams['model'] == 'gru_multistep':
-        if use_expected_value:
+        if loss_type == 'expected_value' or loss_type == 'max_probability':
             from learn2track.models.gru_msp import MultistepMultivariateGaussianExpectedValueL2Distance
             return MultistepMultivariateGaussianExpectedValueL2Distance(model, dataset)
         else:
@@ -132,9 +132,12 @@ def loss_factory(hyperparams, model, dataset, use_expected_value=False):
             return MultistepMultivariateGaussianNLL(model, dataset)
 
     elif hyperparams['model'] == 'gru_mixture':
-        if use_expected_value:
+        if loss_type == 'expected_value':
             from learn2track.models.gru_mixture import MultivariateGaussianMixtureExpectedValueL2Distance
             return MultivariateGaussianMixtureExpectedValueL2Distance(model, dataset)
+        elif loss_type == 'max_probability':
+            from learn2track.models.gru_mixture import MultivariateGaussianMixtureMaxProbabilityL2Distance
+            return MultivariateGaussianMixtureMaxProbabilityL2Distance(model, dataset)
         else:
             from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
             return MultivariateGaussianMixtureNLL(model, dataset)

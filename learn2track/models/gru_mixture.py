@@ -58,7 +58,7 @@ class GRU_Mixture(GRU_Regression):
 
         return mixture_weights, means, stds
 
-    def _get_mixture_samples(self, srng, mixture_weights, means, stds):
+    def _get_stochastic_samples(self, srng, mixture_weights, means, stds):
         batch_size = mixture_weights.shape[0]
         xs = T.arange(0, batch_size)
 
@@ -74,6 +74,15 @@ class GRU_Mixture(GRU_Regression):
 
         noise = srng.normal((batch_size, 3))
         samples = mu + sigma * noise
+
+        return samples
+
+    def _get_max_probability_samples(self, mixture_weights, means, stds):
+        batch_size = mixture_weights.shape[0]
+        xs = T.arange(0, batch_size)
+
+        choices = T.argmax(mixture_weights, axis=1)
+        samples = means[xs, choices]
 
         return samples
 
@@ -109,7 +118,7 @@ class GRU_Mixture(GRU_Regression):
             mixture_params = self.get_mixture_parameters(regression_output)
 
             srng = MRG_RandomStreams(1234)
-            predictions = self._get_mixture_samples(srng, *mixture_params)
+            predictions = self._get_stochastic_samples(srng, *mixture_params)
 
             updates = OrderedDict()
             for i in range(len(self.hidden_sizes)):
@@ -119,15 +128,7 @@ class GRU_Mixture(GRU_Regression):
 
         return self._gen(x_t)
 
-    def get_init_states(self, batch_size):
-        states_h = []
-        for i, hidden_size in enumerate(self.hidden_sizes):
-            state_h = np.zeros((batch_size, hidden_size), dtype=floatX)
-            states_h.append(state_h)
-
-        return states_h
-
-    def make_sequence_generator(self, subject_id=0):
+    def make_sequence_generator(self, subject_id=0, use_max_probability=False):
         """ Makes functions that return the prediction for x_{t+1} for every
         sequence in the batch given x_{t} and the current state of the model h^{l}_{t}.
 
@@ -152,11 +153,19 @@ class GRU_Mixture(GRU_Regression):
         regression_output = new_states[-1]
         mixture_params = self.get_mixture_parameters(regression_output)
 
-        srng = MRG_RandomStreams(1234)
-        predictions = self._get_mixture_samples(srng, *mixture_params)
+        if use_max_probability:
+            predictions = self._get_max_probability_samples(*mixture_params)
+        else:
+            srng = MRG_RandomStreams(1234)
+            predictions = self._get_stochastic_samples(srng, *mixture_params)
+
+        updates = OrderedDict()
+        for i in range(len(self.hidden_sizes)):
+            updates[self.states_h[i]] = new_states_h[i]
 
         f = theano.function(inputs=[symb_x_t] + states_h,
-                            outputs=[predictions] + list(new_states_h))
+                            outputs=[predictions] + list(new_states_h),
+                            updates=updates)
 
         def _gen(x_t, states):
             """ Returns the prediction for x_{t+1} for every
@@ -253,7 +262,7 @@ class MultivariateGaussianMixtureNLL(Loss):
         return mixture_weights, means, stds
 
 class MultivariateGaussianMixtureExpectedValueL2Distance(Loss):
-    """ Computes the likelihood of a multivariate gaussian mixture
+    """ Computes the L2 distance for the expected value of a multivariate gaussian mixture
     """
 
     def __init__(self, model, dataset):
@@ -280,6 +289,56 @@ class MultivariateGaussianMixtureExpectedValueL2Distance(Loss):
 
         # L2_errors_per_time_step.shape = (batch_size, seq_len)
         self.L2_errors_per_time_step = T.sqrt(T.sum(((expected_value - self.dataset.symb_targets)**2), axis=2))
+        # avg_L2_error_per_seq.shape = (batch_size,)
+        self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
+
+        return self.avg_L2_error_per_seq
+
+    def _get_mixture_parameters(self, regression_output):
+        batch_size, seq_len = regression_output.shape[:2]
+
+        gaussian_3d_params_shape = (batch_size, seq_len, self.n, 3)
+
+        mixture_weights = softmax(regression_output[:, :, :self.n], axis=2)
+        means = T.reshape(regression_output[:, :, self.n:self.n * 4], gaussian_3d_params_shape)
+        stds = T.reshape(T.exp(regression_output[:, :, self.n * 4:self.n * 7]), gaussian_3d_params_shape)
+
+        return mixture_weights, means, stds
+
+class MultivariateGaussianMixtureMaxProbabilityL2Distance(Loss):
+    """ Computes the L2 distance for the max probability samples of a multivariate gaussian mixture
+    """
+
+    def __init__(self, model, dataset):
+        super().__init__(model, dataset)
+        self.n = model.n_gaussians
+        self.d = model.output_size
+
+    def _get_updates(self):
+        return {}  # There is no updates for L2Distance.
+
+    def _compute_losses(self, model_output):
+        mask = self.dataset.symb_mask
+
+        # regression_outputs.shape = (batch_size, seq_length, regression_layer_size)
+        regression_outputs = model_output
+
+        mixture_weights, means, stds = self._get_mixture_parameters(regression_outputs)
+
+        # mixture_weights.shape : (batch_size, seq_len, n_gaussians)
+        # means.shape : (batch_size, seq_len, n_gaussians, 3)
+        batch_size = mixture_weights.shape[0]
+        seq_len = mixture_weights.shape[1]
+
+        row_ids = T.tile(T.arange(0, batch_size), (seq_len,1)).T    # [[0,0,...,0],[1,1,...,1],...]
+        column_ids = T.tile(T.arange(0, seq_len), (batch_size, 1))  # [[0,1,...,seq_len],[0,1,...,seq_len],...]
+        choices = T.argmax(mixture_weights, axis=2)
+
+        # samples.shape : (batch_size, seq_len, 3)
+        samples = means[row_ids, column_ids, choices]
+
+        # L2_errors_per_time_step.shape = (batch_size, seq_len)
+        self.L2_errors_per_time_step = T.sqrt(T.sum(((samples - self.dataset.symb_targets)**2), axis=2))
         # avg_L2_error_per_seq.shape = (batch_size,)
         self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
 

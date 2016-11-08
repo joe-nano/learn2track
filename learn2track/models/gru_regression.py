@@ -12,7 +12,6 @@ from learn2track.models import GRU
 
 floatX = theano.config.floatX
 
-
 class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
     """
@@ -130,15 +129,7 @@ class GRU_Regression(GRU):
         directions = self.get_output(X)
         return directions
 
-    def get_init_states(self, batch_size):
-        states_h = []
-        for i, hidden_size in enumerate(self.hidden_sizes):
-            state_h = np.zeros((batch_size, hidden_size), dtype=floatX)
-            states_h.append(state_h)
-
-        return states_h
-
-    def make_sequence_generator(self, subject_id=0):
+    def make_sequence_generator(self, subject_id=0, **kwargs):
         """ Makes functions that return the prediction for x_{t+1} for every
         sequence in the batch given x_{t} and the current state of the model h^{l}_{t}.
 
@@ -162,8 +153,13 @@ class GRU_Regression(GRU):
         # predictions.shape : (batch_size, target_size)
         predictions = new_states[-1]
 
+        updates = OrderedDict()
+        for i in range(len(self.hidden_sizes)):
+            updates[self.states_h[i]] = new_states_h[i]
+
         f = theano.function(inputs=[symb_x_t] + states_h,
-                            outputs=[predictions] + list(new_states_h))
+                            outputs=[predictions] + list(new_states_h),
+                            updates=updates)
 
         def _gen(x_t, states):
             """ Returns the prediction for x_{t+1} for every

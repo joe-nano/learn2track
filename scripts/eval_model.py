@@ -33,6 +33,7 @@ def build_parser():
                    help='name to use when saving the results. Default: %(default)s')
     p.add_argument('--batch_size', type=int, default=100,
                    help='size of the batch.')
+    p.add_argument('--use-max-probability', action='store_true', help='Use the max probability samples to measure the error')
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
@@ -96,7 +97,8 @@ def main():
                                                          shuffle_streamlines=False,
                                                          normalize_target=hyperparams['normalize'])
 
-        loss = loss_factory(hyperparams, model, dataset, use_expected_value=True)
+        loss_type = 'max_probability' if args.use_max_probability else 'expected_value'
+        loss = loss_factory(hyperparams, model, dataset, loss_type=loss_type)
         l2_error = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
 
     with Timer("Evaluating...", newline=True):

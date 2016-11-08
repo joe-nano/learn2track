@@ -103,7 +103,7 @@ class GRU_Multistep_Gaussian(GRU):
         for k in range(1, self.k):
             # Sample an input for the next step
             # sample_directions.shape : (batch_size, target_dimensions)
-            sample_directions = self._get_sample(distribution_params, epsilon[k - 1])
+            sample_directions = self._get_stochastic_samples(distribution_params, epsilon[k - 1])
 
             # Follow *unnormalized* direction and get diffusion data at the new location.
             coords = T.concatenate([coords[:, :3] + sample_directions, coords[:, 3:]], axis=1)
@@ -119,7 +119,7 @@ class GRU_Multistep_Gaussian(GRU):
         return next_hidden_state + (k_distribution_params,)
 
     @staticmethod
-    def _get_sample(distribution_parameters, noise):
+    def _get_stochastic_samples(distribution_parameters, noise):
         # distribution_parameters.shape : (batch_size, target_size)
         # distribution_params[0] = [mu_x, mu_y, mu_z, std_x, std_y, std_z]
 
@@ -128,9 +128,12 @@ class GRU_Multistep_Gaussian(GRU):
         mu = distribution_parameters[:, :3]
         sigma = distribution_parameters[:, 3:6]
 
-        sample = mu + noise * sigma
+        samples = mu + noise * sigma
 
-        return sample
+        return samples
+
+    def _get_max_probability_samples(self, distribution_parameters):
+        return distribution_parameters[:, :3]
 
     def _predict_distribution_params(self, hidden_state):
         # regression layer outputs an array [mean_x, mean_y, mean_z, log(std_x), log(std_y), log(std_z)]
@@ -221,7 +224,7 @@ class GRU_Multistep_Gaussian(GRU):
             noise = srng.normal((batch_size, self.target_dims))
 
             # next_step_predictions.shape : (batch_size, target_dims)
-            next_step_predictions = self._get_sample(distribution_params, noise)
+            next_step_predictions = self._get_stochastic_samples(distribution_params, noise)
 
             updates = OrderedDict()
             for i in range(len(self.hidden_sizes)):
@@ -231,6 +234,88 @@ class GRU_Multistep_Gaussian(GRU):
             self.k = k_bak  # Restore original $k$.
 
         return self._gen(x_t)
+
+    def make_sequence_generator(self, subject_id=0, use_max_probability=False):
+        """ Makes functions that return the prediction for x_{t+1} for every
+        sequence in the batch given x_{t} and the current state of the model h^{l}_{t}.
+
+        Parameters
+        ----------
+        subject_id : int, optional
+            ID of the subject from which its diffusion data will be used. Default: 0.
+        """
+
+        # Build the sequence generator as a theano function.
+        states_h = []
+        for i in range(len(self.hidden_sizes)):
+            state_h = T.matrix(name="layer{}_state_h".format(i))
+            states_h.append(state_h)
+
+        symb_x_t = T.matrix(name="x_t")
+
+        # Temporarily set $k$ to one.
+        k_bak = self.k
+        self.k = 1
+
+        new_states = self._fprop_step(symb_x_t, *states_h)
+        new_states_h = new_states[:len(self.hidden_sizes)]
+
+        # model_output.shape : (batch_size, K=1, target_size)
+        model_output = new_states_h[-1]
+
+        distribution_params = model_output[:, 0, :]
+
+        if use_max_probability:
+            predictions = self._get_max_probability_samples(distribution_params)
+        else:
+            # Sample value from distribution
+            srng = MRG_RandomStreams(seed=1234)
+
+            batch_size = symb_x_t.shape[0]
+            noise = srng.normal((batch_size, self.target_dims))
+
+            # next_step_predictions.shape : (batch_size, target_dims)
+            next_step_predictions = self._get_stochastic_samples(distribution_params, noise)
+
+        updates = OrderedDict()
+        for i in range(len(self.hidden_sizes)):
+            updates[self.states_h[i]] = new_states_h[i]
+
+        f = theano.function(inputs=[symb_x_t] + states_h,
+                            outputs=[predictions] + list(new_states_h),
+                            updates=updates)
+
+        self.k = k_bak  # Restore original $k$.
+
+        def _gen(x_t, states):
+            """ Returns the prediction for x_{t+1} for every
+                sequence in the batch given x_{t} and the current states
+                of the model h^{l}_{t}.
+
+            Parameters
+            ----------
+            x_t : ndarray with shape (batch_size, 3)
+                Streamline coordinate (x, y, z).
+            states : list of 2D array of shape (batch_size, hidden_size)
+                Currrent states of the network.
+
+            Returns
+            -------
+            next_x_t : ndarray with shape (batch_size, 3)
+                Directions to follow.
+            new_states : list of 2D array of shape (batch_size, hidden_size)
+                Updated states of the network after seeing x_t.
+            """
+            # Append the DWI ID of each sequence after the 3D coordinates.
+            subject_ids = np.array([subject_id] * len(x_t), dtype=floatX)[:, None]
+            x_t = np.c_[x_t, subject_ids]
+
+            results = f(x_t, *states)
+            next_x_t = results[0]
+            new_states = results[1:]
+            return next_x_t, new_states
+
+        return _gen
 
     def save(self, path):
         super().save(path)
