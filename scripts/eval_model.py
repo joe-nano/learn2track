@@ -108,7 +108,7 @@ def main():
             print("Loading saved results... (use --force to re-run evaluation)")
             results = smartutils.load_dict_from_json_file(results_file)
 
-        entry = args.dataset_name + "_L2_error"
+        entry = args.dataset_name + "_" + loss_type + "_L2_error"
 
         if entry not in results or args.force:
             with Timer("Evaluating L2 error on {}".format(args.dataset_name)):
