@@ -159,13 +159,8 @@ class GRU_Mixture(GRU_Regression):
             srng = MRG_RandomStreams(1234)
             predictions = self._get_stochastic_samples(srng, *mixture_params)
 
-        updates = OrderedDict()
-        for i in range(len(self.hidden_sizes)):
-            updates[self.states_h[i]] = new_states_h[i]
-
         f = theano.function(inputs=[symb_x_t] + states_h,
-                            outputs=[predictions] + list(new_states_h),
-                            updates=updates)
+                            outputs=[predictions] + list(new_states_h))
 
         def _gen(x_t, states):
             """ Returns the prediction for x_{t+1} for every

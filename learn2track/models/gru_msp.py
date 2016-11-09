@@ -274,16 +274,11 @@ class GRU_Multistep_Gaussian(GRU):
             batch_size = symb_x_t.shape[0]
             noise = srng.normal((batch_size, self.target_dims))
 
-            # next_step_predictions.shape : (batch_size, target_dims)
-            next_step_predictions = self._get_stochastic_samples(distribution_params, noise)
-
-        updates = OrderedDict()
-        for i in range(len(self.hidden_sizes)):
-            updates[self.states_h[i]] = new_states_h[i]
+            # predictions.shape : (batch_size, target_dims)
+            predictions = self._get_stochastic_samples(distribution_params, noise)
 
         f = theano.function(inputs=[symb_x_t] + states_h,
-                            outputs=[predictions] + list(new_states_h),
-                            updates=updates)
+                            outputs=[predictions] + list(new_states_h))
 
         self.k = k_bak  # Restore original $k$.
 
