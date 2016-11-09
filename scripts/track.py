@@ -450,7 +450,7 @@ def pft_track(model, dwi, seeds, step_size, is_stopping, nb_retry=1):
             state[undone, :] = new_state[:, :]
 
         # Update sequences
-        sequences = np.concatenate([sequences, np.nan*np.ones((len(sequences), 1, 3), dtype=np.float32)], axis=1)
+        sequences = np.concatenate([sequences, (np.nan*np.ones((len(sequences), 1, 3))).astype(np.float32)], axis=1)
         sequences[undone] = new_sequences
 
         done = undone[new_done]
