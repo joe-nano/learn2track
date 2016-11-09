@@ -713,7 +713,7 @@ def batch_track(model, dwi, seeds, step_size=None, max_nb_points=500, theta=0.78
                 if tractogram is None:
                     tractogram = batch_tractogram
                 else:
-                    tractogram.streamlines.extend(batch_tractogram)
+                    tractogram += batch_tractogram
 
                 # new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
                 #                         max_nb_points=max_nb_points, theta=theta,
