@@ -25,7 +25,8 @@ def build_argparser():
 
             This results in a .npz file containing the following keys:\n"
             'coords': ndarray of shape (N, 3)
-                Coordinates of each point of every streamlines. N is the total number points of all streamlines.
+                Coordinates of each point of every streamlines expressed in voxel space.
+                N is the total number points of all streamlines.
             'offsets': ndarray of shape (M,) with dtype int64
                 Index of the beginning of each streamline. M is the total number of streamlines.
             'lengths': ndarray of shape (M,) with dtype int16
