@@ -100,6 +100,36 @@ class TractographyData(object):
                  bundle_ids=self.bundle_ids,
                  name2id=list(self.name2id.items()))
 
+    def __str__(self):
+        import textwrap
+        msg = textwrap.dedent("""
+                              Dataset Information
+                              -------------------
+                              Nb. streamlines: {nb_streamlines:}
+                              Nb. bundles: {nb_bundles}
+                              Nb. B0 images: {nb_b0s}
+                              Nb. gradients: {nb_gradients}
+                              dwi filename: {dwi_filename}
+                              affine:
+                              {affine}
+                              Bundles:
+                              {bundles_infos}
+                              """)
+
+        name_max_length = max(map(len, self.name2id.keys()))
+        bundles_infos = "\n".join([(name.ljust(name_max_length) +
+                                    "{}".format((self.bundle_ids==bundle_id).sum()).rjust(12))
+                                   for name, bundle_id in self.name2id.items()])
+
+        msg = msg.format(nb_streamlines=len(self.streamlines),
+                         nb_bundles=len(self.name2id),
+                         nb_b0s=self.gradients.b0s_mask.sum(),
+                         nb_gradients=np.logical_not(self.gradients.b0s_mask).sum(),
+                         dwi_filename=self.signal.get_filename(),
+                         affine=self.signal.affine,
+                         bundles_infos=bundles_infos)
+        return msg
+
 
 class VolumeManager(object):
     def __init__(self):
