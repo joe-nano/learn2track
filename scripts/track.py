@@ -17,6 +17,7 @@ import time
 
 import dipy
 import nibabel as nib
+from nibabel.streamlines import Tractogram
 from dipy.tracking.streamline import compress_streamlines
 
 from smartlearner import views
@@ -52,8 +53,6 @@ def build_argparser():
 
     p.add_argument('name', type=str, help='name/path of the experiment.')
     p.add_argument('dwi', type=str, help="diffusion weighted images (.nii|.nii.gz).")
-    p.add_argument('--ref-dwi', type=str, help="[Experimental] will be used to normalized the diffusion weighted images (.nii|.nii.gz).")
-    p.add_argument('--ref-dwi2', type=str, help="[Experimental] will be used to normalized the diffusion weighted images (.nii|.nii.gz).")
     p.add_argument('--out', type=str, default="tractogram.tck",
                    help="name of the output tractogram (.tck|.trk). Default: tractogram.tck")
 
@@ -79,7 +78,7 @@ def build_argparser():
                    help="streamlines will be terminating if they pass through a voxel with a value from the mask lower than this value. Default: 0.05")
 
     p.add_argument('--backward-tracking-algo', type=int,
-                   help="if specified, both senses of the direction obtained from the seed point will be explored. Default: 0, (i.e. only do tracking one direction) ", default=0)
+                   help="(Deprecated) if specified, both senses of the direction obtained from the seed point will be explored. Default: 0, (i.e. only do tracking one direction) ", default=0)
 
     p.add_argument('--filter-threshold', type=float,
                    help="If specified, only streamlines with a loss value lower than the specified value will be kept.")
@@ -91,14 +90,26 @@ def build_argparser():
 
     p.add_argument('--discard-stopped-by-curvature', action="store_true",
                    help='if specified, discard streamlines having a too high curvature (i.e. tracking stopped because of that).')
-    p.add_argument('--append-previous-direction', action="store_true",
-                   help="if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
 
-    p.add_argument('--pft-nb-retry', type=int,
-                   help="Number of retry to use for the particle filtering tractography inspired by Girard et al. (2014) NeuroImage. Default: don't use PFT at all.")
+    p.add_argument('--append-previous-direction', action="store_true",
+                   help="(Deprecated) if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
+
+    pft = p.add_argument_group("Particle Filtering Tractography")
+    pft.add_argument('--use-pft-old', action="store_true",
+                     help="If specified, track streamlines using the Particle Filtering Tractography (PFT) algorithm inspired by Girard et al. (2014) NeuroImage.")
+
+    pft.add_argument('--use-pft', action="store_true",
+                     help="If specified, track streamlines using the Particle Filtering Tractography (PFT) algorithm inspired by Girard et al. (2014) NeuroImage.")
+
+    pft.add_argument('--pft-nb-retry', type=int, default=1,
+                     help="How many 'rescue' attempts to make (see PFT algorithm). Default: 1.")
+
+    pft.add_argument('--pft-nb-backtrack-steps', type=int, default=1,
+                     help="How many steps will be backtracked before attempting the 'rescue'. Default: 1.")
 
     # Optional parameters
-    p.add_argument('-f', '--force',  action='store_true', help='overwrite existing tractogram')
+    p.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
+    p.add_argument('-f', '--force', action='store_true', help='overwrite existing tractogram')
 
     return p
 
@@ -235,7 +246,7 @@ def make_is_too_curvy(max_theta):
         """
         if streamlines.shape[1] < 3:
             # Not enough segments to test curvature.
-            return [False] * len(streamlines)
+            return np.asarray([False] * len(streamlines))
 
         last_segments = streamlines[:, -1] - streamlines[:, -2]
         before_last_segments = streamlines[:, -2] - streamlines[:, -3]
@@ -306,8 +317,116 @@ def make_is_stopping(stopping_criteria):
     return _is_stopping
 
 
-def track(model, dwi, seeds, step_size, is_stopping):
+class Tracking(object):
+    def __init__(self, model, is_stopping, keep_last_n_states=1):
+        self.model = model
+        self.is_stopping = is_stopping
+        self.grower = model.make_sequence_generator()
+        self.keep_last_n_states = max(keep_last_n_states, 1)
+        self._history = []
 
+    @property
+    def states(self):
+        return self._states
+
+    @states.setter
+    def states(self, values):
+        # Add new states to history; free space if needed.
+        self._history += [self._states.copy()]
+        if len(self._history) > self.keep_last_n_states:
+            self._history = self._history[1:]
+
+        self._states = values.copy()
+
+    def is_ripe(self):
+        return len(self.sprouts) == 0
+
+    def get(self, flag):
+        _, done, stopping_flags = self.is_stopping(self.sprouts)
+        return done[(stopping_flags & flag) != 0]
+
+    def plant(self, seeds):
+        if seeds.ndim == 2:
+            seeds = seeds[:, None, :]
+
+        self.sprouts = seeds.copy()
+        self._states = self.model.get_init_states(batch_size=len(seeds))
+
+    def _grow_step(self, sprouts, states, step_size):
+        # Get next unnormalized directions
+        directions, new_states = self.grower(x_t=sprouts[:, -1, :], states=states)
+
+        if step_size is not None:
+            # Norm direction and stretch it.
+            normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))
+            directions = normalized_directions * step_size
+
+        # Take a step i.e. it's growing!
+        new_sprouts = np.concatenate([sprouts, sprouts[:, [-1], :] + directions[:, None, :]], axis=1)
+        return new_sprouts, new_states
+
+    def grow(self, step_size):
+        self.sprouts, self.states = self._grow_step(self.sprouts, self.states, step_size)
+
+    def harvest(self):
+        undone, done, stopping_flags = self.is_stopping(self.sprouts)
+
+        tractogram = Tractogram(streamlines=compress_streamlines(list(self.sprouts[done])),
+                                data_per_streamline={"stopping_flags": stopping_flags})
+
+        # Update remaining sprouts and their states.
+        self.sprouts = self.sprouts[undone]
+        self._states = [s[undone] for s in self._states]
+
+        # Rewrite history
+        for i, state in enumerate(self._history):
+            self._history[i] = [s[undone] for s in state]
+
+        return tractogram
+
+    def regrow(self, idx, step_size):
+        if self.sprouts.shape[1] <= self.keep_last_n_states:
+            # Cannot regrow sprouts that are too small.
+            return 0
+
+        # Get sprouts that needs regrowing.
+        sprouts = self.sprouts[idx, :-self.keep_last_n_states]
+        states = [s[idx] for s in self._history[0]]
+        idx_to_keep = np.arange(len(sprouts))
+
+        local_history = []
+        for _ in range(self.keep_last_n_states):
+            if len(sprouts) == 0:
+                # Nothing left to regrow, no sprouts could be saved.
+                return 0
+
+            local_history += [states]
+            sprouts, states = self._grow_step(sprouts, states, step_size)
+
+            undone, _, _ = self.is_stopping(sprouts)
+            sprouts = sprouts[undone]
+            states = [s[undone] for s in states]
+            idx_to_keep = idx_to_keep[undone]
+
+            # Rewrite local history
+            for i, old_states in enumerate(local_history):
+                local_history[i] = [s[undone] for s in old_states]
+
+        # Update original sprouts and their states.
+        self.sprouts[idx[idx_to_keep]] = sprouts
+        for i, state in enumerate(self._states):
+            self._states[i][idx[idx_to_keep]] = states[i]
+
+        # Rewrite history
+        assert len(self._history) == len(local_history)
+        for j, old_states in enumerate(self._history):
+            for i, old_state in enumerate(old_states):
+                self._history[j][i][idx[idx_to_keep]] = local_history[j][i]
+
+        return len(idx_to_keep)  # Number of successful regrowths.
+
+
+def track(model, dwi, seeds, step_size, is_stopping, verbose=False):
     """
     Parameters
     ----------
@@ -333,7 +452,7 @@ def track(model, dwi, seeds, step_size, is_stopping):
     # Tracking
     i = 0
     while len(undone) > 0:
-        if (i+1) % 100 == 0:
+        if verbose:
             print("pts: {}/{}".format(i+1, is_stopping.max_nb_points))
 
         directions[:] = np.nan  # Help debugging
@@ -372,7 +491,8 @@ def track(model, dwi, seeds, step_size, is_stopping):
 
     return tractogram
 
-def pft_track(model, dwi, seeds, step_size, is_stopping, nb_retry=1):
+
+def pft_track_old(model, dwi, seeds, step_size, is_stopping, nb_retry=1):
 
     """
     Parameters
@@ -470,6 +590,66 @@ def pft_track(model, dwi, seeds, step_size, is_stopping, nb_retry=1):
     # Compress stremalines and add metadata.
     streamlines = compress_streamlines(streamlines)
     tractogram = nib.streamlines.Tractogram(streamlines, data_per_streamline={"stopping_flags": stopping_flags})
+
+    return tractogram
+
+def pft_track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False):
+    """ Generates streamlines using the Particle Filtering Tractography algorithm.
+
+    This algorithm is inspired from Girard etal. (2014) Neuroimage.
+
+    Parameters
+    ----------
+    is_stopping : function
+        Tells whether a streamlines should stop being tracked.
+        This function expects a list of streamlines and returns a 3-tuple:
+          the indices of the streamlines that are undone,
+          the indices of the streamlines that are done,
+          the reasons why the streamlines should be stopped.
+    """
+    # Prepare some data container and reset the model.
+    print("Using PFT algorithm")
+
+    tracking = Tracking(model, is_stopping, nb_backtrack_steps)
+    tracking.plant(seeds)
+
+    tractogram = None
+
+    i = 1
+    while not tracking.is_ripe():
+        if verbose:
+            print("pts: {}/{}".format(i+1, is_stopping.max_nb_points), end="")
+
+        tracking.grow(step_size)
+
+        for _ in range(nb_retry):
+            if verbose:
+                print(".", end="")
+                sys.stdout.flush()
+
+            idx = tracking.get(flag=STOPPING_MASK | STOPPING_CURVATURE | STOPPING_LIKELIHOOD)
+            if len(idx) == 0:
+                # No sprouts to be saved.
+                break
+
+            nb_saved = tracking.regrow(idx, step_size)
+            print("{}/{} saved.".format(nb_saved, len(idx)))
+
+        if tractogram is None:
+            tractogram = tracking.harvest()
+        else:
+            tractogram += tracking.harvest()
+
+        if verbose:
+            print("")
+
+        i += 1
+
+    print("Max length: {}".format(np.max(list(map(len, tractogram)))))
+    stopping_flags = tractogram.data_per_streamline['stopping_flags'].astype(np.uint8)
+    print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
+                                                                                            count_flags(stopping_flags, STOPPING_CURVATURE),
+                                                                                            count_flags(stopping_flags, STOPPING_LENGTH)))
 
     return tractogram
 
@@ -691,8 +871,7 @@ def track_old(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78,
         return streamlines
 
 
-def batch_track(model, dwi, seeds, step_size=None, max_nb_points=500, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0, batch_size=None,
-                discard_stopped_by_curvature=False, is_stopping=None, **kwargs):
+def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
     if batch_size is None:
         batch_size = len(seeds)
 
@@ -705,10 +884,14 @@ def batch_track(model, dwi, seeds, step_size=None, max_nb_points=500, theta=0.78
             for start in range(0, len(seeds), batch_size):
                 print("{:,} / {:,}".format(start, len(seeds)))
                 end = start+batch_size
-                if kwargs.get('pft_nb_retry') is not None:
-                    batch_tractogram = pft_track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping, nb_retry=kwargs['pft_nb_retry'])
+                if args.use_pft_old:
+                    batch_tractogram = pft_track_old(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
+                                                 nb_retry=args.pft_nb_retry)
+                elif args.use_pft:
+                    batch_tractogram = pft_track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
+                                                 nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
                 else:
-                    batch_tractogram = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping)
+                    batch_tractogram = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping, verbose=args.verbose)
 
                 if tractogram is None:
                     tractogram = batch_tractogram
@@ -907,8 +1090,9 @@ def main():
                                  step_size=step_size,
                                  is_stopping=is_stopping,
                                  batch_size=args.batch_size,
-                                 pft_nb_retry=args.pft_nb_retry)
+                                 args=args)
 
+        # OLD
         # tractogram = batch_track(model, weights, seeds,
         #                          step_size=step_size,
         #                          max_nb_points=max_nb_points,
