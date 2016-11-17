@@ -107,6 +107,8 @@ class TractographyData(object):
                               -------------------
                               Nb. streamlines: {nb_streamlines:}
                               Nb. bundles: {nb_bundles}
+                              Step sizes (in mm): {step_sizes}
+                              Fiber pts: {fiber_lengths}
                               Nb. B0 images: {nb_b0s}
                               Nb. gradients: {nb_gradients}
                               dwi filename: {dwi_filename}
@@ -121,8 +123,15 @@ class TractographyData(object):
                                     "{}".format((self.bundle_ids==bundle_id).sum()).rjust(12))
                                    for name, bundle_id in self.name2id.items()])
 
+        t = nib.streamlines.Tractogram(self.streamlines)
+        t.apply_affine(self.signal.affine)  # Bring streamlines to RAS+mm
+        step_sizes = np.sqrt(np.sum(np.diff(t.streamlines._data, axis=0)**2, axis=1))
+        step_sizes = np.concatenate([step_sizes[o:o+l-1] for o, l in zip(t.streamlines._offsets, t.streamlines._lengths)])
+
         msg = msg.format(nb_streamlines=len(self.streamlines),
                          nb_bundles=len(self.name2id),
+                         step_sizes="[{:.3f}, {:.3f}] (avg. {:.3f})".format(step_sizes.min(), step_sizes.max(), step_sizes.mean()),
+                         fiber_lengths="[{}, {}] (avg. {:.1f})".format(self.streamlines._lengths.min(), self.streamlines._lengths.max(), self.streamlines._lengths.mean()),
                          nb_b0s=self.gradients.b0s_mask.sum(),
                          nb_gradients=np.logical_not(self.gradients.b0s_mask).sum(),
                          dwi_filename=self.signal.get_filename(),
