@@ -35,6 +35,7 @@ class TractographyData(object):
         self.signal = signal
         self.gradients = gradients
         self.subject_id = None
+        self.filename = None
 
     @property
     def volume(self):
@@ -83,6 +84,7 @@ class TractographyData(object):
     def load(cls, filename):
         data = np.load(filename)
         streamlines_data = cls(data['signal'].item(), data['gradients'].item())
+        streamlines_data.filename = filename
         streamlines_data.streamlines._data = data['coords']
         streamlines_data.streamlines._offsets = data['offsets']
         streamlines_data.streamlines._lengths = data['lengths']
@@ -103,18 +105,23 @@ class TractographyData(object):
     def __str__(self):
         import textwrap
         msg = textwrap.dedent("""
-                              Dataset Information
-                              -------------------
-                              Nb. streamlines: {nb_streamlines:}
-                              Nb. bundles: {nb_bundles}
+                              ################################################
+                              Dataset "{dataset_name}"
+                              ################################################
+                              ------------------- Streamlines ----------------
+                              Nb. streamlines:    {nb_streamlines:}
+                              Nb. bundles:        {nb_bundles}
                               Step sizes (in mm): {step_sizes}
-                              Fiber pts: {fiber_lengths}
+                              Fiber nb. pts:      {fiber_lengths}
+                              Image:
+                              --------------------- Image --------------------
+                              Dimension:     {dimension}
+                              Voxel size:    {voxel_size}
                               Nb. B0 images: {nb_b0s}
                               Nb. gradients: {nb_gradients}
-                              dwi filename: {dwi_filename}
-                              affine:
-                              {affine}
-                              Bundles:
+                              dwi filename:  {dwi_filename}
+                              affine: {affine}
+                              -------------------- Bundles -------------------
                               {bundles_infos}
                               """)
 
@@ -128,16 +135,19 @@ class TractographyData(object):
         step_sizes = np.sqrt(np.sum(np.diff(t.streamlines._data, axis=0)**2, axis=1))
         step_sizes = np.concatenate([step_sizes[o:o+l-1] for o, l in zip(t.streamlines._offsets, t.streamlines._lengths)])
 
-        msg = msg.format(nb_streamlines=len(self.streamlines),
+        msg = msg.format(dataset_name=self.filename,
+                         nb_streamlines=len(self.streamlines),
                          nb_bundles=len(self.name2id),
                          step_sizes="[{:.3f}, {:.3f}] (avg. {:.3f})".format(step_sizes.min(), step_sizes.max(), step_sizes.mean()),
                          fiber_lengths="[{}, {}] (avg. {:.1f})".format(self.streamlines._lengths.min(), self.streamlines._lengths.max(), self.streamlines._lengths.mean()),
+                         dimension=self.signal.shape,
+                         voxel_size=tuple(self.signal.header.get_zooms()),
                          nb_b0s=self.gradients.b0s_mask.sum(),
                          nb_gradients=np.logical_not(self.gradients.b0s_mask).sum(),
                          dwi_filename=self.signal.get_filename(),
-                         affine=self.signal.affine,
+                         affine="\n        ".join(str(self.signal.affine).split('\n')),
                          bundles_infos=bundles_infos)
-        return msg
+        return msg[1:]  # Without the first newline.
 
 
 class VolumeManager(object):
