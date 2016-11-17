@@ -113,7 +113,6 @@ class TractographyData(object):
                               Nb. bundles:        {nb_bundles}
                               Step sizes (in mm): {step_sizes}
                               Fiber nb. pts:      {fiber_lengths}
-                              Image:
                               --------------------- Image --------------------
                               Dimension:     {dimension}
                               Voxel size:    {voxel_size}
