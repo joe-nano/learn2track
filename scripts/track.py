@@ -38,15 +38,6 @@ STOPPING_CURVATURE =  int('00000100', 2)
 STOPPING_LIKELIHOOD = int('00001000', 2)
 
 
-def is_flag_set(flags, ref_flag):
-    """ Checks which flags have the `ref_flag` set. """
-    return ((flags & ref_flag) >> np.log2(ref_flag).astype(np.uint8)).astype(bool)
-
-def count_flags(flags, ref_flag):
-    """ Counts how many flags have the `ref_flag` set. """
-    return is_flag_set(flags, ref_flag).sum()
-
-
 def build_argparser():
     DESCRIPTION = "Generate a tractogram from a LSTM model trained on ismrm2015 challenge data."
     p = argparse.ArgumentParser(description=DESCRIPTION)
@@ -95,23 +86,27 @@ def build_argparser():
                    help="(Deprecated) if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
 
     pft = p.add_argument_group("Particle Filtering Tractography")
-    pft.add_argument('--use-pft-old', action="store_true",
-                     help="If specified, track streamlines using the Particle Filtering Tractography (PFT) algorithm inspired by Girard et al. (2014) NeuroImage.")
-
-    pft.add_argument('--use-pft', action="store_true",
-                     help="If specified, track streamlines using the Particle Filtering Tractography (PFT) algorithm inspired by Girard et al. (2014) NeuroImage.")
-
-    pft.add_argument('--pft-nb-retry', type=int, default=1,
-                     help="How many 'rescue' attempts to make (see PFT algorithm). Default: 1.")
+    pft.add_argument('--pft-nb-retry', type=int, default=0,
+                     help="How many 'rescue' attempts to make (see PFT algorithm). Default: 0 i.e. do not use pft.")
 
     pft.add_argument('--pft-nb-backtrack-steps', type=int, default=1,
-                     help="How many steps will be backtracked before attempting the 'rescue'. Default: 1.")
+                     help="If --pft-nb-retry > 0, how many steps will be backtracked before attempting the 'rescue'. Default: 1.")
 
     # Optional parameters
     p.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
     p.add_argument('-f', '--force', action='store_true', help='overwrite existing tractogram')
 
     return p
+
+
+def is_flag_set(flags, ref_flag):
+    """ Checks which flags have the `ref_flag` set. """
+    return ((flags & ref_flag) >> np.log2(ref_flag).astype(np.uint8)).astype(bool)
+
+
+def count_flags(flags, ref_flag):
+    """ Counts how many flags have the `ref_flag` set. """
+    return is_flag_set(flags, ref_flag).sum()
 
 
 def compute_loss_errors(streamlines, model, hyperparams):
@@ -426,174 +421,7 @@ class Tracking(object):
         return len(idx_to_keep)  # Number of successful regrowths.
 
 
-def track(model, dwi, seeds, step_size, is_stopping, verbose=False):
-    """
-    Parameters
-    ----------
-    is_stopping : function
-        Tells whether a streamlines should stop being tracked.
-        This function expects a list of streamlines and returns a 3-tuple:
-          the indices of the streamlines that are undone,
-          the indices of the streamlines that are done,
-          the reasons why the streamlines should be stopped.
-    """
-    # Prepare some data container and reset the model.
-    sequences = seeds.copy()
-    if sequences.ndim == 2:
-        sequences = sequences[:, None, :]
-
-    seq_next = model.make_sequence_generator()
-    states = model.get_init_states(batch_size=len(seeds))
-
-    directions = np.zeros((len(seeds), 3), dtype=np.float32)
-    undone = np.ones(len(sequences), dtype=bool)
-    stopping_flags = np.zeros(len(seeds), dtype=np.uint8)
-
-    # Tracking
-    i = 0
-    while len(undone) > 0:
-        if verbose:
-            print("pts: {}/{}".format(i+1, is_stopping.max_nb_points))
-
-        directions[:] = np.nan  # Help debugging
-        # Get next unnormalized directions
-        assert not np.any(np.isnan(sequences[undone, -1, :]))
-        directions[undone], new_states = seq_next(x_t=sequences[undone, -1, :],
-                                                  states=[s[undone] for s in states])
-
-        # Update states for all undone streamlines.
-        for state, new_state in zip(states, new_states):
-            state[undone, :] = new_state[:, :]
-
-        if step_size is not None:
-            normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
-            directions[undone] = normalized_directions[undone] * step_size
-
-        # Make a step
-        sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
-
-        # Check which streamlines should be stopped.
-        undone, done, flags = is_stopping(sequences, to_check=undone)
-        stopping_flags[done] = flags
-        i += 1
-
-    streamlines_lengths = sequences.shape[1] - np.sum(np.isnan(sequences[..., 0]), axis=1)
-    print("Max length: {}".format(streamlines_lengths.max()))
-    print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
-                                                                                            count_flags(stopping_flags, STOPPING_CURVATURE),
-                                                                                            count_flags(stopping_flags, STOPPING_LENGTH)))
-    # Trim sequences to get the final streamlines.
-    streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_lengths)]
-
-    # Compress stremalines and add metadata.
-    streamlines = compress_streamlines(streamlines)
-    tractogram = nib.streamlines.Tractogram(streamlines, data_per_streamline={"stopping_flags": stopping_flags})
-
-    return tractogram
-
-
-def pft_track_old(model, dwi, seeds, step_size, is_stopping, nb_retry=1):
-
-    """
-    Parameters
-    ----------
-    is_stopping : function
-        Tells whether a streamlines should stop being tracked.
-        This function expects a list of streamlines and returns a 3-tuple:
-          the indices of the streamlines that are undone,
-          the indices of the streamlines that are done,
-          the reasons why the streamlines should be stopped.
-    """
-    # Prepare some data container and reset the model.
-    print("Using PFT algorithm")
-
-    def _track_step(sequences, states):
-        # Get next unnormalized directions
-        directions, new_states = seq_next(x_t=sequences[:, -1, :], states=states)
-
-        if step_size is not None:
-            normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
-            directions = normalized_directions * step_size
-
-        # Make a step
-        sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
-
-        # Check which streamlines should be stopped.
-        undone, done, flags = is_stopping(sequences)
-
-        return sequences, new_states, undone, done, flags
-
-
-    sequences = seeds.copy()
-    if sequences.ndim == 2:
-        sequences = sequences[:, None, :]
-
-    seq_next = model.make_sequence_generator()
-    states = model.get_init_states(batch_size=len(seeds))
-    undone = np.arange(len(sequences))
-    stopping_flags = np.zeros(len(seeds), dtype=np.uint8)
-
-    # Tracking
-    i = 0
-    while len(undone) > 0:
-        if (i+1) % 1 == 0:
-            print("pts: {}/{}".format(i+1, is_stopping.max_nb_points))
-
-        assert not np.any(np.isnan(sequences[undone]))
-        candidates = _track_step(sequences[undone], states=[s[undone] for s in states])
-        new_sequences, new_states, new_undone, new_done, new_flags = candidates
-
-        for j in range(nb_retry):
-            if len(new_done) == 0:
-                break
-
-            print(".", end="")
-            sys.stdout.flush()
-
-            assert not np.any(np.isnan(sequences[undone][new_done]))
-            retry_candidates = _track_step(sequences[undone][new_done], states=[s[undone][new_done] for s in states])
-            retry_new_sequences, retry_new_states, retry_undone, retry_done, retry_flags = retry_candidates
-
-            # Keep new_sequences up-to-date
-            new_sequences[new_done] = retry_new_sequences
-
-            # Keep new_states up-to-date.
-            for new_state, retry_new_state in zip(new_states, retry_new_states):
-                new_state[new_done, :] = retry_new_state[:, :]
-
-            new_undone = np.concatenate([new_undone, new_done[retry_undone]])
-            new_done = new_done[retry_done]
-            new_flags = retry_flags
-
-        # Update states for all undone streamlines.
-        for state, new_state in zip(states, new_states):
-            state[undone, :] = new_state[:, :]
-
-        # Update sequences
-        sequences = np.concatenate([sequences, (np.nan*np.ones((len(sequences), 1, 3))).astype(np.float32)], axis=1)
-        sequences[undone] = new_sequences
-
-        done = undone[new_done]
-        undone = undone[new_undone]
-        stopping_flags[done] = new_flags
-
-        i += 1
-
-    streamlines_lengths = sequences.shape[1] - np.sum(np.isnan(sequences[..., 0]), axis=1)
-    print("Max length: {}".format(streamlines_lengths.max()))
-    print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
-                                                                                            count_flags(stopping_flags, STOPPING_CURVATURE),
-                                                                                            count_flags(stopping_flags, STOPPING_LENGTH)))
-    # Trim sequences to get the final streamlines.
-    streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_lengths)]
-
-    # Compress stremalines and add metadata.
-    streamlines = compress_streamlines(streamlines)
-    tractogram = nib.streamlines.Tractogram(streamlines, data_per_streamline={"stopping_flags": stopping_flags})
-
-    return tractogram
-
-def pft_track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False):
+def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False):
     """ Generates streamlines using the Particle Filtering Tractography algorithm.
 
     This algorithm is inspired from Girard etal. (2014) Neuroimage.
@@ -607,9 +435,6 @@ def pft_track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrac
           the indices of the streamlines that are done,
           the reasons why the streamlines should be stopped.
     """
-    # Prepare some data container and reset the model.
-    print("Using PFT algorithm")
-
     tracking = Tracking(model, is_stopping, nb_backtrack_steps)
     tracking.plant(seeds)
 
@@ -654,223 +479,6 @@ def pft_track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrac
     return tractogram
 
 
-def track_old(model, dwi, seeds, step_size=None, max_nb_points=1000, theta=0.78, mask=None, mask_affine=None, mask_threshold=0.05, backward_tracking_algo=0, discard_stopped_by_curvature=False):
-    # Forward tracking
-    # Prepare some data container and reset the model.
-    sequences = seeds.copy()
-    if sequences.ndim == 2:
-        sequences = sequences[:, None, :]
-
-    directions = np.zeros((len(seeds), 3), dtype=np.float32)
-    all_directions = np.zeros((len(seeds), 0, 3), dtype=np.float32)
-    last_directions = np.zeros((len(seeds), 3), dtype=np.float32)
-
-    streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
-    undone = np.ones(len(sequences), dtype=bool)
-
-    model.seq_reset(batch_size=len(seeds))
-    stopping_types_count = {'curv': 0,
-                            'mask': 0}
-
-    stopped_curv = np.zeros(len(sequences), dtype=bool)
-
-    # Tracking
-    for i in range(max_nb_points):
-        if (i+1) % 100 == 0:
-            print("pts: {}/{}".format(i+1, max_nb_points))
-
-        directions[undone] = model.seq_next(sequences[undone, -1, :])   # Get next unnormalized directions
-        normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
-        # print(np.sqrt(np.sum(directions[undone]**2, axis=1, keepdims=True)))
-
-        # If a streamline makes a turn to tight, stop it.
-        if sequences.shape[1] > 1:
-            # TEND-like approach
-            # directions[undone] = 0.5*last_directions[undone] + 0.5*directions[undone]
-
-            angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
-            model.seq_squeeze(tokeep=angles[undone] <= theta)
-            stopped_curv[undone] = angles[undone] > theta
-            stopping_types_count['curv'] += np.sum(angles[undone] > theta)
-            undone = np.logical_and(undone, angles <= theta)
-
-        if step_size is not None:
-            directions[undone] = normalized_directions[undone] * step_size
-
-        all_directions = np.concatenate([all_directions, directions[:, None, :]], axis=1)
-        last_directions[undone] = normalized_directions[undone].copy()
-
-        # Make a step
-        directions[np.logical_not(undone)] = np.nan  # Help debugging
-        sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
-        streamlines_lengths[:] += undone[:]
-
-        # If a streamline goes outside the wm mask, mark it as done.
-        if mask is not None:
-            last_point_values = neurotools.map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
-            model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
-            stopping_types_count['mask'] += np.sum(last_point_values[undone] <= mask_threshold)
-            undone = np.logical_and(undone, last_point_values > mask_threshold)
-
-        sequences[np.logical_not(undone), i+1] = np.nan  # Help debugging
-
-        if undone.sum() == 0:
-            break
-
-    assert stopping_types_count['curv'] == np.sum(stopped_curv)
-    print("Max length: {}".format(streamlines_lengths.max()))
-    print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(stopping_types_count['mask'],
-                                                                                            stopping_types_count['curv'],
-                                                                                            undone.sum()))
-    # Trim sequences to obtain the streamlines.
-    streamlines = [s[:nb_pts] for s, nb_pts in zip(sequences, streamlines_lengths)]
-
-    norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
-    avg_step_sizes = [np.mean(norm(s[1:]-s[:-1])) for s in streamlines]
-    print("Average step sizes: {:.2f} mm.".format(np.nanmean(avg_step_sizes)))
-
-    if backward_tracking_algo == 0:
-        if discard_stopped_by_curvature:
-            streamlines = [s for s, discard in zip(streamlines, stopped_curv) if not discard]
-
-        return streamlines
-
-    if backward_tracking_algo == 1:
-        # Reset everything and start tracking from the opposite direction.
-
-        sequences = seeds.copy()
-        if sequences.ndim == 2:
-            sequences = sequences[:, None, :]
-
-        directions = np.zeros((len(sequences), 3), dtype=np.float32)
-        last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
-
-        streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
-        undone = np.ones(len(sequences), dtype=bool)
-
-        model.seq_reset(batch_size=len(seeds))
-
-        # Tracking
-        print("Tracking backward...")
-        for i in range(max_nb_points):
-            if (i+1) % 100 == 0:
-                print("pts: {}/{}".format(i+1, max_nb_points))
-
-            directions[undone] = model.seq_next(sequences[undone, -1, :])   # Get next unnormalized directions
-            normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
-
-            if i == 0:
-                # Follow the opposite direction obtained from the seed points (and only for that point).
-                directions[undone] *= -1
-
-            # If a streamline makes a turn to tight, stop it.
-            if sequences.shape[1] > 1:
-                angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
-                stopped_curv[undone] = angles[undone] > theta
-                model.seq_squeeze(tokeep=angles[undone] <= theta)
-                undone = np.logical_and(undone, angles <= theta)
-
-            last_directions[undone] = normalized_directions[undone].copy()
-
-            # Make a step
-            if step_size is not None:
-                directions[undone] = normalized_directions[undone] * step_size  # TODO: Model should have learned the step size.
-            directions[np.logical_not(undone)] = np.nan  # Help debugging
-            sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
-            streamlines_lengths[:] += undone[:]
-
-            # If a streamline goes outside the wm mask, mark it as done.
-            if mask is not None:
-                last_point_values = neurotools.map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
-                model.seq_squeeze(tokeep=last_point_values[undone] > mask_threshold)
-                undone = np.logical_and(undone, last_point_values > mask_threshold)
-
-            if undone.sum() == 0:
-                break
-
-        # Trim sequences to obtain the streamlines.
-        streamlines = [np.r_[s[::-1], seq[1:l]] for s, seq, l in zip(streamlines, sequences, streamlines_lengths)]
-        return streamlines
-
-    elif backward_tracking_algo == 2:
-        # Reset everything, kickstart the model with the first half of the streamline and resume tracking.
-
-        # Reverse streamline
-        forward_streamlines_lengths = streamlines_lengths.copy()
-        r_directions = np.zeros((len(sequences), streamlines_lengths.max(), 3), dtype=sequences.dtype)
-        for i, l in enumerate(streamlines_lengths):
-            r_directions[i, :l-1] = -all_directions[i, :l-1][::-1]
-
-        # old_streamlines_lengths = streamlines_lengths  # DEBUG
-        # old_sequences = sequences  # DEBUG
-        new_sequences = sequences[range(len(sequences)), streamlines_lengths-1].copy()
-        sequences = new_sequences[:, None, :]
-
-        directions = np.zeros((len(sequences), 3), dtype=np.float32)
-        last_directions = np.zeros((len(sequences), 3), dtype=np.float32)
-
-        streamlines_lengths = np.zeros(len(seeds), dtype=np.int16)
-        undone = np.ones(len(sequences), dtype=bool)
-
-        model.seq_reset(batch_size=len(seeds))
-
-        # Tracking
-        print("Tracking backward...")
-        for i in range(max_nb_points):
-            if (i+1) % 100 == 0:
-                print("pts: {}/{}".format(i+1, max_nb_points))
-
-            resuming = i < forward_streamlines_lengths-1
-
-            directions[undone] = model.seq_next(sequences[undone, -1, :])   # Get next unnormalized directions
-            normalized_directions = directions / np.sqrt(np.sum(directions**2, axis=1, keepdims=True))  # Normed directions.
-
-            # If a streamline makes a turn to tight, stop it.
-            if sequences.shape[1] > 1:
-                # TEND-like approach
-                # directions[undone] = 0.5*last_directions[undone] + 0.5*directions[undone]
-
-                angles = np.arccos(np.sum(last_directions * normalized_directions, axis=1))
-                stopped_curv[undone] = np.logical_and(angles[undone] > theta, np.logical_not(resuming[undone]))
-                model.seq_squeeze(tokeep=np.logical_or(angles[undone] <= theta, resuming[undone]))
-                undone = np.logical_or(np.logical_and(undone, angles <= theta), resuming)
-
-            # Overwrite directions for all streamlines still being kickstarted (resumed).
-            if i < r_directions.shape[1]:
-                directions[resuming] = r_directions[resuming, i, :]
-            else:
-                if step_size is not None:
-                    directions[undone] = normalized_directions[undone] * step_size  # TODO: Model should have learned the step size.
-            last_directions[undone] = normalized_directions[undone].copy()
-
-            # Make a step
-            directions[np.logical_not(undone)] = np.nan  # Help debugging
-            sequences = np.concatenate([sequences, sequences[:, [-1], :] + directions[:, None, :]], axis=1)
-            streamlines_lengths[:] += undone[:]
-
-            # If a streamline goes outside the wm mask, mark it as done.
-            if mask is not None:
-                last_point_values = neurotools.map_coordinates_3d_4d(mask, sequences[:, -1, :], affine=mask_affine, order=1)
-                model.seq_squeeze(tokeep=np.logical_or(last_point_values[undone] > mask_threshold, resuming[undone]))
-                undone = np.logical_or(np.logical_and(undone, last_point_values > mask_threshold), resuming)
-
-            if undone.sum() == 0:
-                break
-
-        # Trim sequences to obtain the streamlines.
-        streamlines = [s[:l] for s, l in zip(sequences, streamlines_lengths)]
-
-        print("Max length: {}".format(streamlines_lengths.max()))
-        print("Tracking stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(len(sequences) - (stopped_curv.sum() + undone.sum()),
-                                                                                            stopped_curv.sum(),
-                                                                                            undone.sum()))
-
-        if discard_stopped_by_curvature:
-            streamlines = [s for s, discard in zip(streamlines, stopped_curv) if not discard]
-
-        return streamlines
-
-
 def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
     if batch_size is None:
         batch_size = len(seeds)
@@ -883,28 +491,14 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
 
             for start in range(0, len(seeds), batch_size):
                 print("{:,} / {:,}".format(start, len(seeds)))
-                end = start+batch_size
-                if args.use_pft_old:
-                    batch_tractogram = pft_track_old(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
-                                                 nb_retry=args.pft_nb_retry)
-                elif args.use_pft:
-                    batch_tractogram = pft_track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
-                                                 nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
-                else:
-                    batch_tractogram = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping, verbose=args.verbose)
+                end = start + batch_size
+                batch_tractogram = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
+                                         nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
 
                 if tractogram is None:
                     tractogram = batch_tractogram
                 else:
                     tractogram += batch_tractogram
-
-                # new_streamlines = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size,
-                #                         max_nb_points=max_nb_points, theta=theta,
-                #                         mask=mask, mask_affine=mask_affine, mask_threshold=mask_threshold,
-                #                         backward_tracking_algo=backward_tracking_algo,
-                #                         discard_stopped_by_curvature=discard_stopped_by_curvature)
-                # new_streamlines = compress_streamlines(new_streamlines)
-                # tractogram.streamlines.extend(new_streamlines)
 
             return tractogram
 
@@ -1075,8 +669,6 @@ def main():
         print("Step size (vox): {}".format(step_size))
         print("Max nb. points: {}".format(max_nb_points))
 
-
-
         is_outside_mask = make_is_outside_mask(mask, affine_maskvox2dwivox, threshold=args.mask_threshold)
         is_too_long = make_is_too_long(max_nb_points)
         is_too_curvy = make_is_too_curvy(np.rad2deg(theta))
@@ -1091,17 +683,6 @@ def main():
                                  is_stopping=is_stopping,
                                  batch_size=args.batch_size,
                                  args=args)
-
-        # OLD
-        # tractogram = batch_track(model, weights, seeds,
-        #                          step_size=step_size,
-        #                          max_nb_points=max_nb_points,
-        #                          theta=theta,
-        #                          mask=mask, mask_affine=affine_maskvox2dwivox,
-        #                          mask_threshold=args.mask_threshold,
-        #                          backward_tracking_algo=args.backward_tracking_algo,
-        #                          batch_size=args.batch_size,
-        #                          discard_stopped_by_curvature=args.discard_stopped_by_curvature)
 
     nb_streamlines = len(tractogram)
     print("Generated {:,} (compressed) streamlines".format(nb_streamlines))
