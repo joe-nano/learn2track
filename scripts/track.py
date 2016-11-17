@@ -379,18 +379,18 @@ class Tracking(object):
 
         return tractogram
 
-    def regrow(self, idx, step_size):
-        if self.sprouts.shape[1] <= self.keep_last_n_states:
+    def regrow(self, idx, step_size, backtrack_n_steps):
+        if self.sprouts.shape[1] <= backtrack_n_steps:
             # Cannot regrow sprouts that are too small.
             return 0
 
         # Get sprouts that needs regrowing.
-        sprouts = self.sprouts[idx, :-self.keep_last_n_states]
-        states = [s[idx] for s in self._history[0]]
+        sprouts = self.sprouts[idx, :-backtrack_n_steps]
+        states = [s[idx] for s in self._history[-backtrack_n_steps]]
         idx_to_keep = np.arange(len(sprouts))
 
         local_history = []
-        for _ in range(self.keep_last_n_states):
+        for _ in range(backtrack_n_steps):
             if len(sprouts) == 0:
                 # Nothing left to regrow, no sprouts could be saved.
                 return 0
@@ -413,8 +413,8 @@ class Tracking(object):
             self._states[i][idx[idx_to_keep]] = states[i]
 
         # Rewrite history
-        assert len(self._history) == len(local_history)
-        for j, old_states in enumerate(self._history):
+        assert len(self._history[-backtrack_n_steps:]) == len(local_history)
+        for j, old_states in enumerate(self._history[-backtrack_n_steps:], start=-backtrack_n_steps):
             for i, old_state in enumerate(old_states):
                 self._history[j][i][idx[idx_to_keep]] = local_history[j][i]
 
@@ -452,13 +452,18 @@ def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_st
                 print(".", end="")
                 sys.stdout.flush()
 
-            idx = tracking.get(flag=STOPPING_MASK | STOPPING_CURVATURE | STOPPING_LIKELIHOOD)
+            for backtrack_n_steps in range(1, nb_backtrack_steps+1):
+                idx = tracking.get(flag=STOPPING_MASK | STOPPING_CURVATURE | STOPPING_LIKELIHOOD)
+                if len(idx) == 0:
+                    # No sprouts to be saved.
+                    break
+
+                nb_saved = tracking.regrow(idx, step_size, backtrack_n_steps=backtrack_n_steps)
+                print("{}/{} saved.".format(nb_saved, len(idx)))
+
             if len(idx) == 0:
                 # No sprouts to be saved.
                 break
-
-            nb_saved = tracking.regrow(idx, step_size)
-            print("{}/{} saved.".format(nb_saved, len(idx)))
 
         if tractogram is None:
             tractogram = tracking.harvest()
