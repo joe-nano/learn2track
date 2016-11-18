@@ -120,57 +120,78 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         # return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize_output=hyperparams["normalize"])
 
     elif hyperparams['model'] == 'gru_regression':
+        if loss_type is not None:
+            raise ValueError("loss_type not available for gru_regression: {}".format(loss_type))
+
         from learn2track.models.gru_regression import L2DistanceForSequences
         return L2DistanceForSequences(model, dataset, normalize_output=hyperparams["normalize"])
 
     elif hyperparams['model'] == 'gru_multistep':
-        if loss_type == 'expected_value' or loss_type == 'max_probability':
+        if loss_type == 'expected_value' or loss_type == 'maximum_component':
             from learn2track.models.gru_msp import MultistepMultivariateGaussianExpectedValueL2Distance
             return MultistepMultivariateGaussianExpectedValueL2Distance(model, dataset)
-        else:
+        elif loss_type is None:
             from learn2track.models.gru_msp import MultistepMultivariateGaussianNLL
             return MultistepMultivariateGaussianNLL(model, dataset)
+        else:
+            raise ValueError("Unrecognized loss_type: {}".format(loss_type))
 
     elif hyperparams['model'] == 'gru_mixture':
         if loss_type == 'expected_value':
             from learn2track.models.gru_mixture import MultivariateGaussianMixtureExpectedValueL2Distance
             return MultivariateGaussianMixtureExpectedValueL2Distance(model, dataset)
-        elif loss_type == 'max_probability':
-            from learn2track.models.gru_mixture import MultivariateGaussianMixtureMaxProbabilityL2Distance
-            return MultivariateGaussianMixtureMaxProbabilityL2Distance(model, dataset)
-        else:
+        elif loss_type == 'maximum_component':
+            from learn2track.models.gru_mixture import MultivariateGaussianMixtureMaxComponentL2Distance
+            return MultivariateGaussianMixtureMaxComponentL2Distance(model, dataset)
+        elif loss_type is None:
             from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
             return MultivariateGaussianMixtureNLL(model, dataset)
+        else:
+            raise ValueError("Unrecognized loss_type: {}".format(loss_type))
 
     else:
         raise ValueError("Unknown model!")
 
 
-def batch_scheduler_factory(hyperparams, dataset, noisy_streamlines_sigma, shuffle_streamlines):
-    if hyperparams['model'] == 'gru_regression':
+def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_override=None, use_data_augment=True):
+    """
+    Build the right batch scheduler for the model and chosen mode
+
+    Parameters
+    ----------
+    hyperparams : dict
+        model's training hyperparams
+    dataset : :class:`TractographyDataset`
+        Dataset from which to get the examples.
+    train_mode : bool
+        overrides certain hyperparameters if training the model or not
+    batch_size_override : int
+        override batch_size hyperparam
+    use_data_augment : bool
+        Feed streamlines in both directions (doubles the batch size)
+    """
+    batch_size = hyperparams['batch_size'] if batch_size_override is None else batch_size_override
+
+    if hyperparams['model'] == 'gru_regression' or hyperparams['model'] == 'gru_mixture':
         from learn2track.batch_schedulers import TractographyBatchScheduler
         return TractographyBatchScheduler(dataset,
-                                          batch_size=hyperparams['batch_size'],
-                                          noisy_streamlines_sigma=noisy_streamlines_sigma,
+                                          batch_size=batch_size,
+                                          use_data_augment=use_data_augment,
                                           seed=hyperparams['seed'],
                                           normalize_target=hyperparams['normalize'],
-                                          shuffle_streamlines=shuffle_streamlines)
+                                          noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
+                                          shuffle_streamlines=hyperparams['shuffle_streamlines'] if train_mode else None,
+                                          resample_streamlines=train_mode)
 
     elif hyperparams['model'] == 'gru_multistep':
         from learn2track.batch_schedulers import MultistepSequenceBatchScheduler
         return MultistepSequenceBatchScheduler(dataset,
-                                               batch_size=hyperparams['batch_size'],
+                                               batch_size=batch_size,
+                                               use_data_augment=use_data_augment,
                                                k=hyperparams['k'],
-                                               noisy_streamlines_sigma=noisy_streamlines_sigma,
                                                seed=hyperparams['seed'],
-                                               shuffle_streamlines=shuffle_streamlines)
-    elif hyperparams['model'] == 'gru_mixture':
-        from learn2track.batch_schedulers import TractographyBatchScheduler
-        return TractographyBatchScheduler(dataset,
-                                          batch_size=hyperparams['batch_size'],
-                                          noisy_streamlines_sigma=noisy_streamlines_sigma,
-                                          seed=hyperparams['seed'],
-                                          normalize_target=hyperparams['normalize'],
-                                          shuffle_streamlines=shuffle_streamlines)
+                                               noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
+                                               shuffle_streamlines=hyperparams['shuffle_streamlines'] if train_mode else None,
+                                               resample_streamlines=train_mode)
     else:
         raise ValueError("Unknown model!")

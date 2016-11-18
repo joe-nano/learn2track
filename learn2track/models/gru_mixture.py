@@ -50,7 +50,7 @@ class GRU_Mixture(GRU_Regression):
         hyperparameters['layer_regression_size'] = self.layer_regression_size
         return hyperparameters
 
-    def get_mixture_parameters(self, regression_output):
+    def _get_mixture_parameters(self, regression_output):
         batch_size = regression_output.shape[0]
         mixture_weights = T.nnet.softmax(regression_output[:, :self.n_gaussians])
         means = T.reshape(regression_output[:, self.n_gaussians:self.n_gaussians * 4], (batch_size, self.n_gaussians, 3))
@@ -77,7 +77,7 @@ class GRU_Mixture(GRU_Regression):
 
         return samples
 
-    def _get_max_probability_samples(self, mixture_weights, means, stds):
+    def _get_max_component_samples(self, mixture_weights, means, stds):
         batch_size = mixture_weights.shape[0]
         xs = T.arange(0, batch_size)
 
@@ -115,7 +115,7 @@ class GRU_Mixture(GRU_Regression):
 
             # regression_output.shape : (batch_size, target_size)
             regression_output = new_states[-1]
-            mixture_params = self.get_mixture_parameters(regression_output)
+            mixture_params = self._get_mixture_parameters(regression_output)
 
             srng = MRG_RandomStreams(1234)
             predictions = self._get_stochastic_samples(srng, *mixture_params)
@@ -128,7 +128,7 @@ class GRU_Mixture(GRU_Regression):
 
         return self._gen(x_t)
 
-    def make_sequence_generator(self, subject_id=0, use_max_probability=False):
+    def make_sequence_generator(self, subject_id=0, use_max_component=False):
         """ Makes functions that return the prediction for x_{t+1} for every
         sequence in the batch given x_{t} and the current state of the model h^{l}_{t}.
 
@@ -151,10 +151,10 @@ class GRU_Mixture(GRU_Regression):
 
         # regression_output.shape : (batch_size, target_size)
         regression_output = new_states[-1]
-        mixture_params = self.get_mixture_parameters(regression_output)
+        mixture_params = self._get_mixture_parameters(regression_output)
 
-        if use_max_probability:
-            predictions = self._get_max_probability_samples(*mixture_params)
+        if use_max_component:
+            predictions = self._get_max_component_samples(*mixture_params)
         else:
             srng = MRG_RandomStreams(1234)
             predictions = self._get_stochastic_samples(srng, *mixture_params)
@@ -237,13 +237,13 @@ class MultivariateGaussianMixtureNLL(Loss):
         log_prefix = T.log(mixture_weights) - np.float32((self.d / 2.) * np.log(2 * np.pi)) - T.log(std_x) - T.log(std_y) - T.log(std_z)
         square_mahalanobis_dist = -0.5 * (tg_x_c ** 2 + tg_y_c ** 2 + tg_z_c ** 2)
 
-        # nll_per_timestep.shape : (batch_size, seq_len)
-        self.nll_per_timestep = - logsumexp(log_prefix + square_mahalanobis_dist, axis=2)
+        # loss_per_timestep.shape : (batch_size, seq_len)
+        self.loss_per_time_step = - logsumexp(log_prefix + square_mahalanobis_dist, axis=2)
 
-        # nll_per_seq.shape : (batch_size,)
-        self.nll_per_seq = T.sum(self.nll_per_timestep * mask, axis=1) / T.sum(mask, axis=1)
+        # loss_per_seq.shape : (batch_size,)
+        self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1) / T.sum(mask, axis=1)
 
-        return self.nll_per_seq
+        return self.loss_per_seq
 
     def _get_mixture_parameters(self, regression_output):
         batch_size, seq_len = regression_output.shape[:2]
@@ -257,7 +257,7 @@ class MultivariateGaussianMixtureNLL(Loss):
         return mixture_weights, means, stds
 
 class MultivariateGaussianMixtureExpectedValueL2Distance(Loss):
-    """ Computes the L2 distance for the expected value of a multivariate gaussian mixture
+    """ Computes the L2 distance for the expected value samples of a multivariate gaussian mixture
     """
 
     def __init__(self, model, dataset):
@@ -280,14 +280,14 @@ class MultivariateGaussianMixtureExpectedValueL2Distance(Loss):
         # means.shape : (batch_size, seq_len, n_gaussians, 3)
 
         # expected_value.shape : (batch_size, seq_len, 3)
-        expected_value = T.sum(mixture_weights[:, :, :, None] * means, axis=2)
+        self.samples = T.sum(mixture_weights[:, :, :, None] * means, axis=2)
 
-        # L2_errors_per_time_step.shape = (batch_size, seq_len)
-        self.L2_errors_per_time_step = T.sqrt(T.sum(((expected_value - self.dataset.symb_targets)**2), axis=2))
-        # avg_L2_error_per_seq.shape = (batch_size,)
-        self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
+        # loss_per_time_step.shape = (batch_size, seq_len)
+        self.loss_per_time_step = T.sqrt(T.sum(((self.samples - self.dataset.symb_targets)**2), axis=2))
+        # loss_per_seq.shape = (batch_size,)
+        self.loss_per_seq = T.sum(self.loss_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
 
-        return self.avg_L2_error_per_seq
+        return self.loss_per_seq
 
     def _get_mixture_parameters(self, regression_output):
         batch_size, seq_len = regression_output.shape[:2]
@@ -300,8 +300,9 @@ class MultivariateGaussianMixtureExpectedValueL2Distance(Loss):
 
         return mixture_weights, means, stds
 
-class MultivariateGaussianMixtureMaxProbabilityL2Distance(Loss):
-    """ Computes the L2 distance for the max probability samples of a multivariate gaussian mixture
+
+class MultivariateGaussianMixtureMaxComponentL2Distance(Loss):
+    """ Computes the L2 distance for the max component samples of a multivariate gaussian mixture
     """
 
     def __init__(self, model, dataset):
@@ -318,10 +319,10 @@ class MultivariateGaussianMixtureMaxProbabilityL2Distance(Loss):
         # regression_outputs.shape = (batch_size, seq_length, regression_layer_size)
         regression_outputs = model_output
 
-        mixture_weights, means, stds = self._get_mixture_parameters(regression_outputs)
-
         # mixture_weights.shape : (batch_size, seq_len, n_gaussians)
         # means.shape : (batch_size, seq_len, n_gaussians, 3)
+        mixture_weights, means, stds = self._get_mixture_parameters(regression_outputs)
+
         batch_size = mixture_weights.shape[0]
         seq_len = mixture_weights.shape[1]
 
@@ -330,14 +331,14 @@ class MultivariateGaussianMixtureMaxProbabilityL2Distance(Loss):
         choices = T.argmax(mixture_weights, axis=2)
 
         # samples.shape : (batch_size, seq_len, 3)
-        samples = means[row_ids, column_ids, choices]
+        self.samples = means[row_ids, column_ids, choices]
 
-        # L2_errors_per_time_step.shape = (batch_size, seq_len)
-        self.L2_errors_per_time_step = T.sqrt(T.sum(((samples - self.dataset.symb_targets)**2), axis=2))
-        # avg_L2_error_per_seq.shape = (batch_size,)
-        self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
+        # loss_per_time_step.shape = (batch_size, seq_len)
+        self.loss_per_time_step = T.sqrt(T.sum(((self.samples - self.dataset.symb_targets)**2), axis=2))
+        # loss_per_seq.shape = (batch_size,)
+        self.loss_per_seq = T.sum(self.loss_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
 
-        return self.avg_L2_error_per_seq
+        return self.loss_per_seq
 
     def _get_mixture_parameters(self, regression_output):
         batch_size, seq_len = regression_output.shape[:2]

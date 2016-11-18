@@ -245,12 +245,9 @@ def main():
             tsne_view(trainset, trainset_volume_manager)
             sys.exit(0)
 
-        batch_scheduler = batch_scheduler_factory(hyperparams,
-                                                  dataset=trainset,
-                                                  noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'],
-                                                  shuffle_streamlines=hyperparams['shuffle_streamlines'])
-        print ("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
-        print (trainset_volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
+        batch_scheduler = batch_scheduler_factory(hyperparams, dataset=trainset, train_mode=True)
+        print("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
+        print(trainset_volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
 
     with Timer("Creating model"):
         model = model_factory(hyperparams,
@@ -308,8 +305,7 @@ def main():
         valid_loss = loss_factory(hyperparams, model, validset)
         valid_batch_scheduler = batch_scheduler_factory(hyperparams,
                                                         dataset=validset,
-                                                        noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'],
-                                                        shuffle_streamlines=hyperparams['shuffle_streamlines'])
+                                                        train_mode=False)
 
         valid_error = views.LossView(loss=valid_loss, batch_scheduler=valid_batch_scheduler)
         trainer.append_task(tasks.Print("Validset - Error        : {0:.2f} | {1:.2f}", valid_error.sum, valid_error.mean))

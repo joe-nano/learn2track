@@ -113,8 +113,9 @@ def extract_result_from_experiment(e):
     entry["Max Epoch"] = e.status.get("current_epoch", "")
 
     # Results
-    entry["Train EV L2 error"] = extract_L2_error(e.results, "trainset_expected_valueL2_error", "mean")
-    entry["Valid EV L2 error"] = extract_L2_error(e.results, "validset_expected_value_L2_error", "mean")
+    entry["Train EV L2 error"] = extract_L2_error(e.results, "trainset_EV_L2_error", "mean")
+    entry["Valid EV L2 error"] = extract_L2_error(e.results, "validset_EV_L2_error", "mean")
+    entry["Test EV L2 error"] = extract_L2_error(e.results, "testset_EV_L2_error", "mean")
 
     # Tractometer results
     entry["VC"] = str(e.tractometer_scores.get("VC", "0"))
@@ -162,8 +163,9 @@ def extract_result_from_experiment(e):
     entry['UF_right'] = str(streamlines_per_bundle.get("UF_right", "0"))
 
     # Other results
-    entry["Std. Train EV L2 error"] = extract_L2_error(e.results, "trainset_expected_value_L2_error", "stderror")
-    entry["Std. Valid EV L2 error"] = extract_L2_error(e.results, "validset_expected_value_L2_error", "stderror")
+    entry["Std. Train EV L2 error"] = extract_L2_error(e.results, "trainset_EV_L2_error", "stderror")
+    entry["Std. Valid EV L2 error"] = extract_L2_error(e.results, "validset_EV_L2_error", "stderror")
+    entry["Std. Test EV L2 error"] = extract_L2_error(e.results, "testset_EV_L2_error", "stderror")
     entry["Std. Overlap"] = str(np.std(list(map(float, overlap_per_bundle.values()))))
     entry["Std. Overreach"] = str(np.std(list(map(float, overreach_per_bundle.values()))))
 

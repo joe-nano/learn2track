@@ -210,9 +210,11 @@ class L2DistanceForSequences(Loss):
         if self.normalize_output:
             regression_outputs /= (T.sqrt(T.sum(regression_outputs**2, axis=2, keepdims=True) + self.eps))
 
-        # L2_errors_per_time_step.shape = (batch_size,)
-        self.L2_errors_per_time_step = T.sqrt(T.sum(((regression_outputs - self.dataset.symb_targets)**2), axis=2))
-        # avg_L2_error_per_seq.shape = (batch_size,)
-        self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
+        self.samples = regression_outputs
 
-        return self.avg_L2_error_per_seq
+        # loss_per_time_step.shape = (batch_size,)
+        self.loss_per_time_step = T.sqrt(T.sum(((self.samples - self.dataset.symb_targets)**2), axis=2))
+        # loss_per_seq.shape = (batch_size,)
+        self.loss_per_seq = T.sum(self.loss_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
+
+        return self.loss_per_seq

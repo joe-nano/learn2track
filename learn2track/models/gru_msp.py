@@ -132,7 +132,7 @@ class GRU_Multistep_Gaussian(GRU):
 
         return samples
 
-    def _get_max_probability_samples(self, distribution_parameters):
+    def _get_max_component_samples(self, distribution_parameters):
         return distribution_parameters[:, :3]
 
     def _predict_distribution_params(self, hidden_state):
@@ -235,7 +235,7 @@ class GRU_Multistep_Gaussian(GRU):
 
         return self._gen(x_t)
 
-    def make_sequence_generator(self, subject_id=0, use_max_probability=False):
+    def make_sequence_generator(self, subject_id=0, use_max_component=False):
         """ Makes functions that return the prediction for x_{t+1} for every
         sequence in the batch given x_{t} and the current state of the model h^{l}_{t}.
 
@@ -261,12 +261,12 @@ class GRU_Multistep_Gaussian(GRU):
         new_states_h = new_states[:len(self.hidden_sizes)]
 
         # model_output.shape : (batch_size, K=1, target_size)
-        model_output = new_states_h[-1]
+        model_output = new_states[-1]
 
         distribution_params = model_output[:, 0, :]
 
-        if use_max_probability:
-            predictions = self._get_max_probability_samples(distribution_params)
+        if use_max_component:
+            predictions = self._get_max_component_samples(distribution_params)
         else:
             # Sample value from distribution
             srng = MRG_RandomStreams(seed=1234)
@@ -380,20 +380,23 @@ class MultistepMultivariateGaussianNLL(Loss):
         #   => (x - \mu)^T \Sigma^-1 (x - \mu) = \sum_n ((x_n - \mu_n) / \sigma_n)^2
         m_log_likelihoods = -np.float32((self.target_dims/2.) * np.log(2 * np.pi)) + T.sum(-T.log(sigma) - 0.5 * T.sqr((targets - mu) / sigma), axis=4)
 
-        # k_nlls_per_timestep.shape : (batch_size, seq_len, K)
-        self.k_nlls_per_timestep = T.log(self.m) - logsumexp(m_log_likelihoods, axis=3, keepdims=False)
+        # k_losses_per_timestep.shape : (batch_size, seq_len, K)
+        self.k_losses_per_timestep = T.log(self.m) - logsumexp(m_log_likelihoods, axis=3, keepdims=False)
+
+        # loss_per_timestep.shape : (batch_size, seq_len)
+        self.loss_per_time_step = T.mean(self.k_losses_per_timestep, axis=2)
 
         # Average over sequence steps.
         # k_nlls_per_seq.shape :(batch_size, K)
         if mask is not None:
-            self.k_nlls_per_seq = T.sum(self.k_nlls_per_timestep * mask[:, :, None], axis=1) / T.sum(mask, axis=1, keepdims=True)
+            self.k_losses_per_seq = T.sum(self.k_losses_per_timestep * mask[:, :, None], axis=1) / T.sum(mask, axis=1, keepdims=True)
         else:
-            self.k_nlls_per_seq = T.mean(self.k_nlls_per_timestep, axis=1)
+            self.k_losses_per_seq = T.mean(self.k_losses_per_timestep, axis=1)
 
         # Average over K
-        # nlls.shape :(batch_size,)
-        self.nlls = T.mean(self.k_nlls_per_seq, axis=1)
-        return self.nlls
+        # loss_per_seq.shape :(batch_size,)
+        self.loss_per_seq = T.mean(self.k_losses_per_seq, axis=1)
+        return self.loss_per_seq
 
 
 class MultistepMultivariateGaussianExpectedValueL2Distance(Loss):
@@ -413,21 +416,21 @@ class MultistepMultivariateGaussianExpectedValueL2Distance(Loss):
         # model_output.shape : shape : (batch_size, seq_len, K, M, target_size)
         # self.dataset.symb_targets.shape = (batch_size, seq_len, K, target_dims)
 
-        # mask.shape : (batch_size, seq_len) or None
+        # targets.shape = (batch_size, seq_len, 3)
+        targets = self.dataset.symb_targets[:, :, 0, :]
+
+        # mask.shape : (batch_size, seq_len)
         mask = self.dataset.symb_mask
 
         # mu.shape = (batch_size, seq_len, K, M, target_dims)
         mu = model_output[:, :, :, :, 0:3]
 
-        # expected_value.shape : (batch_size, seq_len, 3)
-        expected_value = mu[:, :, 0, 0, :]
+        # samples.shape : (batch_size, seq_len, 3)
+        self.samples = mu[:, :, 0, 0, :]
 
-        # targets.shape = (batch_size, seq_len, 3)
-        targets = self.dataset.symb_targets[:, :, 0, :]
+        # loss_per_time_step.shape = (batch_size, seq_len)
+        self.loss_per_time_step = T.sqrt(T.sum(((self.samples - targets) ** 2), axis=2))
+        # loss_per_seq.shape = (batch_size,)
+        self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1) / T.sum(mask, axis=1)
 
-        # L2_errors_per_time_step.shape = (batch_size, seq_len)
-        self.L2_errors_per_time_step = T.sqrt(T.sum(((expected_value - targets) ** 2), axis=2))
-        # avg_L2_error_per_seq.shape = (batch_size,)
-        self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step * mask, axis=1) / T.sum(mask, axis=1)
-
-        return self.avg_L2_error_per_seq
+        return self.loss_per_seq

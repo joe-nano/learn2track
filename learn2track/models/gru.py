@@ -152,10 +152,19 @@ class GRU(Model):
 
     @classmethod
     def create(cls, path, **kwargs):
-        loaddir = pjoin(path, cls.__name__)
-        hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
-        hyperparams.update(kwargs)
+        try:
+            loaddir = pjoin(path, cls.__name__)
+            hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
+            hyperparams.update(kwargs)
 
-        model = cls(**hyperparams)
-        model.load(path)
+            model = cls(**hyperparams)
+            model.load(path)
+        except FileNotFoundError:
+            # Model has not finished training, load unfinished model
+            loaddir = pjoin(path, "training", cls.__name__)
+            hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
+            hyperparams.update(kwargs)
+
+            model = cls(**hyperparams)
+            model.load(pjoin(path, "training"))
         return model
