@@ -613,3 +613,203 @@ class MultistepSequenceBatchSchedulerWithoutMask(BatchScheduler):
         self.use_augment_by_flipping = state["use_augment_by_flipping"]
         self.rng = pickle.loads(state["rng"])
         self.rng_noise = pickle.loads(state["rng_noise"])
+
+
+class SingleInputTractographyBatchScheduler(BatchScheduler):
+    """
+    Batch scheduler for streamlines coming from multiple subjects, where each data point must be fed as a single input to the model
+    (not as sequences). Each batch will still select a number of streamlines, but will then split them as single coordinates to be given
+    to the model.
+    """
+
+    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False, shuffle_streamlines=True,
+                 resample_streamlines=True):
+        """
+        Parameters
+        ----------
+        dataset : :class:`TractographyDataset`
+            Dataset from which to get the examples.
+        batch_size : int
+            Nb. of examples per batch.
+        seed : int, optional
+            Seed for the random generator when shuffling streamlines or adding noise to the streamlines.
+        use_data_augment : bool
+            If true, perform data augmentation by flipping streamlines.
+        normalize_target : bool
+            If true, targets will have a norm of one (usually used by the GruRegression model).
+        shuffle_streamlines : bool
+            Shuffle streamlines in the dataset between each epoch.
+        resample_streamlines : bool
+            Streamlines in a same batch will all have the same number of points.
+            Should be always set to True for now (until the method _process_batch supports it).
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.use_augment_by_flipping = use_data_augment
+        self.normalize_target = normalize_target
+
+        self.noisy_streamlines_sigma = noisy_streamlines_sigma
+        self.use_noisy_streamlines = self.noisy_streamlines_sigma is not None
+
+        self.seed = seed
+        self.rng = np.random.RandomState(self.seed)
+        self.rng_noise = np.random.RandomState(self.seed + 1)
+        self.shuffle_streamlines = shuffle_streamlines
+        self.resample_streamlines = resample_streamlines
+        self.indices = np.arange(len(self.dataset))
+
+        # Shared variables
+        self._shared_batch_inputs = sharedX(np.ndarray((0, 0)))
+        self._shared_batch_targets = sharedX(np.ndarray((0, 0)))
+
+        # Test value
+        batch_inputs, batch_targets = self._next_batch(0)
+
+        # Redefine symbolic variables for single input model
+        self.dataset.symb_inputs = T.TensorVariable(type=T.TensorType("floatX", [False] * batch_inputs.ndim),
+                                                    name=self.dataset.name + '_symb_inputs')
+        self.dataset.symb_inputs.tag.test_value = batch_inputs
+
+        # Since this batch scheduler creates its own targets.
+        if self.dataset.symb_targets is None:
+            self.dataset.symb_targets = T.TensorVariable(type=T.TensorType("floatX", [False] * batch_targets.ndim),
+                                                         name=self.dataset.name + '_symb_targets')
+
+        self.dataset.symb_targets.tag.test_value = batch_targets
+
+    @property
+    def input_size(self):
+        # Number of diffusion directions or Spherical Harmonics (SH) coefficients
+        return self.dataset.volumes[0].shape[-1]
+
+    @property
+    def target_size(self):
+        return 3  # Direction to follow.
+
+    @property
+    def nb_updates_per_epoch(self):
+        return int(np.ceil(len(self.dataset) / self.batch_size))
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value):
+        self._batch_size = value
+
+    def _augment_data(self, inputs):
+        pass
+
+    def _add_noise_to_streamlines(self, streamlines):
+        if not self.use_noisy_streamlines:
+            return streamlines
+
+        # Add gaussian noise, N(0, self.sigma).
+        noisy_streamlines = streamlines.copy()
+        shape = noisy_streamlines._data.shape
+        noisy_streamlines._data += self.noisy_streamlines_sigma * self.rng_noise.randn(*shape)
+        return noisy_streamlines
+
+    def _prepare_batch(self, indices):
+        orig_streamlines, volume_ids = self.dataset[indices]
+        streamlines = self._add_noise_to_streamlines(orig_streamlines.copy())
+
+        streamlines._lengths = streamlines._lengths.astype("int64")
+        if self.resample_streamlines:
+            # streamline_length = np.max(streamlines._lengths)  # Sequences are resampled so that they have the same length.
+            streamline_length = np.min(streamlines._lengths)  # Sequences are resampled so that they have the same length.
+            streamlines = set_number_of_points(streamlines, nb_points=streamline_length)
+
+        inputs = streamlines._data  # Streamlines coordinates
+        targets = streamlines._data[1:] - streamlines._data[:-1]  # Unnormalized directions
+        if self.normalize_target:
+            targets = targets / np.sqrt(np.sum(targets ** 2, axis=1, keepdims=True))  # Normalized directions
+
+        actual_batch_size = sum(map(lambda x: len(x)-1, streamlines))
+        if self.use_augment_by_flipping:
+            half_batch_size = actual_batch_size
+            actual_batch_size *= 2
+
+        batch_inputs = np.zeros((actual_batch_size, inputs.shape[1]), dtype=floatX)
+        batch_targets = np.zeros((actual_batch_size, 3), dtype=floatX)
+        batch_array_index = 0
+
+        for i, (offset, length, volume_id) in enumerate(zip(streamlines._offsets, streamlines._lengths, volume_ids)):
+
+            start = batch_array_index
+            end = batch_array_index + (length - 1)
+            batch_array_index += length - 1
+
+            batch_inputs[start:end] = inputs[offset:offset + length - 1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
+            batch_targets[start:end] = targets[offset:offset + length - 1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
+
+            if self.use_augment_by_flipping:
+                batch_inputs[start + half_batch_size:end + half_batch_size] = inputs[offset + 1:offset + length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
+                batch_targets[start + half_batch_size:end + half_batch_size] = -targets[offset:offset + length - 1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
+
+        batch_volume_ids = np.repeat(volume_ids, list(map(lambda x: len(x)-1, streamlines)))
+        if self.use_augment_by_flipping:
+            batch_volume_ids = np.tile(batch_volume_ids, [2])
+        batch_inputs = np.concatenate([batch_inputs, batch_volume_ids[:, None]], axis=1)  # Streamlines coords + dwi ID
+        return batch_inputs, batch_targets
+
+    def _next_batch(self, batch_count):
+        # Simply take the next slice.
+        start = batch_count * self.batch_size
+        end = (batch_count + 1) * self.batch_size
+        return self._prepare_batch(self.indices[slice(start, end)])
+
+    @property
+    def givens(self):
+        return {self.dataset.symb_inputs: self._shared_batch_inputs,
+                self.dataset.symb_targets: self._shared_batch_targets}
+
+    def __iter__(self):
+        if self.shuffle_streamlines:
+            self.rng.shuffle(self.indices)
+
+        for batch_count in range(self.nb_updates_per_epoch):
+            batch_inputs, batch_targets = self._next_batch(batch_count)
+            self._shared_batch_inputs.set_value(batch_inputs)
+            self._shared_batch_targets.set_value(batch_targets)
+
+            yield batch_count + 1
+
+    @property
+    def updates(self):
+        return {}  # No updates
+
+    def get_state(self):
+        state = {"version": 1,
+                 "batch_size": self.batch_size,
+                 "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
+                 "use_augment_by_flipping": self.use_augment_by_flipping,
+                 "normalize_target": self.normalize_target,
+                 "shuffle_streamlines": self.shuffle_streamlines,
+                 "resample_streamlines": self.resample_streamlines,
+                 "seed": self.seed,
+                 "rng": pickle.dumps(self.rng),
+                 "rng_noise": pickle.dumps(self.rng_noise),
+                 "indices": self.indices,
+                 }
+        return state
+
+    def set_state(self, state):
+        self.batch_size = state["batch_size"]
+        self.noisy_streamlines_sigma = state["noisy_streamlines_sigma"]
+        self.use_augment_by_flipping = state["use_augment_by_flipping"]
+        self.rng = pickle.loads(state["rng"])
+        self.rng_noise = pickle.loads(state["rng_noise"])
+        self.indices = state["indices"]
+        self.normalize_target = state["normalize_target"]
+        self.shuffle_streamlines = state["shuffle_streamlines"]
+        self.resample_streamlines = state["resample_streamlines"]
+
+    def save(self, savedir):
+        state = self.get_state()
+        np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)
+
+    def load(self, loaddir):
+        state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
+        self.set_state(state)
