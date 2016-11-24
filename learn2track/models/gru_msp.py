@@ -363,7 +363,7 @@ class MultistepMultivariateGaussianNLL(Loss):
         mu = model_output[:, :, :, :, 0:3]
 
         # sigma.shape = (batch_size, seq_len, K, M, target_dims)
-        sigma = T.exp(model_output[:, :, :, :, 3:6])
+        sigma = model_output[:, :, :, :, 3:6]
 
         # targets.shape = (batch_size, seq_len, K, 1, target_dims)
         targets = self.dataset.symb_targets[:, :, :, None, :]
