@@ -96,21 +96,41 @@ def evaluation_tractogram(hyperparams, model, dataset, batch_size_override, metr
     loss = loss_factory(hyperparams, model, dataset, loss_type=None)
     batch_scheduler = batch_scheduler_factory(hyperparams, dataset, train_mode=False, batch_size_override=batch_size_override, use_data_augment=False)
 
-    loss.losses  # Hack to generate update dict in loss :(
+    _ = loss.losses  # Hack to generate update dict in loss :(
 
-    timestep_losses, seq_losses, inputs, targets, masks = log_variables(batch_scheduler,
-                                                                        model,
-                                                                        loss.loss_per_time_step,
-                                                                        loss.loss_per_seq,
-                                                                        dataset.symb_inputs * 1,
-                                                                        dataset.symb_targets * 1,
-                                                                        dataset.symb_mask * 1)
+    if hyperparams['model'] == 'ffnn_regression':
+        timestep_losses, inputs, targets = log_variables(batch_scheduler,
+                                                         model,
+                                                         loss.loss_per_time_step,
+                                                         dataset.symb_inputs * 1,
+                                                         dataset.symb_targets * 1)
+        # Regrouping data into streamlines will only work if the original streamlines were NOT shuffled, resampled or augmented
+        timesteps_loss = ArraySequence()
+        seq_loss = []
+        timesteps_inputs = ArraySequence()
+        timesteps_targets = ArraySequence()
+        idx = 0
+        for length in dataset.streamlines._lengths:
+            start = idx
+            idx = end = idx+length
+            timesteps_loss.extend(timestep_losses[start:end])
+            seq_loss.extend(np.mean(timestep_losses[start:end]))
+            timesteps_inputs.extend(inputs[start:end])
+            timesteps_targets.extend(targets[start:end])
+    else:
 
-    timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(chain(*timestep_losses), chain(*masks))])
-    seq_loss = np.array(list(chain(*seq_losses)))
-    timesteps_inputs = ArraySequence([i[:int(m.sum())] for i, m in zip(chain(*inputs), chain(*masks))])
-    # Use np.squeeze in case gru_multistep is used to remove the empty k=1 dimension
-    timesteps_targets = ArraySequence([np.squeeze(t[:int(m.sum())]) for t, m in zip(chain(*targets), chain(*masks))])
+        timestep_losses, seq_losses, inputs, targets, masks = log_variables(batch_scheduler,
+                                                                            model,
+                                                                            loss.loss_per_time_step,
+                                                                            loss.loss_per_seq,
+                                                                            dataset.symb_inputs * 1,
+                                                                            dataset.symb_targets * 1,
+                                                                            dataset.symb_mask * 1)
+        timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(chain(*timestep_losses), chain(*masks))])
+        seq_loss = np.array(list(chain(*seq_losses)))
+        timesteps_inputs = ArraySequence([i[:int(m.sum())] for i, m in zip(chain(*inputs), chain(*masks))])
+        # Use np.squeeze in case gru_multistep is used to remove the empty k=1 dimension
+        timesteps_targets = ArraySequence([np.squeeze(t[:int(m.sum())]) for t, m in zip(chain(*targets), chain(*masks))])
 
     if metric == 'sequence':
         # Color is based on sequence loss
@@ -164,8 +184,7 @@ def prediction_tractogram(hyperparams, model, dataset, batch_size_override, pred
     loss = loss_factory(hyperparams, model, dataset, loss_type=prediction_method)
     batch_scheduler = batch_scheduler_factory(hyperparams, dataset, train_mode=False, batch_size_override=batch_size_override, use_data_augment=False)
 
-    loss.losses  # Hack to generate update dict in loss :(
-
+    _ = loss.losses  # Hack to generate update dict in loss :(
     predictions = loss.samples
 
     predict, timestep_losses, inputs, targets, masks = log_variables(batch_scheduler,
@@ -175,21 +194,35 @@ def prediction_tractogram(hyperparams, model, dataset, batch_size_override, pred
                                                                      dataset.symb_inputs * 1,
                                                                      dataset.symb_targets * 1,
                                                                      dataset.symb_mask * 1)
+    if hyperparams['model'] == 'ffnn_regression':
+        # Regrouping data into streamlines will only work if the original streamlines were NOT shuffled, resampled or augmented
+        timesteps_prediction = ArraySequence()
+        timesteps_loss = ArraySequence()
+        timesteps_inputs = ArraySequence()
+        timesteps_targets = ArraySequence()
+        idx = 0
+        for length in dataset.streamlines._lengths:
+            start = idx
+            idx = end = idx+length
+            timesteps_prediction.extend(predict[start:end])
+            timesteps_loss.extend(timestep_losses[start:end])
+            timesteps_inputs.extend(inputs[start:end])
+            timesteps_targets.extend(targets[start:end])
+    else:
+        timesteps_prediction = ArraySequence([p[:int(m.sum())] for p, m in zip(chain(*predict), chain(*masks))])
+        timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(chain(*timestep_losses), chain(*masks))])
+        timesteps_inputs = ArraySequence([i[:int(m.sum())] for i, m in zip(chain(*inputs), chain(*masks))])
+        # Use np.squeeze in case gru_multistep is used to remove the empty k=1 dimension
+        timesteps_targets = ArraySequence([np.squeeze(t[:int(m.sum())]) for t, m in zip(chain(*targets), chain(*masks))])
 
     # Debug : Print norm stats
     # print("Dataset: {}; # of streamlines: {}".format(dataset.name, len(dataset)))
-    # all_predictions = list(chain(*predict))
-    # prediction_norms = [(lambda x: np.mean(np.linalg.norm(x, axis=1)))(x) for x in all_predictions]
+    # all_predictions = np.array(list(chain(*timesteps_prediction)))
+    # prediction_norms = np.linalg.norm(all_predictions, axis=1)
     # print("Prediction norm --- Mean:{}; Max:{}; Min:{}".format(np.mean(prediction_norms), np.max(prediction_norms), np.min(prediction_norms)))
-    # all_targets = list(chain(*targets))
-    # target_norms = [(lambda x: np.mean(np.linalg.norm(x, axis=1)))(x) for x in all_targets]
+    # all_targets = np.array(list(chain(*timesteps_targets)))
+    # target_norms = np.linalg.norm(all_targets, axis=1)
     # print("Target norm --- Mean:{}; Max:{}; Min:{}".format(np.mean(target_norms), np.max(target_norms), np.min(target_norms)))
-
-    timesteps_prediction = ArraySequence([p[:int(m.sum())] for p, m in zip(chain(*predict), chain(*masks))])
-    timesteps_loss = ArraySequence([l[:int(m.sum())] for l, m in zip(chain(*timestep_losses), chain(*masks))])
-    timesteps_inputs = ArraySequence([i[:int(m.sum())] for i, m in zip(chain(*inputs), chain(*masks))])
-    # Use np.squeeze in case gru_multistep is used to remove the empty k=1 dimension
-    timesteps_targets = ArraySequence([np.squeeze(t[:int(m.sum())]) for t, m in zip(chain(*targets), chain(*masks))])
 
     # Color is based on timestep loss
     cmap = cm.get_cmap('bwr')
@@ -260,6 +293,9 @@ def main():
             model = GRU_Multistep_Gaussian.create(experiment_path, volume_manager=volume_manager)
             model.k = 1
             model.m = 1
+        elif hyperparams['model'] == 'ffnn_regression':
+            from learn2track.models import FFNN_Regression
+            model = FFNN_Regression.create(experiment_path, volume_manager=volume_manager)
         else:
             raise NameError("Unknown model: {}".format(hyperparams['model']))
         print(str(model))
