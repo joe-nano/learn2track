@@ -9,9 +9,9 @@ import smartlearner.initializers as initer
 
 from learn2track.models.layers import LayerRegression
 from learn2track.models import GRU
+from learn2track.utils import l2distance
 
 floatX = theano.config.floatX
-
 
 class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
@@ -130,15 +130,7 @@ class GRU_Regression(GRU):
         directions = self.get_output(X)
         return directions
 
-    def get_init_states(self, batch_size):
-        states_h = []
-        for i, hidden_size in enumerate(self.hidden_sizes):
-            state_h = np.zeros((batch_size, hidden_size), dtype=floatX)
-            states_h.append(state_h)
-
-        return states_h
-
-    def make_sequence_generator(self, subject_id=0):
+    def make_sequence_generator(self, subject_id=0, **_):
         """ Makes functions that return the prediction for x_{t+1} for every
         sequence in the batch given x_{t} and the current state of the model h^{l}_{t}.
 
@@ -217,11 +209,13 @@ class L2DistanceForSequences(Loss):
         # regression_outputs.shape = (batch_size, seq_length, out_dim)
         regression_outputs = model_output
         if self.normalize_output:
-            regression_outputs /= (T.sqrt(T.sum(regression_outputs**2, axis=2, keepdims=True) + self.eps))
+            regression_outputs /= l2distance(regression_outputs, keepdims=True, eps=self.eps)
 
-        # L2_errors_per_time_step.shape = (batch_size,)
-        self.L2_errors_per_time_step = T.sqrt(T.sum(((regression_outputs - self.dataset.symb_targets)**2), axis=2))
-        # avg_L2_error_per_seq.shape = (batch_size,)
-        self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
+        self.samples = regression_outputs
 
-        return self.avg_L2_error_per_seq
+        # loss_per_time_step.shape = (batch_size, seq_len)
+        self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets)
+        # loss_per_seq.shape = (batch_size,)
+        self.loss_per_seq = T.sum(self.loss_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
+
+        return self.loss_per_seq

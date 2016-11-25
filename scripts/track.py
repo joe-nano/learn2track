@@ -23,8 +23,8 @@ from dipy.tracking.streamline import compress_streamlines
 from smartlearner import views
 from smartlearner import utils as smartutils
 
-from learn2track import datasets, batch_schedulers
-from learn2track.factories import loss_factory
+from learn2track import datasets
+from learn2track.factories import loss_factory, batch_scheduler_factory
 from learn2track.utils import Timer
 
 from learn2track import neurotools
@@ -92,6 +92,10 @@ def build_argparser():
     pft.add_argument('--pft-nb-backtrack-steps', type=int, default=1,
                      help="If --pft-nb-retry > 0, how many steps will be backtracked before attempting the 'rescue'. Default: 1.")
 
+    # Deterministic sampling
+    p.add_argument('--use-max-component', action="store_true",
+                   help="if specified, generate streamlines by using maximum probability instead of sampling")
+
     # Optional parameters
     p.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
     p.add_argument('-f', '--force', action='store_true', help='overwrite existing tractogram')
@@ -116,25 +120,11 @@ def compute_loss_errors(streamlines, model, hyperparams):
     tracto_data.subject_id = 0
     dataset = datasets.TractographyDataset([tracto_data], "Generated", keep_on_cpu=True)
 
+    # Override K for gru_multistep
+    if 'k' in hyperparams:
+        hyperparams['k'] = 1
+    batch_scheduler = batch_scheduler_factory(hyperparams, dataset, train_mode=False, batch_size_override=1000, use_data_augment=False)
     loss = loss_factory(hyperparams, model, dataset)
-    if hyperparams['model'] == 'gru_multistep':
-        batch_scheduler = batch_schedulers.MultistepSequenceBatchScheduler(dataset,
-                                                                           batch_size=1000,
-                                                                           k=1,
-                                                                           noisy_streamlines_sigma=None,
-                                                                           use_data_augment=False,  # Otherwise it doubles the number of losses :-/
-                                                                           seed=1234,
-                                                                           shuffle_streamlines=False,
-                                                                           normalize_target=False)
-    else:
-        batch_scheduler = batch_schedulers.TractographyBatchScheduler(dataset,
-                                                                      batch_size=1000,
-                                                                      noisy_streamlines_sigma=None,
-                                                                      use_data_augment=False,  # Otherwise it doubles the number of losses :-/
-                                                                      seed=1234,
-                                                                      shuffle_streamlines=False,
-                                                                      normalize_target=hyperparams['normalize'])
-
     loss_view = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
     return loss_view.losses.view()
 
@@ -313,10 +303,10 @@ def make_is_stopping(stopping_criteria):
 
 
 class Tracking(object):
-    def __init__(self, model, is_stopping, keep_last_n_states=1):
+    def __init__(self, model, is_stopping, keep_last_n_states=1, use_max_component=False):
         self.model = model
         self.is_stopping = is_stopping
-        self.grower = model.make_sequence_generator()
+        self.grower = model.make_sequence_generator(use_max_component)
         self.keep_last_n_states = max(keep_last_n_states, 1)
         self._history = []
 
@@ -421,7 +411,7 @@ class Tracking(object):
         return len(idx_to_keep)  # Number of successful regrowths.
 
 
-def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False):
+def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False, use_max_component=False):
     """ Generates streamlines using the Particle Filtering Tractography algorithm.
 
     This algorithm is inspired from Girard etal. (2014) Neuroimage.
@@ -435,7 +425,7 @@ def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_st
           the indices of the streamlines that are done,
           the reasons why the streamlines should be stopped.
     """
-    tracking = Tracking(model, is_stopping, nb_backtrack_steps)
+    tracking = Tracking(model, is_stopping, nb_backtrack_steps, use_max_component)
     tracking.plant(seeds)
 
     tractogram = None
@@ -498,7 +488,8 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
                 print("{:,} / {:,}".format(start, len(seeds)))
                 end = start + batch_size
                 batch_tractogram = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
-                                         nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
+                                         nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose,
+                                         use_max_component=args.use_max_component)
 
                 if tractogram is None:
                     tractogram = batch_tractogram

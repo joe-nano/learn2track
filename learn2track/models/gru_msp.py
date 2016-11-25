@@ -10,7 +10,7 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 from learn2track.models import GRU
 from learn2track.models.layers import LayerRegression
-from learn2track.utils import logsumexp
+from learn2track.utils import logsumexp, l2distance
 
 floatX = theano.config.floatX
 
@@ -103,7 +103,7 @@ class GRU_Multistep_Gaussian(GRU):
         for k in range(1, self.k):
             # Sample an input for the next step
             # sample_directions.shape : (batch_size, target_dimensions)
-            sample_directions = self._get_sample(distribution_params, epsilon[k - 1])
+            sample_directions = self.get_stochastic_samples(distribution_params, epsilon[k - 1])
 
             # Follow *unnormalized* direction and get diffusion data at the new location.
             coords = T.concatenate([coords[:, :3] + sample_directions, coords[:, 3:]], axis=1)
@@ -119,18 +119,25 @@ class GRU_Multistep_Gaussian(GRU):
         return next_hidden_state + (k_distribution_params,)
 
     @staticmethod
-    def _get_sample(distribution_parameters, noise):
+    def get_stochastic_samples(distribution_parameters, noise):
         # distribution_parameters.shape : (batch_size, target_size)
         # distribution_params[0] = [mu_x, mu_y, mu_z, std_x, std_y, std_z]
 
         # noise.shape : (batch_size, target_dims)
 
-        mu = distribution_parameters[:, :3]
-        sigma = distribution_parameters[:, 3:6]
+        mu = distribution_parameters[..., :3]
+        sigma = distribution_parameters[..., 3:6]
 
-        sample = mu + noise * sigma
+        samples = mu + noise * sigma
 
-        return sample
+        return samples
+
+    @staticmethod
+    def get_max_component_samples(distribution_parameters):
+        # distribution_parameters.shape : (batch_size, target_size)
+        # distribution_params[0] = [mu_x, mu_y, mu_z, std_x, std_y, std_z]
+        mean = distribution_parameters[..., :3]
+        return mean
 
     def _predict_distribution_params(self, hidden_state):
         # regression layer outputs an array [mean_x, mean_y, mean_z, log(std_x), log(std_y), log(std_z)]
@@ -138,7 +145,7 @@ class GRU_Multistep_Gaussian(GRU):
         regression_output = self.layer_regression.fprop(hidden_state)
 
         # Use T.exp to retrieve a positive sigma
-        distribution_params = T.set_subtensor(regression_output[:, 3:6], T.exp(regression_output[:, 3:6]))
+        distribution_params = T.set_subtensor(regression_output[..., 3:6], T.exp(regression_output[..., 3:6]))
 
         # distribution_params.shape : (batch_size, target_size)
         return distribution_params
@@ -221,7 +228,7 @@ class GRU_Multistep_Gaussian(GRU):
             noise = srng.normal((batch_size, self.target_dims))
 
             # next_step_predictions.shape : (batch_size, target_dims)
-            next_step_predictions = self._get_sample(distribution_params, noise)
+            next_step_predictions = self.get_stochastic_samples(distribution_params, noise)
 
             updates = OrderedDict()
             for i in range(len(self.hidden_sizes)):
@@ -231,6 +238,83 @@ class GRU_Multistep_Gaussian(GRU):
             self.k = k_bak  # Restore original $k$.
 
         return self._gen(x_t)
+
+    def make_sequence_generator(self, subject_id=0, use_max_component=False):
+        """ Makes functions that return the prediction for x_{t+1} for every
+        sequence in the batch given x_{t} and the current state of the model h^{l}_{t}.
+
+        Parameters
+        ----------
+        subject_id : int, optional
+            ID of the subject from which its diffusion data will be used. Default: 0.
+        """
+
+        # Build the sequence generator as a theano function.
+        states_h = []
+        for i in range(len(self.hidden_sizes)):
+            state_h = T.matrix(name="layer{}_state_h".format(i))
+            states_h.append(state_h)
+
+        symb_x_t = T.matrix(name="x_t")
+
+        # Temporarily set $k$ to one.
+        k_bak = self.k
+        self.k = 1
+
+        new_states = self._fprop_step(symb_x_t, *states_h)
+        new_states_h = new_states[:len(self.hidden_sizes)]
+
+        # model_output.shape : (batch_size, K=1, target_size)
+        model_output = new_states[-1]
+
+        distribution_params = model_output[:, 0, :]
+
+        if use_max_component:
+            predictions = self.get_max_component_samples(distribution_params)
+        else:
+            # Sample value from distribution
+            srng = MRG_RandomStreams(seed=1234)
+
+            batch_size = symb_x_t.shape[0]
+            noise = srng.normal((batch_size, self.target_dims))
+
+            # predictions.shape : (batch_size, target_dims)
+            predictions = self.get_stochastic_samples(distribution_params, noise)
+
+        f = theano.function(inputs=[symb_x_t] + states_h,
+                            outputs=[predictions] + list(new_states_h))
+
+        self.k = k_bak  # Restore original $k$.
+
+        def _gen(x_t, states):
+            """ Returns the prediction for x_{t+1} for every
+                sequence in the batch given x_{t} and the current states
+                of the model h^{l}_{t}.
+
+            Parameters
+            ----------
+            x_t : ndarray with shape (batch_size, 3)
+                Streamline coordinate (x, y, z).
+            states : list of 2D array of shape (batch_size, hidden_size)
+                Currrent states of the network.
+
+            Returns
+            -------
+            next_x_t : ndarray with shape (batch_size, 3)
+                Directions to follow.
+            new_states : list of 2D array of shape (batch_size, hidden_size)
+                Updated states of the network after seeing x_t.
+            """
+            # Append the DWI ID of each sequence after the 3D coordinates.
+            subject_ids = np.array([subject_id] * len(x_t), dtype=floatX)[:, None]
+            x_t = np.c_[x_t, subject_ids]
+
+            results = f(x_t, *states)
+            next_x_t = results[0]
+            new_states = results[1:]
+            return next_x_t, new_states
+
+        return _gen
 
     def save(self, path):
         super().save(path)
@@ -279,14 +363,14 @@ class MultistepMultivariateGaussianNLL(Loss):
         mu = model_output[:, :, :, :, 0:3]
 
         # sigma.shape = (batch_size, seq_len, K, M, target_dims)
-        sigma = T.exp(model_output[:, :, :, :, 3:6])
+        sigma = model_output[:, :, :, :, 3:6]
 
         # targets.shape = (batch_size, seq_len, K, 1, target_dims)
         targets = self.dataset.symb_targets[:, :, :, None, :]
 
         # For monitoring the L2 error of using $mu$ as the predicted direction (should be comparable to MICCAI's work).
-        normalized_mu = mu[:, :, 0, 0] / T.sqrt(T.sum(mu[:, :, 0, 0] ** 2, axis=2, keepdims=True) + 1e-8)
-        normalized_targets = targets[:, :, 0, 0] / T.sqrt(T.sum(targets[:, :, 0, 0] ** 2, axis=2, keepdims=True) + 1e-8)
+        normalized_mu = mu[:, :, 0, 0] / l2distance(mu[:, :, 0, 0], keepdims=True, eps=1e-8)
+        normalized_targets = targets[:, :, 0, 0] / l2distance(targets[:, :, 0, 0], keepdims=True, eps=1e-8)
         self.L2_error_per_item = T.sqrt(T.sum(((normalized_mu - normalized_targets) ** 2), axis=2))
         if mask is not None:
             self.mean_sqr_error = T.sum(self.L2_error_per_item * mask, axis=1) / T.sum(mask, axis=1)
@@ -300,20 +384,23 @@ class MultistepMultivariateGaussianNLL(Loss):
         #   => (x - \mu)^T \Sigma^-1 (x - \mu) = \sum_n ((x_n - \mu_n) / \sigma_n)^2
         m_log_likelihoods = -np.float32((self.target_dims/2.) * np.log(2 * np.pi)) + T.sum(-T.log(sigma) - 0.5 * T.sqr((targets - mu) / sigma), axis=4)
 
-        # k_nlls_per_timestep.shape : (batch_size, seq_len, K)
-        self.k_nlls_per_timestep = T.log(self.m) - logsumexp(m_log_likelihoods, axis=3, keepdims=False)
+        # k_losses_per_timestep.shape : (batch_size, seq_len, K)
+        self.k_losses_per_timestep = T.log(self.m) - logsumexp(m_log_likelihoods, axis=3, keepdims=False)
+
+        # loss_per_timestep.shape : (batch_size, seq_len)
+        self.loss_per_time_step = T.mean(self.k_losses_per_timestep, axis=2)
 
         # Average over sequence steps.
         # k_nlls_per_seq.shape :(batch_size, K)
         if mask is not None:
-            self.k_nlls_per_seq = T.sum(self.k_nlls_per_timestep * mask[:, :, None], axis=1) / T.sum(mask, axis=1, keepdims=True)
+            self.k_losses_per_seq = T.sum(self.k_losses_per_timestep * mask[:, :, None], axis=1) / T.sum(mask, axis=1, keepdims=True)
         else:
-            self.k_nlls_per_seq = T.mean(self.k_nlls_per_timestep, axis=1)
+            self.k_losses_per_seq = T.mean(self.k_losses_per_timestep, axis=1)
 
         # Average over K
-        # nlls.shape :(batch_size,)
-        self.nlls = T.mean(self.k_nlls_per_seq, axis=1)
-        return self.nlls
+        # loss_per_seq.shape :(batch_size,)
+        self.loss_per_seq = T.mean(self.k_losses_per_seq, axis=1)
+        return self.loss_per_seq
 
 
 class MultistepMultivariateGaussianExpectedValueL2Distance(Loss):
@@ -333,21 +420,19 @@ class MultistepMultivariateGaussianExpectedValueL2Distance(Loss):
         # model_output.shape : shape : (batch_size, seq_len, K, M, target_size)
         # self.dataset.symb_targets.shape = (batch_size, seq_len, K, target_dims)
 
-        # mask.shape : (batch_size, seq_len) or None
-        mask = self.dataset.symb_mask
-
-        # mu.shape = (batch_size, seq_len, K, M, target_dims)
-        mu = model_output[:, :, :, :, 0:3]
-
-        # expected_value.shape : (batch_size, seq_len, 3)
-        expected_value = mu[:, :, 0, 0, :]
-
         # targets.shape = (batch_size, seq_len, 3)
         targets = self.dataset.symb_targets[:, :, 0, :]
 
-        # L2_errors_per_time_step.shape = (batch_size, seq_len)
-        self.L2_errors_per_time_step = T.sqrt(T.sum(((expected_value - targets) ** 2), axis=2))
-        # avg_L2_error_per_seq.shape = (batch_size,)
-        self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step * mask, axis=1) / T.sum(mask, axis=1)
+        # mask.shape : (batch_size, seq_len)
+        mask = self.dataset.symb_mask
 
-        return self.avg_L2_error_per_seq
+        # samples.shape : (batch_size, seq_len, 3)
+        # T.squeeze(.) should remove the K=1 and M=1 dimensions
+        self.samples = self.model.get_max_component_samples(T.squeeze(model_output))
+
+        # loss_per_time_step.shape = (batch_size, seq_len)
+        self.loss_per_time_step = l2distance(self.samples, targets)
+        # loss_per_seq.shape = (batch_size,)
+        self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1) / T.sum(mask, axis=1)
+
+        return self.loss_per_seq

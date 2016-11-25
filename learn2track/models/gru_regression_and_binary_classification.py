@@ -12,6 +12,7 @@ from smartlearner.interfaces import Loss
 
 from learn2track.models.layers import LayerRegression, LayerDense
 from learn2track.models import GRU
+from learn2track.utils import l2distance
 
 
 class GRU_RegressionAndBinaryClassification(GRU):
@@ -107,11 +108,11 @@ class L2DistancePlusBinaryCrossEntropyForSequences(Loss):
         # regression_outputs.shape = (batch_size, seq_length, out_dim)
         regression_outputs = model_output
         if self.normalize_output:
-            regression_outputs /= (T.sqrt(T.sum(regression_outputs**2, axis=2, keepdims=True) + 1e-8))
+            regression_outputs /= l2distance(regression_outputs, keepdims=True, eps=1e-8)
 
         # Regression part (next direction)
         # L2_errors_per_time_step.shape = (batch_size,)
-        self.L2_errors_per_time_step = T.sqrt(T.sum(((regression_outputs - self.dataset.symb_targets)**2), axis=2))
+        self.L2_errors_per_time_step = l2distance(regression_outputs, self.dataset.symb_targets)
         # avg_L2_error_per_seq.shape = (batch_size,)
         self.avg_L2_error_per_seq = T.sum(self.L2_errors_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
 

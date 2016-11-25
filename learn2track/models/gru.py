@@ -12,6 +12,7 @@ import smartlearner.initializers as initer
 
 from learn2track.models.layers import LayerGRU, LayerRegression, LayerDense
 
+floatX = theano.config.floatX
 
 class GRU(Model):
     """ A standard GRU model with no output layer.
@@ -64,6 +65,14 @@ class GRU(Model):
             parameters += layer.parameters
 
         return parameters
+
+    def get_init_states(self, batch_size):
+        states_h = []
+        for i, hidden_size in enumerate(self.hidden_sizes):
+            state_h = np.zeros((batch_size, hidden_size), dtype=floatX)
+            states_h.append(state_h)
+
+        return states_h
 
     def _fprop(self, Xi, *args):
         layers_h = []

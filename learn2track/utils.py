@@ -83,6 +83,16 @@ def softmax(x, axis=None):
     return T.exp(x - logsumexp(x, axis=axis, keepdims=True))
 
 
+def l2distance(x, y=None, axis=-1, keepdims=False, eps=0.0):
+    """ Computes the L2 distance between x and y if y is given, else computes the L2 norm of x. """
+    if y is not None:
+        diff = x - y
+    else:
+        diff = x
+
+    return T.sqrt(T.sum((diff ** 2), axis=axis, keepdims=keepdims) + eps)
+
+
 def chunk(sequence, n):
     """ Yield successive n-sized chunks from sequence. """
     for i in range(0, len(sequence), n):
