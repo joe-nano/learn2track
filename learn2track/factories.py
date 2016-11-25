@@ -109,6 +109,14 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                            output_size=output_size,
                            n_gaussians=hyperparams['n_gaussians'])
 
+    elif hyperparams['model'] == 'ffnn_regression':
+        from learn2track.models import FFNN_Regression
+        return FFNN_Regression(volume_manager=volume_manager,
+                               input_size=input_size,
+                               hidden_sizes=hyperparams['hidden_sizes'],
+                               output_size=output_size,
+                               activation=hyperparams['activation'])
+
     else:
         raise ValueError("Unknown model!")
 
@@ -148,6 +156,9 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
             return MultivariateGaussianMixtureNLL(model, dataset)
         else:
             raise ValueError("Unrecognized loss_type: {}".format(loss_type))
+    elif hyperparams['model'] == 'ffnn_regression':
+        from learn2track.models.ffnn_regression import L2Distance
+        return L2Distance(model, dataset, normalize_output=hyperparams['normalize'])
 
     else:
         raise ValueError("Unknown model!")
@@ -193,5 +204,15 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                                noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
                                                shuffle_streamlines=hyperparams['shuffle_streamlines'] if train_mode else None,
                                                resample_streamlines=train_mode)
+    elif hyperparams['model'] == 'ffnn_regression':
+        from learn2track.batch_schedulers import SingleInputTractographyBatchScheduler
+        return SingleInputTractographyBatchScheduler(dataset,
+                                                     batch_size=batch_size,
+                                                     use_data_augment=use_data_augment,
+                                                     seed=hyperparams['seed'],
+                                                     normalize_target=hyperparams['normalize'],
+                                                     noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
+                                                     shuffle_streamlines=hyperparams['shuffle_streamlines'] if train_mode else None,
+                                                     resample_streamlines=train_mode)
     else:
         raise ValueError("Unknown model!")

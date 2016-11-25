@@ -78,6 +78,9 @@ def main():
             model = GRU_Multistep_Gaussian.create(experiment_path, volume_manager=volume_manager)
             model.k = 1
             model.m = 1
+        elif hyperparams['model'] == 'ffnn_regression':
+            from learn2track.models import FFNN_Regression
+            model = FFNN_Regression.create(experiment_path, volume_manager=volume_manager)
         else:
             raise NameError("Unknown model: {}".format(hyperparams['model']))
 

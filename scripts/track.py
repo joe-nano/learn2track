@@ -306,7 +306,7 @@ class Tracking(object):
     def __init__(self, model, is_stopping, keep_last_n_states=1, use_max_component=False):
         self.model = model
         self.is_stopping = is_stopping
-        self.grower = model.make_sequence_generator(use_max_component)
+        self.grower = model.make_sequence_generator(use_max_component=use_max_component)
         self.keep_last_n_states = max(keep_last_n_states, 1)
         self._history = []
 
@@ -586,6 +586,9 @@ def main():
         elif hyperparams['model'] == 'gru_multistep':
             from learn2track.models import GRU_Multistep_Gaussian
             model_class = GRU_Multistep_Gaussian
+        elif hyperparams['model'] == 'ffnn_regression':
+            from learn2track.models import FFNN_Regression
+            model_class = FFNN_Regression
         else:
             raise ValueError("Unknown model!")
 

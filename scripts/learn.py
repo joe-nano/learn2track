@@ -21,7 +21,7 @@ from smartlearner.direction_modifiers import DirectionClipping
 
 from learn2track import utils
 from learn2track.utils import Timer
-from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory, batch_scheduler_factory
+from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory, batch_scheduler_factory, ACTIVATION_FUNCTIONS
 from learn2track.factories import optimizer_factory
 from learn2track.factories import model_factory
 from learn2track.factories import loss_factory
@@ -115,6 +115,37 @@ def build_train_gru_multistep_argparser(subparser):
     general.add_argument('--view', action='store_true', help='display learning curves.')
 
 
+def build_train_ffnn_regression_argparser(subparser):
+    DESCRIPTION = "Train a FFNN on a regression task."
+
+    p = subparser.add_parser("ffnn_regression", description=DESCRIPTION, help=DESCRIPTION)
+
+    # Model options (GRU)
+    model = p.add_argument_group("FFNN regression arguments")
+
+    model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
+                       help="Size of the hidden layers. Default: 500")
+
+    model.add_argument('--activation', type=str, default='tanh', choices=ACTIVATION_FUNCTIONS,
+                       help='which type of activation function to use for hidden layers.'.format(", ".join(ACTIVATION_FUNCTIONS)))
+
+    model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
+                       help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
+    model.add_argument('--initialization-seed', type=int, default=1234,
+                       help='seed used to generate random numbers. Default=1234')
+
+    model.add_argument('--learn-to-stop', action="store_true",
+                       help='if specified, the model will be trained to learn when to stop tracking')
+
+    model.add_argument('--normalize', action="store_true",
+                       help='if specified, output direction the model produces will have unit length.')
+
+    # General parameters (optional)
+    general = p.add_argument_group("General arguments")
+    general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+    general.add_argument('--view', action='store_true', help='display learning curves.')
+
+
 def build_argparser():
     DESCRIPTION = ("Script to train a GRU model from a dataset of streamlines"
                    " coordinates expressed in voxel space and a DWI on a regression task.")
@@ -173,6 +204,7 @@ def build_argparser():
     build_train_gru_argparser(subparser)
     build_train_gru_mixture_argparser(subparser)
     build_train_gru_multistep_argparser(subparser)
+    build_train_ffnn_regression_argparser(subparser)
 
     return p
 
