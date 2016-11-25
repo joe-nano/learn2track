@@ -10,7 +10,7 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 from learn2track.models import GRU
 from learn2track.models.layers import LayerRegression
-from learn2track.utils import logsumexp
+from learn2track.utils import logsumexp, l2distance
 
 floatX = theano.config.floatX
 
@@ -103,7 +103,7 @@ class GRU_Multistep_Gaussian(GRU):
         for k in range(1, self.k):
             # Sample an input for the next step
             # sample_directions.shape : (batch_size, target_dimensions)
-            sample_directions = self._get_stochastic_samples(distribution_params, epsilon[k - 1])
+            sample_directions = self.get_stochastic_samples(distribution_params, epsilon[k - 1])
 
             # Follow *unnormalized* direction and get diffusion data at the new location.
             coords = T.concatenate([coords[:, :3] + sample_directions, coords[:, 3:]], axis=1)
@@ -119,21 +119,25 @@ class GRU_Multistep_Gaussian(GRU):
         return next_hidden_state + (k_distribution_params,)
 
     @staticmethod
-    def _get_stochastic_samples(distribution_parameters, noise):
+    def get_stochastic_samples(distribution_parameters, noise):
         # distribution_parameters.shape : (batch_size, target_size)
         # distribution_params[0] = [mu_x, mu_y, mu_z, std_x, std_y, std_z]
 
         # noise.shape : (batch_size, target_dims)
 
-        mu = distribution_parameters[:, :3]
-        sigma = distribution_parameters[:, 3:6]
+        mu = distribution_parameters[..., :3]
+        sigma = distribution_parameters[..., 3:6]
 
         samples = mu + noise * sigma
 
         return samples
 
-    def _get_max_component_samples(self, distribution_parameters):
-        return distribution_parameters[:, :3]
+    @staticmethod
+    def get_max_component_samples(distribution_parameters):
+        # distribution_parameters.shape : (batch_size, target_size)
+        # distribution_params[0] = [mu_x, mu_y, mu_z, std_x, std_y, std_z]
+        mean = distribution_parameters[..., :3]
+        return mean
 
     def _predict_distribution_params(self, hidden_state):
         # regression layer outputs an array [mean_x, mean_y, mean_z, log(std_x), log(std_y), log(std_z)]
@@ -141,7 +145,7 @@ class GRU_Multistep_Gaussian(GRU):
         regression_output = self.layer_regression.fprop(hidden_state)
 
         # Use T.exp to retrieve a positive sigma
-        distribution_params = T.set_subtensor(regression_output[:, 3:6], T.exp(regression_output[:, 3:6]))
+        distribution_params = T.set_subtensor(regression_output[..., 3:6], T.exp(regression_output[..., 3:6]))
 
         # distribution_params.shape : (batch_size, target_size)
         return distribution_params
@@ -224,7 +228,7 @@ class GRU_Multistep_Gaussian(GRU):
             noise = srng.normal((batch_size, self.target_dims))
 
             # next_step_predictions.shape : (batch_size, target_dims)
-            next_step_predictions = self._get_stochastic_samples(distribution_params, noise)
+            next_step_predictions = self.get_stochastic_samples(distribution_params, noise)
 
             updates = OrderedDict()
             for i in range(len(self.hidden_sizes)):
@@ -266,7 +270,7 @@ class GRU_Multistep_Gaussian(GRU):
         distribution_params = model_output[:, 0, :]
 
         if use_max_component:
-            predictions = self._get_max_component_samples(distribution_params)
+            predictions = self.get_max_component_samples(distribution_params)
         else:
             # Sample value from distribution
             srng = MRG_RandomStreams(seed=1234)
@@ -275,7 +279,7 @@ class GRU_Multistep_Gaussian(GRU):
             noise = srng.normal((batch_size, self.target_dims))
 
             # predictions.shape : (batch_size, target_dims)
-            predictions = self._get_stochastic_samples(distribution_params, noise)
+            predictions = self.get_stochastic_samples(distribution_params, noise)
 
         f = theano.function(inputs=[symb_x_t] + states_h,
                             outputs=[predictions] + list(new_states_h))
@@ -365,8 +369,8 @@ class MultistepMultivariateGaussianNLL(Loss):
         targets = self.dataset.symb_targets[:, :, :, None, :]
 
         # For monitoring the L2 error of using $mu$ as the predicted direction (should be comparable to MICCAI's work).
-        normalized_mu = mu[:, :, 0, 0] / T.sqrt(T.sum(mu[:, :, 0, 0] ** 2, axis=2, keepdims=True) + 1e-8)
-        normalized_targets = targets[:, :, 0, 0] / T.sqrt(T.sum(targets[:, :, 0, 0] ** 2, axis=2, keepdims=True) + 1e-8)
+        normalized_mu = mu[:, :, 0, 0] / l2distance(mu[:, :, 0, 0], keepdims=True, eps=1e-8)
+        normalized_targets = targets[:, :, 0, 0] / l2distance(targets[:, :, 0, 0], keepdims=True, eps=1e-8)
         self.L2_error_per_item = T.sqrt(T.sum(((normalized_mu - normalized_targets) ** 2), axis=2))
         if mask is not None:
             self.mean_sqr_error = T.sum(self.L2_error_per_item * mask, axis=1) / T.sum(mask, axis=1)
@@ -422,14 +426,12 @@ class MultistepMultivariateGaussianExpectedValueL2Distance(Loss):
         # mask.shape : (batch_size, seq_len)
         mask = self.dataset.symb_mask
 
-        # mu.shape = (batch_size, seq_len, K, M, target_dims)
-        mu = model_output[:, :, :, :, 0:3]
-
         # samples.shape : (batch_size, seq_len, 3)
-        self.samples = mu[:, :, 0, 0, :]
+        # T.squeeze(.) should remove the K=1 and M=1 dimensions
+        self.samples = self.model.get_max_component_samples(T.squeeze(model_output))
 
         # loss_per_time_step.shape = (batch_size, seq_len)
-        self.loss_per_time_step = T.sqrt(T.sum(((self.samples - targets) ** 2), axis=2))
+        self.loss_per_time_step = l2distance(self.samples, targets)
         # loss_per_seq.shape = (batch_size,)
         self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1) / T.sum(mask, axis=1)
 

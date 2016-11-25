@@ -7,7 +7,7 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 from learn2track.models.gru_regression import GRU_Regression
 from learn2track.models.layers import LayerRegression
-from learn2track.utils import logsumexp, softmax
+from learn2track.utils import logsumexp, softmax, l2distance
 
 floatX = theano.config.floatX
 
@@ -50,11 +50,11 @@ class GRU_Mixture(GRU_Regression):
         hyperparameters['layer_regression_size'] = self.layer_regression_size
         return hyperparameters
 
-    def _get_mixture_parameters(self, regression_output):
-        batch_size = regression_output.shape[0]
-        mixture_weights = T.nnet.softmax(regression_output[:, :self.n_gaussians])
-        means = T.reshape(regression_output[:, self.n_gaussians:self.n_gaussians * 4], (batch_size, self.n_gaussians, 3))
-        stds = T.reshape(T.exp(regression_output[:, self.n_gaussians * 4:self.n_gaussians * 7]), (batch_size, self.n_gaussians, 3))
+    def get_mixture_parameters(self, regression_output, ndim=3):
+        shape_split_by_gaussian = T.concatenate([regression_output.shape[:-1], [self.n_gaussians, 3]])
+        mixture_weights = softmax(regression_output[..., :self.n_gaussians])
+        means = T.reshape(regression_output[..., self.n_gaussians:self.n_gaussians * 4], shape_split_by_gaussian, ndim=ndim)
+        stds = T.reshape(T.exp(regression_output[..., self.n_gaussians * 4:self.n_gaussians * 7]), shape_split_by_gaussian, ndim=ndim)
 
         return mixture_weights, means, stds
 
@@ -115,7 +115,7 @@ class GRU_Mixture(GRU_Regression):
 
             # regression_output.shape : (batch_size, target_size)
             regression_output = new_states[-1]
-            mixture_params = self._get_mixture_parameters(regression_output)
+            mixture_params = self.get_mixture_parameters(regression_output, ndim=3)
 
             srng = MRG_RandomStreams(1234)
             predictions = self._get_stochastic_samples(srng, *mixture_params)
@@ -151,7 +151,7 @@ class GRU_Mixture(GRU_Regression):
 
         # regression_output.shape : (batch_size, target_size)
         regression_output = new_states[-1]
-        mixture_params = self._get_mixture_parameters(regression_output)
+        mixture_params = self.get_mixture_parameters(regression_output, ndim=3)
 
         if use_max_component:
             predictions = self._get_max_component_samples(*mixture_params)
@@ -211,7 +211,7 @@ class MultivariateGaussianMixtureNLL(Loss):
         # regression_outputs.shape = (batch_size, seq_length, regression_layer_size)
         regression_outputs = model_output
 
-        mixture_weights, means, stds = self._get_mixture_parameters(regression_outputs)
+        mixture_weights, means, stds = self.model.get_mixture_parameters(regression_outputs, ndim=4)
 
         # means.shape : (batch_size, seq_len, n_gaussians, 3)
 
@@ -245,16 +245,6 @@ class MultivariateGaussianMixtureNLL(Loss):
 
         return self.loss_per_seq
 
-    def _get_mixture_parameters(self, regression_output):
-        batch_size, seq_len = regression_output.shape[:2]
-
-        gaussian_3d_params_shape = (batch_size, seq_len, self.n, 3)
-
-        mixture_weights = softmax(regression_output[:, :, :self.n], axis=2)
-        means = T.reshape(regression_output[:, :, self.n:self.n * 4], gaussian_3d_params_shape)
-        stds = T.reshape(T.exp(regression_output[:, :, self.n * 4:self.n * 7]), gaussian_3d_params_shape)
-
-        return mixture_weights, means, stds
 
 class MultivariateGaussianMixtureExpectedValueL2Distance(Loss):
     """ Computes the L2 distance for the expected value samples of a multivariate gaussian mixture
@@ -274,31 +264,20 @@ class MultivariateGaussianMixtureExpectedValueL2Distance(Loss):
         # regression_outputs.shape = (batch_size, seq_length, regression_layer_size)
         regression_outputs = model_output
 
-        mixture_weights, means, stds = self._get_mixture_parameters(regression_outputs)
+        mixture_weights, means, stds = self.model.get_mixture_parameters(regression_outputs, ndim=4)
 
         # mixture_weights.shape : (batch_size, seq_len, n_gaussians)
         # means.shape : (batch_size, seq_len, n_gaussians, 3)
 
-        # expected_value.shape : (batch_size, seq_len, 3)
+        # samples.shape : (batch_size, seq_len, 3)
         self.samples = T.sum(mixture_weights[:, :, :, None] * means, axis=2)
 
         # loss_per_time_step.shape = (batch_size, seq_len)
-        self.loss_per_time_step = T.sqrt(T.sum(((self.samples - self.dataset.symb_targets)**2), axis=2))
+        self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets)
         # loss_per_seq.shape = (batch_size,)
         self.loss_per_seq = T.sum(self.loss_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
 
         return self.loss_per_seq
-
-    def _get_mixture_parameters(self, regression_output):
-        batch_size, seq_len = regression_output.shape[:2]
-
-        gaussian_3d_params_shape = (batch_size, seq_len, self.n, 3)
-
-        mixture_weights = softmax(regression_output[:, :, :self.n], axis=2)
-        means = T.reshape(regression_output[:, :, self.n:self.n * 4], gaussian_3d_params_shape)
-        stds = T.reshape(T.exp(regression_output[:, :, self.n * 4:self.n * 7]), gaussian_3d_params_shape)
-
-        return mixture_weights, means, stds
 
 
 class MultivariateGaussianMixtureMaxComponentL2Distance(Loss):
@@ -321,32 +300,17 @@ class MultivariateGaussianMixtureMaxComponentL2Distance(Loss):
 
         # mixture_weights.shape : (batch_size, seq_len, n_gaussians)
         # means.shape : (batch_size, seq_len, n_gaussians, 3)
-        mixture_weights, means, stds = self._get_mixture_parameters(regression_outputs)
-
-        batch_size = mixture_weights.shape[0]
-        seq_len = mixture_weights.shape[1]
-
-        row_ids = T.tile(T.arange(0, batch_size), (seq_len,1)).T    # [[0,0,...,0],[1,1,...,1],...]
-        column_ids = T.tile(T.arange(0, seq_len), (batch_size, 1))  # [[0,1,...,seq_len],[0,1,...,seq_len],...]
-        choices = T.argmax(mixture_weights, axis=2)
+        mixture_weights, means, stds = self.model.get_mixture_parameters(regression_outputs, ndim=4)
+        maximum_component_ids = T.argmax(mixture_weights, axis=2)
 
         # samples.shape : (batch_size, seq_len, 3)
-        self.samples = means[row_ids, column_ids, choices]
+        self.samples = means[(T.arange(mixture_weights.shape[0])[:, None]),
+                             (T.arange(mixture_weights.shape[1])[None, :]),
+                             maximum_component_ids]
 
         # loss_per_time_step.shape = (batch_size, seq_len)
-        self.loss_per_time_step = T.sqrt(T.sum(((self.samples - self.dataset.symb_targets)**2), axis=2))
+        self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets)
         # loss_per_seq.shape = (batch_size,)
         self.loss_per_seq = T.sum(self.loss_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
 
         return self.loss_per_seq
-
-    def _get_mixture_parameters(self, regression_output):
-        batch_size, seq_len = regression_output.shape[:2]
-
-        gaussian_3d_params_shape = (batch_size, seq_len, self.n, 3)
-
-        mixture_weights = softmax(regression_output[:, :, :self.n], axis=2)
-        means = T.reshape(regression_output[:, :, self.n:self.n * 4], gaussian_3d_params_shape)
-        stds = T.reshape(T.exp(regression_output[:, :, self.n * 4:self.n * 7]), gaussian_3d_params_shape)
-
-        return mixture_weights, means, stds

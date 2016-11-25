@@ -6,6 +6,8 @@ from learn2track import factories
 from smartlearner.utils import sharedX
 import smartlearner.initializers as initer
 
+from learn2track.utils import l2distance
+
 
 class LayerDense(object):
     def __init__(self, input_size, output_size, activation="identity", name="Dense"):
@@ -55,7 +57,7 @@ class LayerRegression(object):
         out = T.dot(X, self.W) + self.b
         # Normalize the output vector.
         if self.normed:
-            out /= (T.sqrt(T.sum(out**2, axis=1, keepdims=True) + 1e-8))
+            out /= l2distance(out, keepdims=True, eps=1e-8)
 
         return out
 
