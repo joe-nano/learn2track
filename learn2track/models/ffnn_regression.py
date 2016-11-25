@@ -6,7 +6,6 @@ import theano
 import theano.tensor as T
 from learn2track.models import FFNN
 from learn2track.models.layers import LayerRegression
-from smartlearner import utils as smartutils
 from smartlearner.interfaces.loss import Loss
 
 from learn2track.utils import l2distance
@@ -18,7 +17,7 @@ class FFNN_Regression(FFNN):
     """ A standard FFNN model with a regression layer stacked on top of it.
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, **_):
         """
         Parameters
         ----------
@@ -30,8 +29,10 @@ class FFNN_Regression(FFNN):
             Number of hidden units each FFNN layer should have.
         output_size : int
             Number of units the regression layer should have.
+        activation : str
+            Name of the activation function to use in the hidden layers
         """
-        super().__init__(input_size, hidden_sizes)
+        super().__init__(input_size, hidden_sizes, activation)
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)

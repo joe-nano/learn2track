@@ -13,12 +13,12 @@ floatX = theano.config.floatX
 
 
 class FFNN(Model):
-    """ A standard FFNN model with no output layer (using a sigmoid act. functions for the hidden layers).
+    """ A standard FFNN model with no output layer.
 
     The output is simply the state of the last hidden layer.
     """
 
-    def __init__(self, input_size, hidden_sizes):
+    def __init__(self, input_size, hidden_sizes, activation='tanh'):
         """
         Parameters
         ----------
@@ -26,17 +26,20 @@ class FFNN(Model):
             Number of units each element X has.
         hidden_sizes : int, list of int
             Number of hidden units the model should have.
+        activation : str
+            Name of the activation function to use in the hidden layers
         """
         self.graph_updates = OrderedDict()
         self._gen = None
 
         self.input_size = input_size
         self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
+        self.activation = activation
 
         self.layers = []
         last_hidden_size = self.input_size
         for i, hidden_size in enumerate(self.hidden_sizes):
-            self.layers.append(LayerDense(last_hidden_size, hidden_size, activation='tanh', name="Dense{}".format(i)))
+            self.layers.append(LayerDense(last_hidden_size, hidden_size, activation=activation, name="Dense{}".format(i)))
             last_hidden_size = hidden_size
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
@@ -51,7 +54,8 @@ class FFNN(Model):
     def hyperparameters(self):
         hyperparameters = {'version': 1,
                            'input_size': self.input_size,
-                           'hidden_sizes': self.hidden_sizes}
+                           'hidden_sizes': self.hidden_sizes,
+                           'activation': self.activation}
 
         return hyperparameters
 
@@ -85,20 +89,6 @@ class FFNN(Model):
     def get_output(self, X):
         last_layer_output = self._fprop(X)[-1]
         return last_layer_output
-
-    def seq_next(self, input):
-        """ Returns the next element in every sequence of the batch. """
-        if self._gen is None:
-
-            X = T.TensorVariable(type=T.TensorType("floatX", [False] * input.ndim), name='X')
-            X.tag.test_value = input
-
-            layer_outputs = self._fprop(X)
-            output = layer_outputs[-1]
-
-            self._gen = theano.function([X], output)
-
-        return self._gen(input)
 
     def save(self, path):
         savedir = smartutils.create_folder(pjoin(path, type(self).__name__))

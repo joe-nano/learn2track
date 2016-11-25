@@ -114,7 +114,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
         return FFNN_Regression(volume_manager=volume_manager,
                                input_size=input_size,
                                hidden_sizes=hyperparams['hidden_sizes'],
-                               output_size=output_size)
+                               output_size=output_size,
+                               activation=hyperparams['activation'])
 
     else:
         raise ValueError("Unknown model!")

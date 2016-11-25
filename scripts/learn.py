@@ -21,7 +21,7 @@ from smartlearner.direction_modifiers import DirectionClipping
 
 from learn2track import utils
 from learn2track.utils import Timer
-from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory, batch_scheduler_factory
+from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory, batch_scheduler_factory, ACTIVATION_FUNCTIONS
 from learn2track.factories import optimizer_factory
 from learn2track.factories import model_factory
 from learn2track.factories import loss_factory
@@ -125,6 +125,9 @@ def build_train_ffnn_regression_argparser(subparser):
 
     model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
                        help="Size of the hidden layers. Default: 500")
+
+    model.add_argument('--activation', type=str, default='tanh', choices=ACTIVATION_FUNCTIONS,
+                       help='which type of activation function to use for hidden layers.'.format(", ".join(ACTIVATION_FUNCTIONS)))
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))

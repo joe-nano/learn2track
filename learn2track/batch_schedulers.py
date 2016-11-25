@@ -645,7 +645,6 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
         """
         self.dataset = dataset
         self.batch_size = batch_size
-        self.use_augment_by_flipping = use_data_augment
         self.normalize_target = normalize_target
 
         self.noisy_streamlines_sigma = noisy_streamlines_sigma
@@ -676,6 +675,12 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
                                                          name=self.dataset.name + '_symb_targets')
 
         self.dataset.symb_targets.tag.test_value = batch_targets
+
+        # use_data_augment cannot be used in the case of a FFNN model (or any other non-recurrent model,
+        # because the targets are flipped but the inputs stay the same)
+        self.use_augment_by_flipping = False
+        if use_data_augment:
+            print("WARNING: {} cannot use parameter use_data_augment and will ignore it.".format(type(self).__name__))
 
     @property
     def input_size(self):
