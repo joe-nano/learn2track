@@ -343,19 +343,26 @@ def main():
         # Callback function to stop training if NaN is detected.
         def detect_nan(obj, status):
             if np.isnan(model.parameters[0].get_value().sum()):
-                print("NaN detected! Not saving the model. Crashing now.")
+                print("NaN detected! Stopping training now.")
                 sys.exit()
+
         trainer.append_task(tasks.Callback(detect_nan, each_k_update=1))
 
-        # Early stopping with a callback for saving every time model improves.
+        # Callback function to save training progression.
         def save_training(obj, status):
-            """ Save training progression. """
+            trainer.save(experiment_path)
+
+        trainer.append_task(tasks.Callback(save_training))
+
+        # Early stopping with a callback for saving every time model improves.
+        def save_improvement(obj, status):
+            """ Save best model and training progression. """
             if np.isnan(model.parameters[0].get_value().sum()):
                 print("NaN detected! Not saving the model. Crashing now.")
                 sys.exit()
 
             print("*** Best epoch: {0} ***\n".format(obj.best_epoch))
-            trainer.save(experiment_path)
+            model.save(experiment_path)
 
         # Print time for one epoch
         trainer.append_task(tasks.PrintEpochDuration())
@@ -364,7 +371,7 @@ def main():
 
         # Add stopping criteria
         trainer.append_task(stopping_criteria.MaxEpochStopping(args.max_epoch))
-        early_stopping = stopping_criteria.EarlyStopping(lookahead_loss, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_training)
+        early_stopping = stopping_criteria.EarlyStopping(lookahead_loss, lookahead=args.lookahead, eps=args.lookahead_eps, callback=save_improvement)
         trainer.append_task(early_stopping)
 
     with Timer("Compiling Theano graph"):
@@ -378,7 +385,7 @@ def main():
         trainer.train()
 
     trainer.save(experiment_path)
-    model.save(experiment_path)
+
 
 if __name__ == "__main__":
     main()
