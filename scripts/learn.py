@@ -410,8 +410,12 @@ def main():
         trainer.build_theano_graph()
 
     if resuming:
-        with Timer("Loading"):
-            trainer.load(experiment_path)
+        if not os.path.isdir('training'):
+            print("No 'training/' folder. Assuming it failed before"
+                  " the end of the first epoch. Starting a new training.")
+        else:
+            with Timer("Loading"):
+                trainer.load(experiment_path)
 
     with Timer("Training"):
         trainer.train()
