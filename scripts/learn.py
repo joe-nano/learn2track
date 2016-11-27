@@ -410,7 +410,7 @@ def main():
         trainer.build_theano_graph()
 
     if resuming:
-        if not os.path.isdir('training'):
+        if not os.path.isdir(pjoin(experiment_path, 'training')):
             print("No 'training/' folder. Assuming it failed before"
                   " the end of the first epoch. Starting a new training.")
         else:
