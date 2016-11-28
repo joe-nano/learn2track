@@ -360,9 +360,6 @@ class MultistepSequenceBatchScheduler(TractographyBatchSchedulerWithProportional
                          seed=seed, use_data_augment=use_data_augment, normalize_target=normalize_target,
                          shuffle_streamlines=shuffle_streamlines, resample_streamlines=resample_streamlines)
 
-        # Batch targets shape is different for multistep, and must be overidden
-        self._shared_batch_targets = sharedX(np.ndarray((0, 0, 0, 0)))
-
     @property
     def target_size(self):
         return 3  # Direction: X, Y, Z
@@ -389,27 +386,23 @@ class MultistepSequenceBatchScheduler(TractographyBatchSchedulerWithProportional
         max_streamline_length = np.max(streamlines._lengths)  # Sequences are padded so that they have the same length.
         batch_masks = np.zeros((batch_size, max_streamline_length - self.k), dtype=floatX)
         batch_inputs = np.zeros((batch_size, max_streamline_length - self.k, inputs.shape[1]), dtype=floatX)
-        batch_targets = np.zeros((batch_size, max_streamline_length - self.k, self.k, self.target_size), dtype=floatX)
+        batch_targets = np.zeros((batch_size, max_streamline_length - 1, self.target_size), dtype=floatX)
 
         for i, (offset, length) in enumerate(zip(streamlines._offsets, streamlines._lengths)):
             n = length - self.k
             batch_masks[i, :n] = 1
             batch_inputs[i, :n] = inputs[offset:offset + n]
-            batch_targets[i, :n] = self._window_stack(targets[offset:offset + length - 1, None], self.k)
+            batch_targets[i, :length - 1] = targets[offset:offset + length - 1]
 
             if self.use_augment_by_flipping:
                 batch_masks[i + len(streamlines), :n] = 1
                 batch_inputs[i + len(streamlines), :n] = inputs[offset + self.k:offset + length][::-1]
-                batch_targets[i + len(streamlines), :n] = self._window_stack(-targets[offset:offset + length - 1, None][::-1], self.k)
+                batch_targets[i + len(streamlines), :length - 1] = -targets[offset:offset + length - 1][::-1]
 
         batch_volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length - self.k, 1))
         batch_inputs = np.concatenate([batch_inputs, batch_volume_ids], axis=2)  # Streamlines coords + dwi ID
 
         return batch_inputs, batch_targets, batch_masks
-
-    @staticmethod
-    def _window_stack(x, width):
-        return np.hstack(x[i:1 + i - width or None] for i in range(width))
 
     def get_state(self):
         state = super().get_state()

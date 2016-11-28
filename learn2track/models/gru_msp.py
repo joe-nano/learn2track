@@ -120,7 +120,7 @@ class GRU_Multistep_Gaussian(GRU):
 
     @staticmethod
     def get_stochastic_samples(distribution_parameters, noise):
-        # distribution_parameters.shape : (batch_size, target_size)
+        # distribution_parameters.shape : (batch_size, [seq_len], target_size)
         # distribution_params[0] = [mu_x, mu_y, mu_z, std_x, std_y, std_z]
 
         # noise.shape : (batch_size, target_dims)
@@ -134,7 +134,7 @@ class GRU_Multistep_Gaussian(GRU):
 
     @staticmethod
     def get_max_component_samples(distribution_parameters):
-        # distribution_parameters.shape : (batch_size, target_size)
+        # distribution_parameters.shape : (batch_size, [seq_len], target_size)
         # distribution_params[0] = [mu_x, mu_y, mu_z, std_x, std_y, std_z]
         mean = distribution_parameters[..., :3]
         return mean
@@ -353,8 +353,8 @@ class MultistepMultivariateGaussianNLL(Loss):
         return {}
 
     def _compute_losses(self, model_output):
-        # model_output.shape : shape : (batch_size, seq_len, K, M, target_size)
-        # self.dataset.symb_targets.shape = (batch_size, seq_len, K, target_dims)
+        # model_output.shape : (batch_size, seq_len, K, M, target_size)
+        # self.dataset.symb_targets.shape = (batch_size, seq_len+K-1, target_dims)
 
         # mask.shape : (batch_size, seq_len) or None
         mask = self.dataset.symb_mask
@@ -365,8 +365,13 @@ class MultistepMultivariateGaussianNLL(Loss):
         # sigma.shape = (batch_size, seq_len, K, M, target_dims)
         sigma = model_output[:, :, :, :, 3:6]
 
+        # Stack K targets for each input (sliding window style)
+        # targets.shape = (batch_size, seq_len, K, target_dims)
+        targets = T.stack([self.dataset.symb_targets[:, i:(-self.model.k + i + 1) or None] for i in range(self.model.k)], axis=2)
+
+        # Add new axis for sum over M
         # targets.shape = (batch_size, seq_len, K, 1, target_dims)
-        targets = self.dataset.symb_targets[:, :, :, None, :]
+        targets = targets[:, :, :, None, :]
 
         # For monitoring the L2 error of using $mu$ as the predicted direction (should be comparable to MICCAI's work).
         normalized_mu = mu[:, :, 0, 0] / l2distance(mu[:, :, 0, 0], keepdims=True, eps=1e-8)
@@ -417,11 +422,11 @@ class MultistepMultivariateGaussianExpectedValueL2Distance(Loss):
         return {}
 
     def _compute_losses(self, model_output):
-        # model_output.shape : shape : (batch_size, seq_len, K, M, target_size)
-        # self.dataset.symb_targets.shape = (batch_size, seq_len, K, target_dims)
+        # model_output.shape : (batch_size, seq_len, K, M, target_size)
+        # self.dataset.symb_targets.shape = (batch_size, seq_len+K-1, target_dims)
 
         # targets.shape = (batch_size, seq_len, 3)
-        targets = self.dataset.symb_targets[:, :, 0, :]
+        targets = self.dataset.symb_targets[:, :-self.model.k + 1, :]
 
         # mask.shape : (batch_size, seq_len)
         mask = self.dataset.symb_mask

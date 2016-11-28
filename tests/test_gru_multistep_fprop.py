@@ -23,6 +23,8 @@ def test_gru_multistep_fprop_k1_single_subject():
         'hidden_sizes': hidden_sizes,
         'learn_to_stop': False,
         'normalize': False,
+        'noisy_streamlines_sigma': None,
+        'shuffle_streamlines': True,
         'seed': 1234}
 
     with Timer("Creating dataset", newline=True):
@@ -30,7 +32,7 @@ def test_gru_multistep_fprop_k1_single_subject():
         trainset = make_dummy_dataset(volume_manager, nb_subjects=1)
         print("Dataset sizes:", len(trainset))
 
-        batch_scheduler = factories.batch_scheduler_factory(hyperparams, trainset, noisy_streamlines_sigma=None, shuffle_streamlines=True)
+        batch_scheduler = factories.batch_scheduler_factory(hyperparams, trainset, train_mode=True)
         print("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
         print(volume_manager.data_dimension, hidden_sizes, batch_scheduler.target_size)
 
@@ -73,6 +75,8 @@ def test_gru_multistep_fprop_k3():
         'hidden_sizes': hidden_sizes,
         'learn_to_stop': False,
         'normalize': False,
+        'noisy_streamlines_sigma': None,
+        'shuffle_streamlines': True,
         'seed': 1234}
 
     with Timer("Creating dataset", newline=True):
@@ -80,7 +84,7 @@ def test_gru_multistep_fprop_k3():
         trainset = make_dummy_dataset(volume_manager)
         print("Dataset sizes:", len(trainset))
 
-        batch_scheduler = factories.batch_scheduler_factory(hyperparams, trainset, noisy_streamlines_sigma=None, shuffle_streamlines=True)
+        batch_scheduler = factories.batch_scheduler_factory(hyperparams, trainset, train_mode=True)
         print("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
         print(volume_manager.data_dimension, hidden_sizes, batch_scheduler.target_size)
 
@@ -123,6 +127,8 @@ def test_gru_multistep_fprop_k3_multidataset():
         'hidden_sizes': hidden_sizes,
         'learn_to_stop': False,
         'normalize': False,
+        'noisy_streamlines_sigma': None,
+        'shuffle_streamlines': True,
         'seed': 1234}
 
     with Timer("Creating dataset", newline=True):
@@ -131,7 +137,7 @@ def test_gru_multistep_fprop_k3_multidataset():
         validset = make_dummy_dataset(volume_manager)
         print("Dataset sizes:", len(trainset))
 
-        batch_scheduler = factories.batch_scheduler_factory(hyperparams, trainset, noisy_streamlines_sigma=None, shuffle_streamlines=True)
+        batch_scheduler = factories.batch_scheduler_factory(hyperparams, trainset, train_mode=True)
         print("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
         print(volume_manager.data_dimension, hidden_sizes, batch_scheduler.target_size)
 
