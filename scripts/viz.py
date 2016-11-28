@@ -217,7 +217,7 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
                 streamlines = set_number_of_points(streamlines, nb_points=40)
                 tractograms.append(streamlines)
 
-            if False and hasattr(tractography_data, 'signal'):
+            if hasattr(tractography_data, 'signal'):
                 signal = tractography_data.signal.get_data()
                 data = signal[:, :, :, 0]
                 affine = np.eye(4)
