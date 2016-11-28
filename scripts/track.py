@@ -433,7 +433,7 @@ def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_st
     i = 1
     while not tracking.is_ripe():
         if verbose:
-            print("pts: {}/{}".format(i+1, is_stopping.max_nb_points), end="")
+            print("pts: {}/{} ({:,} remaining)".format(i+1, is_stopping.max_nb_points, len(tracking.sprouts)), end="")
 
         tracking.grow(step_size)
 
@@ -683,6 +683,11 @@ def main():
                                  batch_size=args.batch_size,
                                  args=args)
 
+        # Streamlines have been generated in voxel space.
+        # Transform them them back to RAS+mm space using the dwi's affine.
+        tractogram.affine_to_rasmm = dwi.affine
+        tractogram.to_world()  # Performed in-place.
+
     nb_streamlines = len(tractogram)
     print("Generated {:,} (compressed) streamlines".format(nb_streamlines))
     with Timer("Cleaning streamlines", newline=True):
@@ -717,9 +722,6 @@ def main():
                                                                                           args.filter_threshold))
 
     with Timer("Saving {:,} (compressed) streamlines".format(len(tractogram))):
-        # Streamlines have been generated in the voxel space so the add the
-        # affine of the dwi so we send them in rasmm.
-        tractogram.affine_to_rasmm = dwi.affine
         save_path = pjoin(experiment_path, args.out)
         try:  # Create dirs, if needed.
             os.makedirs(os.path.dirname(save_path))
