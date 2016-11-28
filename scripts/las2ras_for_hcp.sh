@@ -13,8 +13,8 @@ python ~/research/src/learn2track/scripts/extract_single_shell.py data_ras.nii.g
 python ~/research/src/scilpy/scripts/apply_crop_bb.py dwi_ras_b0.nii.gz dwi_ras_brain_b0.nii.gz box.pkl -f
 python ~/research/src/scilpy/scripts/apply_crop_bb.py dwi_ras_b1000.nii.gz dwi_ras_brain_b1000.nii.gz box.pkl -f
 
-# Cleaning up
-mv -f dwi_ras_brain_b1000.nii.gz dwi_ras_b1000.nii.gz
-mv -f dwi_ras_brain_b0.nii.gz dwi_ras_b0.nii.gz
-rm data.nii.gz bvals bvecs data_ras_b0.nii.gz bvals_ras bvecs_ras data_ras.nii.gz
-rm -rf ./$1
+# # Cleaning up
+# mv -f dwi_ras_brain_b1000.nii.gz dwi_ras_b1000.nii.gz
+# mv -f dwi_ras_brain_b0.nii.gz dwi_ras_b0.nii.gz
+# rm data.nii.gz bvals bvecs bvals_ras bvecs_ras data_ras.nii.gz
+# rm -rf ./$1
