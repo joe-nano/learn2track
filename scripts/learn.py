@@ -176,7 +176,6 @@ def build_argparser():
     #                       help='if specified, patch (as a cube, i.e. NxNxN) around each streamlines coordinates will be concatenated to the input.')
     training.add_argument('--noisy-streamlines-sigma', type=float,
                           help='if specified, it is the standard deviation of the gaussian noise added independently to every point of every streamlines at each batch.')
-    training.add_argument('--shuffle-streamlines', action="store_true", help='Shuffle streamlines between each batch update')
     training.add_argument('--clip-gradient', type=float,
                           help='if provided, gradient norms will be clipped to this value (if it exceeds it).')
     training.add_argument('--seed', type=int, default=1234,

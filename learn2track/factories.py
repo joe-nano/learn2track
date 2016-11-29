@@ -191,7 +191,7 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                           seed=hyperparams['seed'],
                                           normalize_target=hyperparams['normalize'],
                                           noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
-                                          shuffle_streamlines=hyperparams['shuffle_streamlines'] if train_mode else None,
+                                          shuffle_streamlines=train_mode,
                                           resample_streamlines=train_mode)
 
     elif hyperparams['model'] == 'gru_multistep':
@@ -202,7 +202,7 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                                k=hyperparams['k'],
                                                seed=hyperparams['seed'],
                                                noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
-                                               shuffle_streamlines=hyperparams['shuffle_streamlines'] if train_mode else None,
+                                               shuffle_streamlines=train_mode,
                                                resample_streamlines=train_mode)
     elif hyperparams['model'] == 'ffnn_regression':
         from learn2track.batch_schedulers import SingleInputTractographyBatchScheduler
@@ -212,7 +212,7 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                                      seed=hyperparams['seed'],
                                                      normalize_target=hyperparams['normalize'],
                                                      noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
-                                                     shuffle_streamlines=hyperparams['shuffle_streamlines'] if train_mode else None,
+                                                     shuffle_streamlines=train_mode,
                                                      resample_streamlines=train_mode)
     else:
         raise ValueError("Unknown model!")
