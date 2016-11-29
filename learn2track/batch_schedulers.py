@@ -14,7 +14,9 @@ floatX = theano.config.floatX
 
 class TractographyBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines coming from multiple subjects. """
-    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False, shuffle_streamlines=True, resample_streamlines=True):
+
+    def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False,
+                 shuffle_streamlines=True, resample_streamlines=True, feed_previous_direction=False):
         """
         Parameters
         ----------
@@ -33,6 +35,8 @@ class TractographyBatchScheduler(BatchScheduler):
         resample_streamlines : bool
             Streamlines in a same batch will all have the same number of points.
             Should be always set to True for now (until the method _process_batch supports it).
+        feed_previous_direction : bool
+            Should the previous direction be appended to the input when making a prediction?
         """
         self.dataset = dataset
         self.batch_size = batch_size
@@ -48,6 +52,8 @@ class TractographyBatchScheduler(BatchScheduler):
         self.shuffle_streamlines = shuffle_streamlines
         self.resample_streamlines = resample_streamlines
         self.indices = np.arange(len(self.dataset))
+
+        self.feed_previous_direction = feed_previous_direction
 
         # Shared variables
         self._shared_batch_inputs = sharedX(np.ndarray((0, 0, 0)))
@@ -139,6 +145,11 @@ class TractographyBatchScheduler(BatchScheduler):
 
         batch_volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length-1, 1))
         batch_inputs = np.concatenate([batch_inputs, batch_volume_ids], axis=2)  # Streamlines coords + dwi ID
+
+        if self.feed_previous_direction:
+            previous_directions = np.concatenate([np.zeros((batch_size, 1, 3), dtype=floatX), batch_targets[:, :-1]], axis=1)
+            batch_inputs = np.concatenate([batch_inputs, previous_directions], axis=2)  # Streamlines coords + dwi ID + previous direction
+
         return batch_inputs, batch_targets, batch_masks
 
     def _next_batch(self, batch_count):
@@ -177,10 +188,11 @@ class TractographyBatchScheduler(BatchScheduler):
                  "normalize_target": self.normalize_target,
                  "shuffle_streamlines": self.shuffle_streamlines,
                  "resample_streamlines": self.resample_streamlines,
+                 "feed_previous_direction": self.feed_previous_direction,
                  "seed": self.seed,
                  "rng": pickle.dumps(self.rng),
                  "rng_noise": pickle.dumps(self.rng_noise),
-                 "indices": self.indices,
+                 "indices": self.indices
                  }
         return state
 
@@ -191,6 +203,7 @@ class TractographyBatchScheduler(BatchScheduler):
         self.rng = pickle.loads(state["rng"])
         self.rng_noise = pickle.loads(state["rng_noise"])
         self.indices = state["indices"]
+        self.feed_previous_direction = state["feed_previous_direction"]
         if state["version"] < 2:
             self.normalize_target = True
         else:
@@ -332,8 +345,8 @@ class MultistepSequenceBatchScheduler(TractographyBatchSchedulerWithProportional
     """ Multistep batch scheduler for streamlines dataset.
     """
 
-    def __init__(self, dataset, batch_size, k, noisy_streamlines_sigma=None, seed=1234,
-                 use_data_augment=True, normalize_target=False, shuffle_streamlines=True, resample_streamlines=True):
+    def __init__(self, dataset, batch_size, k, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False,
+                 shuffle_streamlines=True, resample_streamlines=True, feed_previous_direction=False):
         """
         Parameters
         ----------
@@ -354,11 +367,13 @@ class MultistepSequenceBatchScheduler(TractographyBatchSchedulerWithProportional
         resample_streamlines : bool
             Streamlines in a same batch will all have the same number of points.
             Should be always set to True for now (until the method _process_batch supports it).
+        feed_previous_direction : bool
+            Should the previous direction be appended to the input when making a prediction?
         """
         self.k = k
-        super().__init__(dataset=dataset, batch_size=batch_size, noisy_streamlines_sigma=noisy_streamlines_sigma,
-                         seed=seed, use_data_augment=use_data_augment, normalize_target=normalize_target,
-                         shuffle_streamlines=shuffle_streamlines, resample_streamlines=resample_streamlines)
+        super().__init__(dataset=dataset, batch_size=batch_size, noisy_streamlines_sigma=noisy_streamlines_sigma, seed=seed,
+                         use_data_augment=use_data_augment, normalize_target=normalize_target, shuffle_streamlines=shuffle_streamlines,
+                         resample_streamlines=resample_streamlines, feed_previous_direction=feed_previous_direction)
 
     @property
     def target_size(self):
@@ -401,6 +416,10 @@ class MultistepSequenceBatchScheduler(TractographyBatchSchedulerWithProportional
 
         batch_volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length - self.k, 1))
         batch_inputs = np.concatenate([batch_inputs, batch_volume_ids], axis=2)  # Streamlines coords + dwi ID
+
+        if self.feed_previous_direction:
+            previous_directions = np.concatenate([np.zeros((batch_size, 1, 3), dtype=floatX), batch_targets[:, :-self.k]], axis=1)
+            batch_inputs = np.concatenate([batch_inputs, previous_directions], axis=2)  # Streamlines coords + dwi ID + previous direction
 
         return batch_inputs, batch_targets, batch_masks
 
@@ -616,7 +635,7 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
     """
 
     def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False, shuffle_streamlines=True,
-                 resample_streamlines=True):
+                 resample_streamlines=True, feed_previous_direction=False):
         """
         Parameters
         ----------
@@ -635,6 +654,8 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
         resample_streamlines : bool
             Streamlines in a same batch will all have the same number of points.
             Should be always set to True for now (until the method _process_batch supports it).
+        feed_previous_direction : bool
+            Should the previous direction be appended to the input when making a prediction?
         """
         self.dataset = dataset
         self.batch_size = batch_size
@@ -655,6 +676,8 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
         self.shuffle_streamlines = shuffle_streamlines
         self.resample_streamlines = resample_streamlines
         self.indices = np.arange(len(self.dataset))
+
+        self.feed_previous_direction = feed_previous_direction
 
         # Shared variables
         self._shared_batch_inputs = sharedX(np.ndarray((0, 0)))
@@ -729,7 +752,11 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
             half_batch_size = actual_batch_size
             actual_batch_size *= 2
 
-        batch_inputs = np.zeros((actual_batch_size, inputs.shape[1]), dtype=floatX)
+        inputs_shape = inputs.shape[1]
+        if self.feed_previous_direction:
+            inputs_shape *= 2
+
+        batch_inputs = np.zeros((actual_batch_size, inputs_shape), dtype=floatX)
         batch_targets = np.zeros((actual_batch_size, 3), dtype=floatX)
         batch_array_index = 0
 
@@ -739,17 +766,28 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
             end = batch_array_index + (length - 1)
             batch_array_index += length - 1
 
-            batch_inputs[start:end] = inputs[offset:offset + length - 1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
+            batch_inputs[start:end, :3] = inputs[offset:offset + length - 1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
             batch_targets[start:end] = targets[offset:offset + length - 1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
 
+            if self.feed_previous_direction:
+                batch_inputs[start, 3:] = np.zeros((1, 3))
+                batch_inputs[start + 1:end, 3:] = batch_targets[start:end - 1]
+
             if self.use_augment_by_flipping:
-                batch_inputs[start + half_batch_size:end + half_batch_size] = inputs[offset + 1:offset + length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
-                batch_targets[start + half_batch_size:end + half_batch_size] = -targets[offset:offset + length - 1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
+                flipped_start = start + half_batch_size
+                flipped_end = end + half_batch_size
+                batch_inputs[flipped_start:flipped_end] = inputs[offset + 1:offset + length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
+                batch_targets[flipped_start:flipped_end] = -targets[offset:offset + length - 1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
+
+                if self.feed_previous_direction:
+                    batch_inputs[flipped_start, 3:] = np.zeros((1, 3))
+                    batch_inputs[flipped_start + 1:flipped_end, 3:] = batch_targets[flipped_start:flipped_end - 1]
 
         batch_volume_ids = np.repeat(volume_ids, list(map(lambda x: len(x)-1, streamlines)))
         if self.use_augment_by_flipping:
             batch_volume_ids = np.tile(batch_volume_ids, [2])
         batch_inputs = np.concatenate([batch_inputs, batch_volume_ids[:, None]], axis=1)  # Streamlines coords + dwi ID
+
         return batch_inputs, batch_targets
 
     def _next_batch(self, batch_count):
@@ -786,6 +824,7 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
                  "normalize_target": self.normalize_target,
                  "shuffle_streamlines": self.shuffle_streamlines,
                  "resample_streamlines": self.resample_streamlines,
+                 "feed_previous_direction": self.feed_previous_direction,
                  "seed": self.seed,
                  "rng": pickle.dumps(self.rng),
                  "rng_noise": pickle.dumps(self.rng_noise),
@@ -803,6 +842,7 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
         self.normalize_target = state["normalize_target"]
         self.shuffle_streamlines = state["shuffle_streamlines"]
         self.resample_streamlines = state["resample_streamlines"]
+        self.feed_previous_direction = state["feed_previous_direction"]
 
     def save(self, savedir):
         state = self.get_state()
