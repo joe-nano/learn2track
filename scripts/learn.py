@@ -256,7 +256,7 @@ def main():
     print(args)
     print("Using Theano v.{}".format(theano.version.short_version))
 
-    hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view']
+    hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view', 'shuffle_streamlines']
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude)
 
     # Log the command currently running.
