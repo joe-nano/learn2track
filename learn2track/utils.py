@@ -124,7 +124,8 @@ def maybe_create_experiment_folder(args, exclude=[]):
 
     # Remove hyperparams that should not be part of the hash
     for name in exclude:
-        del hyperparams[name]
+        if name in hyperparams:
+            del hyperparams[name]
 
     # Get/generate experiment name
     experiment_name = args.name
