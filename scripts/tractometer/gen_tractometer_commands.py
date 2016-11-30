@@ -1,4 +1,5 @@
 import argparse
+from os.path import join as pjoin
 
 
 def buildArgsParser():
@@ -11,11 +12,11 @@ if __name__ == "__main__":
     parser = buildArgsParser()
     args = parser.parse_args()
 
-    template = "python ~/research/src/tractometer/scripts/score_ismrm.py {0} ismrm15_challenge/scoring_data/ experiments/{1}/tractometer/attributes.json ~/research/src/tractometer/metadata/ismrm_challenge_2015/gt_bundles_attributes.json experiments/{1}/tractometer/ 5 -v --save_tracts --save_vb"
+    template = "python ~/research/src/tractometer/scripts/score_ismrm.py {0} ismrm15_challenge/scoring_data/ {1}/attributes.json ~/research/src/tractometer/metadata/ismrm_challenge_2015/gt_bundles_attributes.json {1}/ 5 -v --save_tracts --save_vb"
 
     if args.save_ib:
         template += " --save_ib"
 
     for f in args.files:
-        folder = f.split("/")[1]
+        folder = pjoin(*(f.split("/")[:-2]))
         print(template.format(f, folder))
