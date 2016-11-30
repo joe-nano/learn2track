@@ -419,8 +419,6 @@ def main():
     with Timer("Training"):
         trainer.train()
 
-    trainer.save(experiment_path)
-
 
 if __name__ == "__main__":
     main()
