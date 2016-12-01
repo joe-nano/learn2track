@@ -53,7 +53,7 @@ def build_train_gru_argparser(subparser):
                        help='if specified, the model will be trained to learn when to stop tracking')
 
     model.add_argument('--normalize', action="store_true",
-                       help='if specified, output direction the model produces will have unit length.')
+                       help='if specified, targets and the output direction the model produces will have unit length.')
 
     model.add_argument('--feed-previous-direction', action="store_true",
                        help='if specified, the model will be given the previous direction as an additional input')
@@ -84,8 +84,7 @@ def build_train_gru_mixture_argparser(subparser):
     model.add_argument('--initialization-seed', type=int, default=1234,
                        help='seed used to generate random numbers. Default=1234')
 
-    model.add_argument('--normalize', action="store_true",
-                       help='if specified, output direction the model produces will have unit length.')
+    model.add_argument('--normalize', action="store_true", help='if specified, model will be trained against unit length targets')
 
     model.add_argument('--feed-previous-direction', action="store_true",
                        help='if specified, the model will be given the previous direction as an additional input')
@@ -112,6 +111,8 @@ def build_train_gru_multistep_argparser(subparser):
 
     model.add_argument('--feed-previous-direction', action="store_true",
                        help='if specified, the model will be given the previous direction as an additional input')
+
+    model.add_argument('--normalize', action="store_true", help='if specified, model will be trained against unit length targets')
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
@@ -270,7 +271,8 @@ def main():
 
     hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view', 'shuffle_streamlines']
     # Use this for hyperparams added in a new version, but nonexistent from older versions
-    retrocompatibility_defaults = {'feed_previous_direction': False}
+    retrocompatibility_defaults = {'feed_previous_direction': False,
+                                   'normalize': False}
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
                                                                                   retrocompatibility_defaults=retrocompatibility_defaults)
 

@@ -206,6 +206,7 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                                use_data_augment=use_data_augment,
                                                k=hyperparams['k'],
                                                seed=hyperparams['seed'],
+                                               normalize_target=hyperparams['normalize'],
                                                noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
                                                shuffle_streamlines=train_mode,
                                                resample_streamlines=train_mode,
