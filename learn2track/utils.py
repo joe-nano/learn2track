@@ -118,7 +118,7 @@ def log_variables(batch_scheduler, model, *symb_vars):
     return log  # [list(itertools.chain(*l)) for l in log]
 
 
-def maybe_create_experiment_folder(args, exclude=[]):
+def maybe_create_experiment_folder(args, exclude=[], retrocompatibility_defaults={}):
     # Extract experiments hyperparameters
     hyperparams = OrderedDict(sorted(vars(args).items()))
 
@@ -144,6 +144,10 @@ def maybe_create_experiment_folder(args, exclude=[]):
         for name in exclude:
             if name in hyperparams_loaded:
                 del hyperparams_loaded[name]
+
+        for new_hyperparams, default_value in retrocompatibility_defaults.items():
+            if new_hyperparams not in hyperparams_loaded:
+                hyperparams_loaded[new_hyperparams] = default_value
 
         if hyperparams != hyperparams_loaded:
             print("{\n" + "\n".join(["{}: {}".format(k, hyperparams[k]) for k in sorted(hyperparams.keys())]) + "\n}")
