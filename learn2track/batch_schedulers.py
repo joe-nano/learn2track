@@ -181,7 +181,7 @@ class TractographyBatchScheduler(BatchScheduler):
         return {}  # No updates
 
     def get_state(self):
-        state = {"version": 3,
+        state = {"version": 4,
                  "batch_size": self.batch_size,
                  "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
                  "use_augment_by_flipping": self.use_augment_by_flipping,
@@ -203,7 +203,6 @@ class TractographyBatchScheduler(BatchScheduler):
         self.rng = pickle.loads(state["rng"])
         self.rng_noise = pickle.loads(state["rng_noise"])
         self.indices = state["indices"]
-        self.feed_previous_direction = state["feed_previous_direction"]
         if state["version"] < 2:
             self.normalize_target = True
         else:
@@ -212,6 +211,11 @@ class TractographyBatchScheduler(BatchScheduler):
         if state["version"] < 3:
             self.shuffle_streamlines = state["shuffle_streamlines"]
             self.resample_streamlines = state["resample_streamlines"]
+
+        if state["version"] < 4:
+            self.feed_previous_direction = False
+        else:
+            self.feed_previous_direction = state["feed_previous_direction"]
 
     def save(self, savedir):
         state = self.get_state()
@@ -817,7 +821,7 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
         return {}  # No updates
 
     def get_state(self):
-        state = {"version": 1,
+        state = {"version": 2,
                  "batch_size": self.batch_size,
                  "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
                  "use_augment_by_flipping": self.use_augment_by_flipping,
@@ -842,7 +846,10 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
         self.normalize_target = state["normalize_target"]
         self.shuffle_streamlines = state["shuffle_streamlines"]
         self.resample_streamlines = state["resample_streamlines"]
-        self.feed_previous_direction = state["feed_previous_direction"]
+        if state["version"] < 2:
+            self.feed_previous_direction = False
+        else:
+            self.feed_previous_direction = state["feed_previous_direction"]
 
     def save(self, savedir):
         state = self.get_state()

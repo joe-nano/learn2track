@@ -269,7 +269,10 @@ def main():
     print("Using Theano v.{}".format(theano.version.short_version))
 
     hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view', 'shuffle_streamlines']
-    experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude)
+    # Use this for hyperparams added in a new version, but nonexistent from older versions
+    retrocompatibility_defaults = {'feed_previous_direction': False}
+    experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
+                                                                                  retrocompatibility_defaults=retrocompatibility_defaults)
 
     # Log the command currently running.
     with open(pjoin(experiment_path, 'cmd.txt'), 'a') as f:

@@ -21,7 +21,7 @@ class GRU_Multistep_Gaussian(GRU):
     For each target dimension, the model outputs (m) distribution parameters estimates for each prediction horizon up to (k)
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, target_dims, k, m, seed, use_previous_direction, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, target_dims, k, m, seed, use_previous_direction=False, **_):
         """
         Parameters
         ----------
@@ -206,61 +206,6 @@ class GRU_Multistep_Gaussian(GRU):
         regression_out = T.transpose(reshaped, (0, 2, 3, 1, 4))
 
         return regression_out
-
-    def seq_next(self, x_t, subject_ids=None):
-        """ Returns the prediction for x_{t+1} for every sequence in the batch.
-
-        Parameters
-        ----------
-        x_t : ndarray with shape (batch_size, 3)
-            Streamline coordinate (x, y, z).
-        subject_ids : ndarray with shape (batch_size, 1), optional
-            ID of the subject from which its diffusion data will be used. Default: [0]*len(x_t)
-
-            Note: self.k will be fixed to 1 in order to avoid useless computations from (t+2) to (t+k).
-        """
-        if subject_ids is None:
-            subject_ids = np.array([0] * len(x_t), dtype=floatX)[:, None]
-
-        # Append the DWI ID of each sequence after the 3D coordinates.
-        x_t = np.c_[x_t, subject_ids]
-
-        if self._gen is None:
-            # Temporarily set $k$ to one.
-            k_bak = self.k
-            self.k = 1
-
-            # Build theano function and cache it.
-            self.seq_reset(batch_size=len(x_t))
-
-            symb_x_t = T.TensorVariable(type=T.TensorType("floatX", [False] * x_t.ndim), name='x_t')
-            # symb_x_t.tag.test_value = x_t
-
-            states = self.states_h + [0]
-            new_states_h = self._fprop_step(symb_x_t, *states)
-
-            # model_output.shape : (batch_size, K=1, target_size)
-            model_output = new_states_h[-1]
-
-            distribution_params = model_output[:, 0, :]
-
-            # Sample value from distribution
-            srng = MRG_RandomStreams(seed=1234)
-
-            batch_size = symb_x_t.shape[0]
-            noise = srng.normal((batch_size, self.target_dims))
-
-            # next_step_predictions.shape : (batch_size, target_dims)
-            next_step_predictions = self.get_stochastic_samples(distribution_params, noise)
-
-            updates = OrderedDict()
-            for i in range(len(self.hidden_sizes)):
-                updates[self.states_h[i]] = new_states_h[i]
-
-            self._gen = theano.function([symb_x_t], next_step_predictions, updates=updates)
-            self.k = k_bak  # Restore original $k$.
-
-        return self._gen(x_t)
 
     def make_sequence_generator(self, subject_id=0, use_max_component=False):
         """ Makes functions that return the prediction for x_{t+1} for every
