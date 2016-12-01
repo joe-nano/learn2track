@@ -13,10 +13,11 @@ from learn2track.utils import l2distance
 
 floatX = theano.config.floatX
 
+
 class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
     """
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, **_):
         """
         Parameters
         ----------
@@ -101,53 +102,6 @@ class GRU_Regression(GRU):
         # regression_out.shape : (batch_size, seq_len, target_size=3)
         self.regression_out = T.transpose(results[-1], axes=(1, 0, 2))
         return self.regression_out
-
-    def seq_next(self, x_t, subject_ids=None, previous_directions=None):
-        """ Returns the prediction for x_{t+1} for every sequence in the batch.
-
-        Parameters
-        ----------
-        x_t : ndarray with shape (batch_size, 3)
-            Streamline coordinate (x, y, z).
-        subject_ids : ndarray with shape (batch_size, 1), optional
-            ID of the subject from which its diffusion data will be used. Default: [0]*len(x_t)
-        previous_directions : ndarray with shape (batch_size, 3)
-            Previous direction followed by each streamline in the batch
-        """
-        if self.use_previous_direction and previous_directions is None:
-            raise ValueError("previous_directions needed to make a prediction")
-
-        if subject_ids is None:
-            subject_ids = np.array([0] * len(x_t), dtype=floatX)[:, None]
-
-        # Append the DWI ID of each sequence after the 3D coordinates.
-        x_t = np.c_[x_t, subject_ids, previous_directions]
-
-        if self._gen is None:
-            # Build theano function and cache it.
-            self.seq_reset(batch_size=len(x_t))
-
-            symb_x_t = T.TensorVariable(type=T.TensorType("floatX", [False] * x_t.ndim), name='x_t')
-            symb_x_t.tag.test_value = x_t
-
-            states = self.states_h + [0]
-            new_states = self._fprop_step(symb_x_t, *states)
-            new_states_h = new_states[:len(self.hidden_sizes)]
-
-            # output.shape : (batch_size, target_size)
-            next_step_predictions = new_states[-1]
-
-            updates = OrderedDict()
-            for i in range(len(self.hidden_sizes)):
-                updates[self.states_h[i]] = new_states_h[i]
-
-            self._gen = theano.function([symb_x_t], next_step_predictions, updates=updates)
-
-        return self._gen(x_t)
-
-    def use(self, X):
-        directions = self.get_output(X)
-        return directions
 
     def make_sequence_generator(self, subject_id=0, **_):
         """ Makes functions that return the prediction for x_{t+1} for every

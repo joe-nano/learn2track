@@ -100,41 +100,6 @@ class GRU(Model):
         self.h = T.transpose(results[0], axes=(1, 0, 2))
         return self.h
 
-    def seq_squeeze(self, tokeep):
-        for i, hidden_size in enumerate(self.hidden_sizes):
-            self.states_h[i].set_value(self.states_h[i].get_value()[tokeep])
-
-    def seq_reset(self, batch_size=None):
-        """ Start a new batch of sequences. """
-        if self._gen is None:
-            self.states_h = []
-            for i, hidden_size in enumerate(self.hidden_sizes):
-                self.states_h.append(sharedX(np.zeros((batch_size, hidden_size)), name="layer{}_state_h".format(i)))
-
-        for i, hidden_size in enumerate(self.hidden_sizes):
-            self.states_h[i].set_value(np.zeros((batch_size, hidden_size), dtype=theano.config.floatX))
-
-    def seq_next(self, input):
-        """ Returns the next element in every sequence of the batch. """
-        if self._gen is None:
-            self.seq_reset(batch_size=len(input))
-
-            X = T.TensorVariable(type=T.TensorType("floatX", [False]*input.ndim), name='X')
-            X.tag.test_value = input
-
-            states = self.states_h
-            new_states = self._fprop(X, *states)
-            new_states_h = new_states[:len(self.hidden_sizes)]
-            output = new_states[-1]
-
-            updates = OrderedDict()
-            for i in range(len(self.hidden_sizes)):
-                updates[self.states_h[i]] = new_states_h[i]
-
-            self._gen = theano.function([X], output, updates=updates)
-
-        return self._gen(input)
-
     def save(self, path):
         savedir = smartutils.create_folder(pjoin(path, type(self).__name__))
         smartutils.save_dict_to_json_file(pjoin(savedir, "hyperparams.json"), self.hyperparameters)

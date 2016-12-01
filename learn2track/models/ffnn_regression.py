@@ -17,7 +17,7 @@ class FFNN_Regression(FFNN):
     """ A standard FFNN model with a regression layer stacked on top of it.
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, use_previous_direction, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, use_previous_direction=False, **_):
         """
         Parameters
         ----------
