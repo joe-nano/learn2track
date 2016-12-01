@@ -16,7 +16,7 @@ floatX = theano.config.floatX
 class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
     """
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction, **_):
         """
         Parameters
         ----------
@@ -28,10 +28,13 @@ class GRU_Regression(GRU):
             Number of hidden units each GRU should have.
         output_size : int
             Number of units the regression layer should have.
+        use_previous_direction : bool
+            Use the previous direction as an additional input
         """
         super().__init__(input_size, hidden_sizes)
         self.volume_manager = volume_manager
         self.output_size = output_size
+        self.use_previous_direction = use_previous_direction
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
@@ -42,6 +45,7 @@ class GRU_Regression(GRU):
     def hyperparameters(self):
         hyperparameters = super().hyperparameters
         hyperparameters['output_size'] = self.output_size
+        hyperparameters['use_previous_direction'] = self.use_previous_direction
         return hyperparameters
 
     @property
@@ -49,18 +53,28 @@ class GRU_Regression(GRU):
         return super().parameters + self.layer_regression.parameters
 
     def _fprop_step(self, Xi, *args):
+        # Xi.shape : (batch_size, 4)    *if self.use_previous_direction, Xi.shape : (batch_size,7)
+        # coords + dwi ID (+ previous_direction)
+
         # coords : streamlines 3D coordinates.
         # coords.shape : (batch_size, 4) where the last column is a dwi ID.
         # args.shape : n_layers * (batch_size, layer_size)
-        coords = Xi
+        coords = Xi[:, :4]
 
         # Get diffusion data.
         # data_at_coords.shape : (batch_size, input_size)
         data_at_coords = self.volume_manager.eval_at_coords(coords)
 
+        if self.use_previous_direction:
+            # previous_direction.shape : (batch_size, 3)
+            previous_direction = Xi[:, 4:]
+            fprop_input = T.concatenate([data_at_coords, previous_direction], axis=1)
+        else:
+            fprop_input = data_at_coords
+
         # Hidden state to be passed to the next GRU iteration (next _fprop call)
         # next_hidden_state.shape : n_layers * (batch_size, layer_size)
-        next_hidden_state = super()._fprop(data_at_coords, *args)
+        next_hidden_state = super()._fprop(fprop_input, *args)
 
         # Compute the direction to follow for step (t)
         regression_out = self.layer_regression.fprop(next_hidden_state[-1])
@@ -68,8 +82,8 @@ class GRU_Regression(GRU):
         return next_hidden_state + (regression_out,)
 
     def get_output(self, X):
-        # X.shape : (batch_size, seq_len, n_features=4)
-        # For tractography n_features is (x,y,z) + (dwi_id,)
+        # X.shape : (batch_size, seq_len, n_features=[4|7])
+        # For tractography n_features is (x,y,z) + (dwi_id,) + [previous_direction]
 
         outputs_info_h = []
         for hidden_size in self.hidden_sizes:
@@ -88,7 +102,7 @@ class GRU_Regression(GRU):
         self.regression_out = T.transpose(results[-1], axes=(1, 0, 2))
         return self.regression_out
 
-    def seq_next(self, x_t, subject_ids=None):
+    def seq_next(self, x_t, subject_ids=None, previous_directions=None):
         """ Returns the prediction for x_{t+1} for every sequence in the batch.
 
         Parameters
@@ -97,12 +111,17 @@ class GRU_Regression(GRU):
             Streamline coordinate (x, y, z).
         subject_ids : ndarray with shape (batch_size, 1), optional
             ID of the subject from which its diffusion data will be used. Default: [0]*len(x_t)
+        previous_directions : ndarray with shape (batch_size, 3)
+            Previous direction followed by each streamline in the batch
         """
+        if self.use_previous_direction and previous_directions is None:
+            raise ValueError("previous_directions needed to make a prediction")
+
         if subject_ids is None:
             subject_ids = np.array([0] * len(x_t), dtype=floatX)[:, None]
 
         # Append the DWI ID of each sequence after the 3D coordinates.
-        x_t = np.c_[x_t, subject_ids]
+        x_t = np.c_[x_t, subject_ids, previous_directions]
 
         if self._gen is None:
             # Build theano function and cache it.
@@ -157,7 +176,7 @@ class GRU_Regression(GRU):
         f = theano.function(inputs=[symb_x_t] + states_h,
                             outputs=[predictions] + list(new_states_h))
 
-        def _gen(x_t, states):
+        def _gen(x_t, states, previous_direction=None):
             """ Returns the prediction for x_{t+1} for every
                 sequence in the batch given x_{t} and the current states
                 of the model h^{l}_{t}.
@@ -168,6 +187,8 @@ class GRU_Regression(GRU):
                 Streamline coordinate (x, y, z).
             states : list of 2D array of shape (batch_size, hidden_size)
                 Currrent states of the network.
+            previous_direction : ndarray with shape (batch_size, 3)
+                If using previous direction, these should be added to the input
 
             Returns
             -------
@@ -178,7 +199,11 @@ class GRU_Regression(GRU):
             """
             # Append the DWI ID of each sequence after the 3D coordinates.
             subject_ids = np.array([subject_id] * len(x_t), dtype=floatX)[:, None]
-            x_t = np.c_[x_t, subject_ids]
+
+            if not self.use_previous_direction:
+                x_t = np.c_[x_t, subject_ids]
+            else:
+                x_t = np.c_[x_t, subject_ids, previous_direction]
 
             results = f(x_t, *states)
             next_x_t = results[0]

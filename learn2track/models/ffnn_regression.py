@@ -17,7 +17,7 @@ class FFNN_Regression(FFNN):
     """ A standard FFNN model with a regression layer stacked on top of it.
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, use_previous_direction, **_):
         """
         Parameters
         ----------
@@ -31,10 +31,13 @@ class FFNN_Regression(FFNN):
             Number of units the regression layer should have.
         activation : str
             Name of the activation function to use in the hidden layers
+        use_previous_direction : bool
+            Use the previous direction as an additional input
         """
         super().__init__(input_size, hidden_sizes, activation)
         self.volume_manager = volume_manager
         self.output_size = output_size
+        self.use_previous_direction = use_previous_direction
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
@@ -45,6 +48,7 @@ class FFNN_Regression(FFNN):
     def hyperparameters(self):
         hyperparameters = super().hyperparameters
         hyperparameters['output_size'] = self.output_size
+        hyperparameters['use_previous_direction'] = self.use_previous_direction
         return hyperparameters
 
     @property
@@ -52,18 +56,28 @@ class FFNN_Regression(FFNN):
         return super().parameters + self.layer_regression.parameters
 
     def _fprop(self, Xi, *args):
+        # Xi.shape : (batch_size, 4)    *if self.use_previous_direction, Xi.shape : (batch_size,7)
+        # coords + dwi ID (+ previous_direction)
+
         # coords : streamlines 3D coordinates.
         # coords.shape : (batch_size, 4) where the last column is a dwi ID.
         # args.shape : n_layers * (batch_size, layer_size)
-        coords = Xi
+        coords = Xi[:, :4]
 
         # Get diffusion data.
         # data_at_coords.shape : (batch_size, input_size)
         data_at_coords = self.volume_manager.eval_at_coords(coords)
 
+        if self.use_previous_direction:
+            # previous_direction.shape : (batch_size, 3)
+            previous_direction = Xi[:, 4:]
+            fprop_input = T.concatenate([data_at_coords, previous_direction], axis=1)
+        else:
+            fprop_input = data_at_coords
+
         # Hidden state to be passed to the next GRU iteration (next _fprop call)
         # next_hidden_state.shape : n_layers * (batch_size, layer_size)
-        layer_outputs = super()._fprop(data_at_coords)
+        layer_outputs = super()._fprop(fprop_input)
 
         # Compute the direction to follow for step (t)
         regression_out = self.layer_regression.fprop(layer_outputs[-1])
@@ -90,7 +104,7 @@ class FFNN_Regression(FFNN):
 
         f = theano.function(inputs=[symb_x_t], outputs=[predictions])
 
-        def _gen(x_t, states):
+        def _gen(x_t, states, previous_direction=None):
             """ Returns the prediction for x_{t+1} for every
                 sequence in the batch given x_{t}.
 
@@ -100,6 +114,8 @@ class FFNN_Regression(FFNN):
                 Streamline coordinate (x, y, z).
             states : list of 2D array of shape (batch_size, hidden_size)
                 Currrent states of the network.
+            previous_direction : ndarray with shape (batch_size, 3)
+                If using previous direction, these should be added to the input
 
             Returns
             -------
@@ -110,7 +126,11 @@ class FFNN_Regression(FFNN):
             """
             # Append the DWI ID of each sequence after the 3D coordinates.
             subject_ids = np.array([subject_id] * len(x_t), dtype=floatX)[:, None]
-            x_t = np.c_[x_t, subject_ids]
+
+            if not self.use_previous_direction:
+                x_t = np.c_[x_t, subject_ids]
+            else:
+                x_t = np.c_[x_t, subject_ids, previous_direction]
 
             results = f(x_t)
             next_x_t = results[-1]

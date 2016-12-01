@@ -16,7 +16,7 @@ class GRU_Mixture(GRU_Regression):
     """ A GRU_Regression model with the output size computed for a mixture of gaussians, using a diagonal covariance matrix
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, use_previous_direction, **_):
         """
         Parameters
         ----------
@@ -30,6 +30,8 @@ class GRU_Mixture(GRU_Regression):
             Number of units the regression layer should have.
         n_gaussians : int
             Number of gaussians in the mixture
+        use_previous_direction : bool
+            Use the previous direction as an additional input
         """
         super(GRU_Regression, self).__init__(input_size, hidden_sizes)
         self.volume_manager = volume_manager
@@ -37,6 +39,8 @@ class GRU_Mixture(GRU_Regression):
 
         assert output_size == 3  # Only 3-dimensional target is supported for now
         self.output_size = output_size
+
+        self.use_previous_direction = use_previous_direction
 
         self.layer_regression_size = sum([n_gaussians,  # Mixture weights
                                           n_gaussians * output_size,  # Means
@@ -48,6 +52,7 @@ class GRU_Mixture(GRU_Regression):
         hyperparameters = super().hyperparameters
         hyperparameters['n_gaussians'] = self.n_gaussians
         hyperparameters['layer_regression_size'] = self.layer_regression_size
+        hyperparameters['use_previous_direction'] = self.use_previous_direction
         return hyperparameters
 
     def get_mixture_parameters(self, regression_output, ndim=3):
@@ -162,7 +167,7 @@ class GRU_Mixture(GRU_Regression):
         f = theano.function(inputs=[symb_x_t] + states_h,
                             outputs=[predictions] + list(new_states_h))
 
-        def _gen(x_t, states):
+        def _gen(x_t, states, previous_direction=None):
             """ Returns the prediction for x_{t+1} for every
                 sequence in the batch given x_{t} and the current states
                 of the model h^{l}_{t}.
@@ -173,6 +178,8 @@ class GRU_Mixture(GRU_Regression):
                 Streamline coordinate (x, y, z).
             states : list of 2D array of shape (batch_size, hidden_size)
                 Currrent states of the network.
+            previous_direction : ndarray with shape (batch_size, 3)
+                If using previous direction, these should be added to the input
 
             Returns
             -------
@@ -183,7 +190,11 @@ class GRU_Mixture(GRU_Regression):
             """
             # Append the DWI ID of each sequence after the 3D coordinates.
             subject_ids = np.array([subject_id] * len(x_t), dtype=floatX)[:, None]
-            x_t = np.c_[x_t, subject_ids]
+
+            if not self.use_previous_direction:
+                x_t = np.c_[x_t, subject_ids]
+            else:
+                x_t = np.c_[x_t, subject_ids, previous_direction]
 
             results = f(x_t, *states)
             next_x_t = results[0]

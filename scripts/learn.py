@@ -55,6 +55,9 @@ def build_train_gru_argparser(subparser):
     model.add_argument('--normalize', action="store_true",
                        help='if specified, output direction the model produces will have unit length.')
 
+    model.add_argument('--feed-previous-direction', action="store_true",
+                       help='if specified, the model will be given the previous direction as an additional input')
+
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -84,6 +87,9 @@ def build_train_gru_mixture_argparser(subparser):
     model.add_argument('--normalize', action="store_true",
                        help='if specified, output direction the model produces will have unit length.')
 
+    model.add_argument('--feed-previous-direction', action="store_true",
+                       help='if specified, the model will be given the previous direction as an additional input')
+
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -103,6 +109,9 @@ def build_train_gru_multistep_argparser(subparser):
 
     model.add_argument('-k', type=int, required=True, help="Prediction horizon for multistep training")
     model.add_argument('-m', type=int, required=True, help="Number of samples used in the Monte-Carlo estimate")
+
+    model.add_argument('--feed-previous-direction', action="store_true",
+                       help='if specified, the model will be given the previous direction as an additional input')
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
@@ -139,6 +148,9 @@ def build_train_ffnn_regression_argparser(subparser):
 
     model.add_argument('--normalize', action="store_true",
                        help='if specified, output direction the model produces will have unit length.')
+
+    model.add_argument('--feed-previous-direction', action="store_true",
+                       help='if specified, the model will be given the previous direction as an additional input')
 
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
@@ -281,8 +293,12 @@ def main():
         print(trainset_volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
 
     with Timer("Creating model"):
+        input_size = trainset_volume_manager.data_dimension
+        if hyperparams['feed_previous_direction']:
+            input_size += 3
+
         model = model_factory(hyperparams,
-                              input_size=trainset_volume_manager.data_dimension,
+                              input_size=input_size,
                               output_size=batch_scheduler.target_size,
                               volume_manager=trainset_volume_manager)
         model.initialize(weigths_initializer_factory(args.weights_initialization,

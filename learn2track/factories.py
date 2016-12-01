@@ -89,7 +89,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
         return GRU_Regression(volume_manager=volume_manager,
                               input_size=input_size,
                               hidden_sizes=hyperparams['hidden_sizes'],
-                              output_size=output_size)
+                              output_size=output_size,
+                              use_previous_direction=hyperparams['feed_previous_direction'])
 
     elif hyperparams['model'] == 'gru_multistep':
         from learn2track.models import GRU_Multistep_Gaussian
@@ -99,7 +100,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                                       target_dims=output_size,
                                       k=hyperparams['k'],
                                       m=hyperparams['m'],
-                                      seed=hyperparams['seed'])
+                                      seed=hyperparams['seed'],
+                                      use_previous_direction=hyperparams['feed_previous_direction'])
 
     elif hyperparams['model'] == 'gru_mixture':
         from learn2track.models import GRU_Mixture
@@ -107,7 +109,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                            input_size=input_size,
                            hidden_sizes=hyperparams['hidden_sizes'],
                            output_size=output_size,
-                           n_gaussians=hyperparams['n_gaussians'])
+                           n_gaussians=hyperparams['n_gaussians'],
+                           use_previous_direction=hyperparams['feed_previous_direction'])
 
     elif hyperparams['model'] == 'ffnn_regression':
         from learn2track.models import FFNN_Regression
@@ -115,7 +118,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                                input_size=input_size,
                                hidden_sizes=hyperparams['hidden_sizes'],
                                output_size=output_size,
-                               activation=hyperparams['activation'])
+                               activation=hyperparams['activation'],
+                               use_previous_direction=hyperparams['feed_previous_direction'])
 
     else:
         raise ValueError("Unknown model!")
@@ -192,7 +196,8 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                           normalize_target=hyperparams['normalize'],
                                           noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
                                           shuffle_streamlines=train_mode,
-                                          resample_streamlines=train_mode)
+                                          resample_streamlines=train_mode,
+                                          feed_previous_direction=hyperparams['feed_previous_direction'])
 
     elif hyperparams['model'] == 'gru_multistep':
         from learn2track.batch_schedulers import MultistepSequenceBatchScheduler
@@ -203,7 +208,8 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                                seed=hyperparams['seed'],
                                                noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
                                                shuffle_streamlines=train_mode,
-                                               resample_streamlines=train_mode)
+                                               resample_streamlines=train_mode,
+                                               feed_previous_direction=hyperparams['feed_previous_direction'])
     elif hyperparams['model'] == 'ffnn_regression':
         from learn2track.batch_schedulers import SingleInputTractographyBatchScheduler
         return SingleInputTractographyBatchScheduler(dataset,
@@ -213,6 +219,7 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                                      normalize_target=hyperparams['normalize'],
                                                      noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
                                                      shuffle_streamlines=train_mode,
-                                                     resample_streamlines=train_mode)
+                                                     resample_streamlines=train_mode,
+                                                     feed_previous_direction=hyperparams['feed_previous_direction'])
     else:
         raise ValueError("Unknown model!")
