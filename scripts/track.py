@@ -44,8 +44,8 @@ def build_argparser():
 
     p.add_argument('name', type=str, help='name/path of the experiment.')
     p.add_argument('dwi', type=str, help="diffusion weighted images (.nii|.nii.gz).")
-    p.add_argument('--out', type=str, default="tractogram.tck",
-                   help="name of the output tractogram (.tck|.trk). Default: tractogram.tck")
+    p.add_argument('--out', type=str,
+                   help="name of the output tractogram (.tck|.trk). Default: auto generate a meaningful name")
 
     p.add_argument('--seeds', type=str, nargs="+", required=True,
                    help="use extermities of the streamlines in these tractograms (.trk|.tck) as seed points.")
@@ -729,7 +729,23 @@ def main():
                                                                                           args.filter_threshold))
 
     with Timer("Saving {:,} (compressed) streamlines".format(len(tractogram))):
-        save_path = pjoin(experiment_path, args.out)
+        filename = args.out
+        if args.out is None:
+            filename = "{}_seeding-{}_step-{}mm_nbSeeds-{}_maxAngle-{}deg_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_useMaxComponent-{}.tck".format(
+                os.path.basename(args.name),
+                "wm" if "wm" in args.seeds[0] else "rois",
+                step_size,
+                args.nb_seeds_per_voxel,
+                np.rad2deg(theta),
+                args.discard_stopped_by_curvature,
+                args.filter_threshold,
+                args.min_length,
+                args.pft_nb_retry,
+                args.pft_nb_backtrack_steps,
+                args.use_max_component
+                )
+
+        save_path = pjoin(experiment_path, filename)
         try:  # Create dirs, if needed.
             os.makedirs(os.path.dirname(save_path))
         except:
