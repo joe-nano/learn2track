@@ -99,7 +99,7 @@ def main():
 
     # Try to find optimal assignment threshold
     best_threshold = None
-    last_f1_score = -np.inf
+    best_f1_score = -np.inf
     thresholds = np.arange(-2, 10, 0.2) + args.qb_threshold
     for threshold in thresholds:
         indices = qb.find_closest(clusters, full_streamlines, threshold=threshold)
@@ -111,12 +111,9 @@ def main():
         overreach_per_bundle = _compute_overreach(model_mask.get_data(), mask)
         # overreach_norm_gt_per_bundle = _compute_overreach_normalize_gt(model_mask.get_data(), mask)
         f1_score = _compute_f1_score(overlap_per_bundle, overreach_per_bundle)
-        if last_f1_score >= f1_score:
-            print("Best threshold: {}".format(best_threshold))
-            break
-
-        best_threshold = threshold
-        last_f1_score = f1_score
+        if best_f1_score < f1_score:
+            best_threshold = threshold
+            best_f1_score = f1_score
 
         print("{}:\t {}/{} ({:.1%}) {:.1%}/{:.1%} ({:.1%}) {}/{}".format(
             threshold,
@@ -124,6 +121,11 @@ def main():
             overlap_per_bundle, overreach_per_bundle, f1_score,
             mask.sum(), model_mask.get_data().sum()))
 
+        if overlap_per_bundle >= 1:
+            break
+
+
+    print("Best threshold: {} with F1-Score of {}".format(best_threshold, best_f1_score))
 
 
 if __name__ == "__main__":
