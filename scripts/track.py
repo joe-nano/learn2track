@@ -105,7 +105,7 @@ def build_argparser():
 
 def is_flag_set(flags, ref_flag):
     """ Checks which flags have the `ref_flag` set. """
-    return ((flags & ref_flag) >> np.log2(ref_flag).astype(np.uint8)).astype(bool)
+    return ((flags.astype(np.uint8) & ref_flag) >> np.log2(ref_flag).astype(np.uint8)).astype(bool)
 
 
 def count_flags(flags, ref_flag):
@@ -714,7 +714,7 @@ def main():
                                                                        args.min_length))
         if args.discard_stopped_by_curvature:
             nb_streamlines = len(tractogram)
-            stopping_curvature_flag_is_set = is_flag_set(tractogram.data_per_streamline['stopping_flags'], STOPPING_CURVATURE)
+            stopping_curvature_flag_is_set = is_flag_set(tractogram.data_per_streamline['stopping_flags'][:, 0], STOPPING_CURVATURE)
             tractogram = tractogram[stopping_curvature_flag_is_set]
             print("Removed {:,} streamlines stopped for having a curvature higher than {:.2f} degree".format(nb_streamlines - len(tractogram),
                                                                                                              np.rad2deg(theta)))
