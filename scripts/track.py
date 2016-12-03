@@ -732,7 +732,7 @@ def main():
         filename = args.out
         if args.out is None:
             filename = "{}_seeding-{}_step-{:.2f}mm_nbSeeds-{}_maxAngle-{:.1f}deg_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_useMaxComponent-{}.tck".format(
-                os.path.basename(args.name.rstrip('/')),
+                os.path.basename(args.name.rstrip('/'))[:6],
                 "wm" if "wm" in args.seeds[0] else "rois",
                 step_size,
                 args.nb_seeds_per_voxel,
