@@ -82,7 +82,7 @@ parameter of its value. E.g 'param1-value1_param2_value2.pkl' or
 'description_param1-value1_param2_value2.pkl'.
 """
 
-METRICS = ['OL', 'OR', 'F1', 'IB', 'VB', 'NC', 'VCWP', 'IC', 'VC', 'VCCR']
+METRICS = ['OL', 'OR', 'ORn', 'F1', 'IB', 'VB', 'NC', 'VCWP', 'IC', 'VC', 'VCCR']
 
 
 def buildArgsParser():
@@ -136,7 +136,8 @@ def main():
                           for param in infos.split('_')[ind:]])
         else:
             param = {"filename": infos}
-        score = pickle.load(open(scoring_file))
+        # score = pickle.load(open(scoring_file))
+        score = json.load(open(scoring_file))
 
         # Compute the VCCR metric, CSR=1-NC
         # In VCCR, VCWP are considered as IC [Girard et al., NeuroImage, 2014]
