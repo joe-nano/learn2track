@@ -82,7 +82,7 @@ parameter of its value. E.g 'param1-value1_param2_value2.pkl' or
 'description_param1-value1_param2_value2.pkl'.
 """
 
-METRICS = ['OL', 'OR', 'ORn', 'F1', 'IB', 'VB', 'NC', 'VCWP', 'IC', 'VC', 'VCCR']
+METRICS = ['IB', 'VB', 'NC', 'VCWP', 'IC', 'VC', 'VCCR', 'OL', 'OR', 'ORn', 'F1']
 
 
 def buildArgsParser():
@@ -129,7 +129,7 @@ def main():
 
     # Retrieves scores
     for scoring_file in scoring_files:
-        infos = scoring_file.split('/')[-1][:-4]
+        infos = scoring_file.split('/')[-1][:-5]
         if args.is_split:
             ind = 0 if infos.find('-') < infos.find('_') else 1
             param = dict([tuple(param.split('-'))
@@ -166,7 +166,7 @@ def main():
     table = Texttable(max_width=0)
     table.set_deco(Texttable.HEADER)
     table.set_cols_dtype(['a'] * nbr_cols)
-    table.set_cols_align(['c'] * nbr_cols)
+    table.set_cols_align(['l'] + ['c'] * (nbr_cols-1))
 
     # Headers
     headers_params = sorted(headers_params)

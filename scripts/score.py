@@ -52,6 +52,7 @@ if __name__ == "__main__":
     attributes_json = pjoin(tractometer_output, "attributes.json")
     attributes = {'orientation': 'RAS',
                   'count': len(nib.streamlines.load(args.tractogram).tractogram)}
+    print("Saving {}".format(attributes_json))
     save_dict_to_json_file(attributes_json, attributes)
 
     # Run Tractometer scoring.
@@ -66,4 +67,14 @@ if __name__ == "__main__":
                gt_bundles_attributes_json, tractometer_output, "5",
                "-v", "--save_tracts", "--save_vb", "--save_ib", "-f"]
 
+    print(" ".join(cmd))
+    subprocess.call(" ".join(cmd), shell=True)
+
+    # Compute bundle coverage scores.
+    cmd = ["python", "~/research/src/tractometer/scripts/scil_compute_bundle_overlap_overreach.py",
+           pjoin(tractometer_output, "scores", tractogram_name + ".pkl"),
+           pjoin(scoring_data, 'masks', 'bundles'),
+           '-v', '-f']
+
+    print(" ".join(cmd))
     subprocess.call(" ".join(cmd), shell=True)
