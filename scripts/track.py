@@ -737,7 +737,7 @@ def main():
                 step_size,
                 args.nb_seeds_per_voxel,
                 np.rad2deg(theta),
-                args.discard_stopped_by_curvature,
+                not args.discard_stopped_by_curvature,
                 args.filter_threshold,
                 args.min_length,
                 args.pft_nb_retry,
