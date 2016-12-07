@@ -46,6 +46,8 @@ def build_argparser():
     p.add_argument('dwi', type=str, help="diffusion weighted images (.nii|.nii.gz).")
     p.add_argument('--out', type=str,
                    help="name of the output tractogram (.tck|.trk). Default: auto generate a meaningful name")
+    p.add_argument('--prefix', type=str,
+                   help="prefix to use for the name of the output tractogram, only if it is auto generated.")
 
     p.add_argument('--seeds', type=str, nargs="+", required=True,
                    help="use extermities of the streamlines in these tractograms (.trk|.tck) as seed points.")
@@ -731,9 +733,22 @@ def main():
     with Timer("Saving {:,} (compressed) streamlines".format(len(tractogram))):
         filename = args.out
         if args.out is None:
+            prefix = args.prefix
+            if prefix is None:
+                prefix = args.dwi.replace(".", "_").replace("_", "")
+
+            mask_type = args.seeds[0].replace(".", "_").replace("_", "")
+            if "int" in args.seeds[0]:
+                mask_type = "int"
+            elif "wm" in args.seeds[0]:
+                mask_type = "wm"
+            elif "rois" in args.seeds[0]:
+                mask_type = "rois"
+
             filename = "{}_seeding-{}_step-{:.2f}mm_nbSeeds-{}_maxAngle-{:.1f}deg_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_useMaxComponent-{}.tck".format(
                 os.path.basename(args.name.rstrip('/'))[:6],
-                "wm" if "wm" in args.seeds[0] else "rois",
+                prefix,
+                mask_type,
                 args.step_size,
                 args.nb_seeds_per_voxel,
                 np.rad2deg(theta),
