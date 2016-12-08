@@ -745,7 +745,7 @@ def main():
             elif "rois" in args.seeds[0]:
                 mask_type = "rois"
 
-            filename = "{}_seeding-{}_step-{:.2f}mm_nbSeeds-{}_maxAngle-{:.1f}deg_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_useMaxComponent-{}.tck".format(
+            filename = "{}-{}_seeding-{}_step-{:.2f}mm_nbSeeds-{}_maxAngle-{:.1f}deg_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_useMaxComponent-{}.tck".format(
                 os.path.basename(args.name.rstrip('/'))[:6],
                 prefix,
                 mask_type,
