@@ -98,6 +98,15 @@ def build_argparser():
     p.add_argument('--use-max-component', action="store_true",
                    help="if specified, generate streamlines by using maximum probability instead of sampling")
 
+    # Flipping options
+    # TODO: detect flipping directly from `dwi` file.
+    p.add_argument('--flip-x', action="store_true",
+                   help="if specified, prediction direction will be flip in X")
+    p.add_argument('--flip-y', action="store_true",
+                   help="if specified, prediction direction will be flip in Y")
+    p.add_argument('--flip-z', action="store_true",
+                   help="if specified, prediction direction will be flip in Z")
+
     # Optional parameters
     p.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
     p.add_argument('-f', '--force', action='store_true', help='overwrite existing tractogram')
@@ -305,12 +314,15 @@ def make_is_stopping(stopping_criteria):
 
 
 class Tracking(object):
-    def __init__(self, model, is_stopping, keep_last_n_states=1, use_max_component=False):
+    def __init__(self, model, is_stopping, keep_last_n_states=1, use_max_component=False, flip_x=False, flip_y=False, flip_z=False):
         self.model = model
         self.is_stopping = is_stopping
         self.grower = model.make_sequence_generator(use_max_component=use_max_component)
         self.keep_last_n_states = max(keep_last_n_states, 1)
         self._history = []
+        self.flip_x = flip_x
+        self.flip_y = flip_y
+        self.flip_z = flip_z
 
     @property
     def states(self):
@@ -349,6 +361,12 @@ class Tracking(object):
 
         # Get next unnormalized directions
         directions, new_states = self.grower(x_t=sprouts[:, -1, :], states=states, previous_direction=previous_direction)
+        if self.flip_x:
+            directions[:, 0] *= -1
+        if self.flip_y:
+            directions[:, 1] *= -1
+        if self.flip_z:
+            directions[:, 2] *= -1
 
         if step_size is not None:
             # Norm direction and stretch it.
@@ -420,7 +438,7 @@ class Tracking(object):
         return len(idx_to_keep)  # Number of successful regrowths.
 
 
-def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False, use_max_component=False):
+def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False, use_max_component=False, flip_x=False, flip_y=False, flip_z=False):
     """ Generates streamlines using the Particle Filtering Tractography algorithm.
 
     This algorithm is inspired from Girard etal. (2014) Neuroimage.
@@ -434,7 +452,7 @@ def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_st
           the indices of the streamlines that are done,
           the reasons why the streamlines should be stopped.
     """
-    tracking = Tracking(model, is_stopping, nb_backtrack_steps, use_max_component)
+    tracking = Tracking(model, is_stopping, nb_backtrack_steps, use_max_component, flip_x, flip_y, flip_z)
     tracking.plant(seeds)
 
     tractogram = None
@@ -498,7 +516,8 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
                 end = start + batch_size
                 batch_tractogram = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
                                          nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose,
-                                         use_max_component=args.use_max_component)
+                                         use_max_component=args.use_max_component,
+                                         flip_x=args.flip_x, flip_y=args.flip_y, flip_z=args.flip_z)
 
                 if tractogram is None:
                     tractogram = batch_tractogram
