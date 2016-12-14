@@ -165,8 +165,8 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
             from learn2track.models.ffnn_regression import UndirectedL2Distance
             return UndirectedL2Distance(model, dataset, hyperparams['normalize'])
         else:
-            from learn2track.models.ffnn_regression import SineSquaredLoss
-            return SineSquaredLoss(model, dataset, normalize_output=hyperparams['normalize'])
+            from learn2track.models.ffnn_regression import CosineSquaredLoss
+            return CosineSquaredLoss(model, dataset, normalize_output=hyperparams['normalize'])
 
     else:
         raise ValueError("Unknown model!")

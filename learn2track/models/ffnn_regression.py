@@ -135,9 +135,12 @@ class FFNN_Regression(FFNN):
             results = f(x_t)
             next_x_t = results[-1]
 
-            next_x_t_both_directions = np.concatenate([next_x_t, -next_x_t], axis=1)
+            next_x_t_both_directions = np.stack([next_x_t, -next_x_t], axis=-1)
 
-            next_x_t = next_x_t_both_directions[np.argmin(np.linalg.norm(next_x_t_both_directions - previous_direction[:, None, :], axis=2), axis=1)]
+            next_x_t = next_x_t_both_directions[
+                (np.arange(next_x_t_both_directions.shape[0])[:, None]),
+                (np.arange(next_x_t_both_directions.shape[1])[None, :]),
+                np.argmin(np.linalg.norm(next_x_t_both_directions - previous_direction[:, :, None], axis=1), axis=1)[:, None]]
 
             # FFNN_Regression is not a recurrent network, return original states
             new_states = states
@@ -176,7 +179,7 @@ class L2Distance(Loss):
         return self.loss_per_time_step
 
 
-class SineSquaredLoss(Loss):
+class CosineSquaredLoss(Loss):
     """ Computes the sine squared error of the angle between the target and the output.
 
     Notes
@@ -199,9 +202,9 @@ class SineSquaredLoss(Loss):
 
         self.samples = regression_outputs
 
-        # Minimize sine**2 of the angle between target and output
+        # Maximize squared cosine similarity = minimize -cos**2
         # loss_per_time_step.shape = (batch_size,)
-        self.loss_per_time_step = 1 - T.batched_dot(self.samples, self.dataset.symb_targets)**2
+        self.loss_per_time_step = -T.square(T.sum(self.samples*self.dataset.symb_targets, axis=1))
 
         return self.loss_per_time_step
 
@@ -232,6 +235,6 @@ class UndirectedL2Distance(Loss):
 
         # loss_per_time_step.shape = (batch_size,)
         self.loss_per_time_step = T.min(
-            T.concatenate(l2distance(self.samples, self.dataset.symb_targets), l2distance(self.samples, -self.dataset.symb_targets), axis=1), axis=1)
+            T.stack([l2distance(self.samples, self.dataset.symb_targets), l2distance(self.samples, -self.dataset.symb_targets)], axis=1), axis=1)
 
         return self.loss_per_time_step
