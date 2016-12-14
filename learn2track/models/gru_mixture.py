@@ -57,7 +57,7 @@ class GRU_Mixture(GRU_Regression):
 
     def get_mixture_parameters(self, regression_output, ndim=3):
         shape_split_by_gaussian = T.concatenate([regression_output.shape[:-1], [self.n_gaussians, 3]])
-        mixture_weights = softmax(regression_output[..., :self.n_gaussians])
+        mixture_weights = softmax(regression_output[..., :self.n_gaussians], axis=-1)
         means = T.reshape(regression_output[..., self.n_gaussians:self.n_gaussians * 4], shape_split_by_gaussian, ndim=ndim)
         stds = T.reshape(T.exp(regression_output[..., self.n_gaussians * 4:self.n_gaussians * 7]), shape_split_by_gaussian, ndim=ndim)
 
