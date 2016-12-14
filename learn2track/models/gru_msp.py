@@ -400,7 +400,7 @@ class MultistepMultivariateGaussianExpectedValueL2Distance(Loss):
         # self.dataset.symb_targets.shape = (batch_size, seq_len+K-1, target_dims)
 
         # targets.shape = (batch_size, seq_len, 3)
-        targets = self.dataset.symb_targets[:, :-self.model.k + 1, :]
+        targets = self.dataset.symb_targets[:, :-self.model.k + 1 or None, :]
 
         # mask.shape : (batch_size, seq_len)
         mask = self.dataset.symb_mask
