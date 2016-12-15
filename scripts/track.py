@@ -352,12 +352,12 @@ class Tracking(object):
         self._states = self.model.get_init_states(batch_size=len(seeds))
 
     def _grow_step(self, sprouts, states, step_size):
-        previous_direction = None
-        if self.model.use_previous_direction:
-            if sprouts.shape[1] >= 2:
-                previous_direction = sprouts[:, -1, :] - sprouts[:, -2, :]
-            else:
-                previous_direction = np.zeros_like(sprouts[:, -1, :])
+        
+        # Always feed previous direction, grower will choose to use it or not
+        if sprouts.shape[1] >= 2:
+            previous_direction = sprouts[:, -1, :] - sprouts[:, -2, :]
+        else:
+            previous_direction = np.zeros_like(sprouts[:, -1, :])
 
         # Get next unnormalized directions
         directions, new_states = self.grower(x_t=sprouts[:, -1, :], states=states, previous_direction=previous_direction)

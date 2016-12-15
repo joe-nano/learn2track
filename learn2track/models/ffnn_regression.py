@@ -135,6 +135,13 @@ class FFNN_Regression(FFNN):
             results = f(x_t)
             next_x_t = results[-1]
 
+            next_x_t_both_directions = np.stack([next_x_t, -next_x_t], axis=-1)
+
+            next_x_t = next_x_t_both_directions[
+                (np.arange(next_x_t_both_directions.shape[0])[:, None]),
+                (np.arange(next_x_t_both_directions.shape[1])[None, :]),
+                np.argmin(np.linalg.norm(next_x_t_both_directions - previous_direction[:, :, None], axis=1), axis=1)[:, None]]
+
             # FFNN_Regression is not a recurrent network, return original states
             new_states = states
 
@@ -168,5 +175,66 @@ class L2Distance(Loss):
 
         # loss_per_time_step.shape = (batch_size,)
         self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets)
+
+        return self.loss_per_time_step
+
+
+class CosineSquaredLoss(Loss):
+    """ Computes the sine squared error of the angle between the target and the output.
+
+    Notes
+    -----
+    This loss assumes the regression target is a vector.
+    """
+    def __init__(self, model, dataset, normalize_output=False, eps=1e-6):
+        super().__init__(model, dataset)
+        self.normalize_output = normalize_output
+        self.eps = eps
+
+    def _get_updates(self):
+        return {}  # There is no updates for L2Distance.
+
+    def _compute_losses(self, model_output):
+        # regression_outputs.shape = (batch_size, out_dim)
+        regression_outputs = model_output
+        if self.normalize_output:
+            regression_outputs /= l2distance(regression_outputs, keepdims=True, eps=self.eps)
+
+        self.samples = regression_outputs
+
+        # Maximize squared cosine similarity = minimize -cos**2
+        # loss_per_time_step.shape = (batch_size,)
+        self.loss_per_time_step = -T.square(T.sum(self.samples*self.dataset.symb_targets, axis=1))
+
+        return self.loss_per_time_step
+
+
+class UndirectedL2Distance(Loss):
+    """ Computes the undirected L2 error of the output. (min of the l2distance between output and y/-y)
+
+    Notes
+    -----
+    This loss assumes the regression target is a vector.
+    This should not be used for model training!
+    """
+    def __init__(self, model, dataset, normalize_output=False, eps=1e-6):
+        super().__init__(model, dataset)
+        self.normalize_output = normalize_output
+        self.eps = eps
+
+    def _get_updates(self):
+        return {}  # There is no updates for L2Distance.
+
+    def _compute_losses(self, model_output):
+        # regression_outputs.shape = (batch_size, out_dim)
+        regression_outputs = model_output
+        if self.normalize_output:
+            regression_outputs /= l2distance(regression_outputs, keepdims=True, eps=self.eps)
+
+        self.samples = regression_outputs
+
+        # loss_per_time_step.shape = (batch_size,)
+        self.loss_per_time_step = T.min(
+            T.stack([l2distance(self.samples, self.dataset.symb_targets), l2distance(self.samples, -self.dataset.symb_targets)], axis=1), axis=1)
 
         return self.loss_per_time_step
