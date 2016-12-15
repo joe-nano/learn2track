@@ -352,7 +352,7 @@ class Tracking(object):
         self._states = self.model.get_init_states(batch_size=len(seeds))
 
     def _grow_step(self, sprouts, states, step_size):
-        
+
         # Always feed previous direction, grower will choose to use it or not
         if sprouts.shape[1] >= 2:
             previous_direction = sprouts[:, -1, :] - sprouts[:, -2, :]
@@ -754,7 +754,14 @@ def main():
         if args.out is None:
             prefix = args.prefix
             if prefix is None:
-                prefix = args.dwi.replace(".", "_").replace("_", "")
+                dwi_name = os.path.basename(args.dwi)
+                if dwi_name.endswith(".nii.gz"):
+                    dwi_name = dwi_name[:-7]
+                else:  # .nii
+                    dwi_name = dwi_name[:-4]
+
+                prefix = os.path.basename(os.path.dirname(args.dwi)) + dwi_name
+                prefix = prefix.replace(".", "_")
 
             mask_type = args.seeds[0].replace(".", "_").replace("_", "")
             if "int" in args.seeds[0]:
