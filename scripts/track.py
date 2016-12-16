@@ -313,7 +313,7 @@ def make_is_stopping(stopping_criteria):
     return _is_stopping
 
 
-class Tracking(object):
+class Tracker(object):
     def __init__(self, model, is_stopping, keep_last_n_states=1, use_max_component=False, flip_x=False, flip_y=False, flip_z=False, compress_streamlines=False):
         self.model = model
         self._is_stopping = is_stopping
@@ -452,7 +452,7 @@ class Tracking(object):
         return len(idx_to_keep)  # Number of successful regrowths.
 
 
-class BackwardTracking(Tracking):
+class BackwardTracker(Tracker):
     def plant(self, seeds):
         self.seeds = seeds
         self.nb_init_steps = np.asarray(list(map(len, seeds)))
@@ -566,8 +566,8 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
                 end = start + batch_size
 
                 # Forward tracking
-                tracker = Tracking(model, is_stopping, args.pft_nb_backtrack_steps, args.use_max_component,
-                                   args.flip_x, args.flip_y, args.flip_z, compress_streamlines=False)
+                tracker = Tracker(model, is_stopping, args.pft_nb_backtrack_steps, args.use_max_component,
+                                  args.flip_x, args.flip_y, args.flip_z, compress_streamlines=False)
                 batch_tractogram = track(tracker=tracker, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
                                          nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
 
@@ -577,8 +577,8 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
                                                                                                         count_flags(stopping_flags, STOPPING_LENGTH)))
 
                 # Backward tracking
-                tracker = BackwardTracking(model, is_stopping, args.pft_nb_backtrack_steps, args.use_max_component,
-                                           args.flip_x, args.flip_y, args.flip_z, compress_streamlines=True)
+                tracker = BackwardTracker(model, is_stopping, args.pft_nb_backtrack_steps, args.use_max_component,
+                                          args.flip_x, args.flip_y, args.flip_z, compress_streamlines=True)
                 streamlines = [s[::-1] for s in batch_tractogram.streamlines]  # Flip streamlines (the first half).
                 batch_tractogram = track(tracker=tracker, seeds=streamlines, step_size=step_size, is_stopping=is_stopping,
                                          nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
