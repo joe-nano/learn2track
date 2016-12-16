@@ -397,8 +397,8 @@ class Tracking(object):
     def harvest(self):
         undone, done, stopping_flags = self.is_stopping(self.sprouts)
 
-        # TODO: Should we keep last point since it almost surely raised the stopping flag?
-        streamlines = list(self.sprouts[done])
+        # Do not keep last point since it almost surely raised the stopping flag.
+        streamlines = list(self.sprouts[done, :-1])
         if self.compress_streamlines:
             streamlines = compress_streamlines(streamlines)
 
