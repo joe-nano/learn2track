@@ -313,16 +313,17 @@ def make_is_stopping(stopping_criteria):
     return _is_stopping
 
 
-class Tracking(object):
-    def __init__(self, model, is_stopping, keep_last_n_states=1, use_max_component=False, flip_x=False, flip_y=False, flip_z=False):
+class Tracker(object):
+    def __init__(self, model, is_stopping, keep_last_n_states=1, use_max_component=False, flip_x=False, flip_y=False, flip_z=False, compress_streamlines=False):
         self.model = model
-        self.is_stopping = is_stopping
+        self._is_stopping = is_stopping
         self.grower = model.make_sequence_generator(use_max_component=use_max_component)
         self.keep_last_n_states = max(keep_last_n_states, 1)
         self._history = []
         self.flip_x = flip_x
         self.flip_y = flip_y
         self.flip_z = flip_z
+        self.compress_streamlines = compress_streamlines
 
     @property
     def states(self):
@@ -336,6 +337,10 @@ class Tracking(object):
             self._history = self._history[1:]
 
         self._states = values.copy()
+
+    def is_stopping(self, sprouts):
+        undone, done, stopping_flags = self._is_stopping(sprouts)
+        return undone, done, stopping_flags
 
     def is_ripe(self):
         return len(self.sprouts) == 0
@@ -380,19 +385,28 @@ class Tracking(object):
     def grow(self, step_size):
         self.sprouts, self.states = self._grow_step(self.sprouts, self.states, step_size)
 
-    def harvest(self):
-        undone, done, stopping_flags = self.is_stopping(self.sprouts)
-
-        tractogram = Tractogram(streamlines=compress_streamlines(list(self.sprouts[done])),
-                                data_per_streamline={"stopping_flags": stopping_flags})
-
+    def _keep(self, idx):
         # Update remaining sprouts and their states.
-        self.sprouts = self.sprouts[undone]
-        self._states = [s[undone] for s in self._states]
+        self.sprouts = self.sprouts[idx]
+        self._states = [s[idx] for s in self._states]
 
         # Rewrite history
         for i, state in enumerate(self._history):
-            self._history[i] = [s[undone] for s in state]
+            self._history[i] = [s[idx] for s in state]
+
+    def harvest(self):
+        undone, done, stopping_flags = self.is_stopping(self.sprouts)
+
+        # Do not keep last point since it almost surely raised the stopping flag.
+        streamlines = list(self.sprouts[done, :-1])
+        if self.compress_streamlines:
+            streamlines = compress_streamlines(streamlines)
+
+        tractogram = Tractogram(streamlines=streamlines,
+                                data_per_streamline={"stopping_flags": stopping_flags})
+
+        # Keep only undone sprouts
+        self._keep(undone)
 
         return tractogram
 
@@ -438,7 +452,51 @@ class Tracking(object):
         return len(idx_to_keep)  # Number of successful regrowths.
 
 
-def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False, use_max_component=False, flip_x=False, flip_y=False, flip_z=False):
+class BackwardTracker(Tracker):
+    def plant(self, seeds):
+        self.seeds = seeds
+        self.nb_init_steps = np.asarray(list(map(len, seeds)))
+        self.sprouts = np.asarray([s[0] for s in seeds])[:, None, :]
+        self._states = self.model.get_init_states(batch_size=len(seeds))
+
+    def is_stopping(self, sprouts):
+        undone, done, stopping_flags = self._is_stopping(sprouts)
+
+        # Ignore sprouts that haven't finished initializing.
+        init_undone = self.nb_init_steps >= self.sprouts.shape[1]
+        undone = np.r_[undone, [idx for idx in done if init_undone[idx]]]
+        undone = undone.astype(int)
+
+        # Sprouts can be done only if it has been initialized completely.
+        truely_done = np.logical_not(init_undone[done])
+        done = done[truely_done]
+        stopping_flags = stopping_flags[truely_done]
+
+        return undone, done, stopping_flags
+
+    def grow(self, step_size):
+        new_sprouts, self.states = self._grow_step(self.sprouts, self.states, step_size)
+
+        # Only update sprouts once they are done initializing.
+        # However always update their states.
+        init_undone = self.nb_init_steps >= new_sprouts.shape[1]
+        if np.any(init_undone):
+            new_sprouts[init_undone, -1] = [s[new_sprouts.shape[1]-1] for s, undone in zip(self.seeds, init_undone) if undone]
+
+        self.sprouts = new_sprouts
+
+    def regrow(self, idx, step_size, backtrack_n_steps):
+        init_done = self.nb_init_steps < self.sprouts.shape[1]
+        assert np.all(init_done[idx])  # Call an exterminator if that happens!
+        return super().regrow(idx, step_size, backtrack_n_steps)
+
+    def _keep(self, idx):
+        super()._keep(idx)
+        self.seeds = [self.seeds[i] for i in np.arange(len(self.seeds))[idx]]
+        self.nb_init_steps = self.nb_init_steps[idx]
+
+
+def track(tracker, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps=0, verbose=False):
     """ Generates streamlines using the Particle Filtering Tractography algorithm.
 
     This algorithm is inspired from Girard etal. (2014) Neuroimage.
@@ -452,17 +510,15 @@ def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_st
           the indices of the streamlines that are done,
           the reasons why the streamlines should be stopped.
     """
-    tracking = Tracking(model, is_stopping, nb_backtrack_steps, use_max_component, flip_x, flip_y, flip_z)
-    tracking.plant(seeds)
-
     tractogram = None
+    tracker.plant(seeds)
 
     i = 1
-    while not tracking.is_ripe():
+    while not tracker.is_ripe():
         if verbose:
-            print("pts: {}/{} ({:,} remaining)".format(i+1, is_stopping.max_nb_points, len(tracking.sprouts)), end="")
+            print("pts: {}/{} ({:,} remaining)".format(i+1, is_stopping.max_nb_points, len(tracker.sprouts)), end="")
 
-        tracking.grow(step_size)
+        tracker.grow(step_size)
 
         for _ in range(nb_retry):
             if verbose:
@@ -470,12 +526,12 @@ def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_st
                 sys.stdout.flush()
 
             for backtrack_n_steps in range(1, nb_backtrack_steps+1):
-                idx = tracking.get(flag=STOPPING_MASK | STOPPING_CURVATURE | STOPPING_LIKELIHOOD)
+                idx = tracker.get(flag=STOPPING_MASK | STOPPING_CURVATURE | STOPPING_LIKELIHOOD)
                 if len(idx) == 0:
                     # No sprouts to be saved.
                     break
 
-                nb_saved = tracking.regrow(idx, step_size, backtrack_n_steps=backtrack_n_steps)
+                nb_saved = tracker.regrow(idx, step_size, backtrack_n_steps=backtrack_n_steps)
                 print("{}/{} saved.".format(nb_saved, len(idx)))
 
             if len(idx) == 0:
@@ -483,20 +539,14 @@ def track(model, dwi, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_st
                 break
 
         if tractogram is None:
-            tractogram = tracking.harvest()
+            tractogram = tracker.harvest()
         else:
-            tractogram += tracking.harvest()
+            tractogram += tracker.harvest()
 
         if verbose:
             print("")
 
         i += 1
-
-    print("Max length: {}".format(np.max(list(map(len, tractogram)))))
-    stopping_flags = tractogram.data_per_streamline['stopping_flags'].astype(np.uint8)
-    print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
-                                                                                            count_flags(stopping_flags, STOPPING_CURVATURE),
-                                                                                            count_flags(stopping_flags, STOPPING_LENGTH)))
 
     return tractogram
 
@@ -514,10 +564,29 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
             for start in range(0, len(seeds), batch_size):
                 print("{:,} / {:,}".format(start, len(seeds)))
                 end = start + batch_size
-                batch_tractogram = track(model=model, dwi=dwi, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
-                                         nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose,
-                                         use_max_component=args.use_max_component,
-                                         flip_x=args.flip_x, flip_y=args.flip_y, flip_z=args.flip_z)
+
+                # Forward tracking
+                tracker = Tracker(model, is_stopping, args.pft_nb_backtrack_steps, args.use_max_component,
+                                  args.flip_x, args.flip_y, args.flip_z, compress_streamlines=False)
+                batch_tractogram = track(tracker=tracker, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
+                                         nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
+
+                stopping_flags = batch_tractogram.data_per_streamline['stopping_flags'].astype(np.uint8)
+                print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
+                                                                                                        count_flags(stopping_flags, STOPPING_CURVATURE),
+                                                                                                        count_flags(stopping_flags, STOPPING_LENGTH)))
+
+                # Backward tracking
+                tracker = BackwardTracker(model, is_stopping, args.pft_nb_backtrack_steps, args.use_max_component,
+                                          args.flip_x, args.flip_y, args.flip_z, compress_streamlines=True)
+                streamlines = [s[::-1] for s in batch_tractogram.streamlines]  # Flip streamlines (the first half).
+                batch_tractogram = track(tracker=tracker, seeds=streamlines, step_size=step_size, is_stopping=is_stopping,
+                                         nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
+
+                stopping_flags = batch_tractogram.data_per_streamline['stopping_flags'].astype(np.uint8)
+                print("Backward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
+                                                                                                         count_flags(stopping_flags, STOPPING_CURVATURE),
+                                                                                                         count_flags(stopping_flags, STOPPING_LENGTH)))
 
                 if tractogram is None:
                     tractogram = batch_tractogram
