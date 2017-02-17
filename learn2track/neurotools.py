@@ -129,7 +129,7 @@ class TractographyData(object):
                                     "{}".format((self.bundle_ids==bundle_id).sum()).rjust(12))
                                    for name, bundle_id in self.name2id.items()])
 
-        t = nib.streamlines.Tractogram(self.streamlines)
+        t = nib.streamlines.Tractogram(self.streamlines.copy())
         t.apply_affine(self.signal.affine)  # Bring streamlines to RAS+mm
         step_sizes = np.sqrt(np.sum(np.diff(t.streamlines._data, axis=0)**2, axis=1))
         step_sizes = np.concatenate([step_sizes[o:o+l-1] for o, l in zip(t.streamlines._offsets, t.streamlines._lengths)])
