@@ -790,7 +790,12 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
         batch_volume_ids = np.repeat(volume_ids, list(map(lambda x: len(x)-1, streamlines)))
         if self.use_augment_by_flipping:
             batch_volume_ids = np.tile(batch_volume_ids, [2])
-        batch_inputs = np.concatenate([batch_inputs, batch_volume_ids[:, None]], axis=1)  # Streamlines coords + dwi ID
+
+        # Add dwi ID.
+        if self.feed_previous_direction:
+            batch_inputs = np.concatenate([batch_inputs[:, :3], batch_volume_ids[:, None], batch_inputs[:, 3:]], axis=1)  # Streamlines coords + dwi ID + previous direction
+        else:
+            batch_inputs = np.concatenate([batch_inputs, batch_volume_ids[:, None]], axis=1)  # Streamlines coords + dwi ID
 
         return batch_inputs, batch_targets
 
