@@ -62,8 +62,8 @@ def build_argparser():
     deviation_angle.add_argument('--curvature', metavar='RADIUS', type=float,
                                  help='Minimum radius of curvature R in mm. Replaces --theta.')
 
-    p.add_argument('--min-length', type=int, help="minimum length (in mm) for a streamline. Default: 10 mm", default=10)
-    p.add_argument('--max-length', type=int, help="maximum length (in mm) for a streamline. Default: 300 mm", default=300)
+    p.add_argument('--min-length', type=int, help="minimum length (in mm) for a streamline. Default: 20 mm", default=20)
+    p.add_argument('--max-length', type=int, help="maximum length (in mm) for a streamline. Default: 200 mm", default=200)
     p.add_argument('--step-size', type=float, help="step size between two consecutive points in a streamlines (in mm). Default: use model's output as-is")
     p.add_argument('--mask', type=str,
                    help="if provided, streamlines will stop if going outside this mask (.nii|.nii.gz).")
