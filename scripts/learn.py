@@ -193,6 +193,8 @@ def build_argparser():
                           help='if provided, gradient norms will be clipped to this value (if it exceeds it).')
     training.add_argument('--seed', type=int, default=1234,
                           help='seed used to generate random numbers in the batch scheduler. Default=1234')
+    training.add_argument('--keep-step-size', action="store_true",
+                          help='if specified, training streamlines will not be resampled between batches (streamlines will keep their original step size)')
 
     # Optimizer options
     optimizer = p.add_argument_group("Optimizer (required)")
@@ -272,7 +274,8 @@ def main():
     hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view', 'shuffle_streamlines']
     # Use this for hyperparams added in a new version, but nonexistent from older versions
     retrocompatibility_defaults = {'feed_previous_direction': False,
-                                   'normalize': False}
+                                   'normalize': False,
+                                   'keep_step_size': False}
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
                                                                                   retrocompatibility_defaults=retrocompatibility_defaults)
 

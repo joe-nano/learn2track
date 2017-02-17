@@ -60,6 +60,14 @@ def main():
     except FileNotFoundError:
         hyperparams = smartutils.load_dict_from_json_file(pjoin(experiment_path, "..", "hyperparams.json"))
 
+    # Use this for hyperparams added in a new version, but nonexistent from older versions
+    retrocompatibility_defaults = {'feed_previous_direction': False,
+                                   'normalize': False,
+                                   'keep_step_size': False}
+    for new_hyperparams, default_value in retrocompatibility_defaults.items():
+        if new_hyperparams not in hyperparams:
+            hyperparams[new_hyperparams] = default_value
+
     with Timer("Loading dataset", newline=True):
         volume_manager = VolumeManager()
         dataset = datasets.load_tractography_dataset(args.subjects, volume_manager, name="dataset", use_sh_coeffs=hyperparams['use_sh_coeffs'])
