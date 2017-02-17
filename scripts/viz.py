@@ -7,8 +7,6 @@ import sys
 # Hack so you don't have to put the library containing this script in the PYTHONPATH.
 sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
-from dipy.workflows.base import IntrospectiveArgumentParser
-
 import numpy as np
 import nibabel as nib
 from dipy.viz import actor, window, widget
@@ -18,9 +16,7 @@ from dipy.tracking.streamline import set_number_of_points
 from learn2track.neurotools import TractographyData
 
 
-def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
-            random_colors=False,
-            length_lt=0, length_gt=np.inf, clusters_lt=0, clusters_gt=np.inf):
+def horizon(tractograms, data, affine):
 
     rng = np.random.RandomState(42)
     slicer_opacity = .8
@@ -31,12 +27,8 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
     for streamlines in tractograms:
 
         print(' Number of streamlines loaded {} \n'.format(len(streamlines)))
-
-        if not random_colors:
-            ren.add(actor.line(streamlines, opacity=1., lod_points=10 ** 5))
-        else:
-            colors = rng.rand(3)
-            ren.add(actor.line(streamlines, colors, opacity=1., lod_points=10 ** 5))
+        colors = rng.rand(3)
+        ren.add(actor.line(streamlines, colors, opacity=1., lod_points=10 ** 5))
 
     class SimpleTrackBallNoBB(window.vtk.vtkInteractorStyleTrackballCamera):
         def HighlightProp(self, p):
@@ -90,29 +82,6 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
     global picked_actors
     picked_actors = {}
 
-    def pick_callback(obj, event):
-        global centroid_actors
-        global picked_actors
-
-        prop = obj.GetProp3D()
-
-        ac = np.array(centroid_actors)
-        index = np.where(ac == prop)[0]
-
-        if len(index) > 0:
-            try:
-                bundle = picked_actors[prop]
-                ren.rm(bundle)
-                del picked_actors[prop]
-            except:
-                bundle = actor.line(clusters[visible_cluster_id[index]],
-                                    lod=False)
-                picked_actors[prop] = bundle
-                ren.add(bundle)
-
-        if prop in picked_actors.values():
-            ren.rm(prop)
-
     def win_callback(obj, event):
         global size
         if size != obj.GetSize():
@@ -124,25 +93,8 @@ def horizon(tractograms, data, affine, cluster=False, cluster_thr=15.,
     global centroid_visibility
     centroid_visibility = True
 
-    def key_press(obj, event):
-        global centroid_visibility
-        key = obj.GetKeySym()
-        if key == 'h' or key == 'H':
-            if cluster:
-                if centroid_visibility is True:
-                    for ca in centroid_actors:
-                        ca.VisibilityOff()
-                    centroid_visibility = False
-                else:
-                    for ca in centroid_actors:
-                        ca.VisibilityOn()
-                    centroid_visibility = True
-                show_m.render()
-
     show_m.initialize()
-    show_m.iren.AddObserver('KeyPressEvent', key_press)
     show_m.add_window_callback(win_callback)
-    #show_m.add_picker_callback(pick_callback)
     show_m.render()
     show_m.start()
 
@@ -155,11 +107,7 @@ def add_noise_to_streamlines(streamlines, sigma, rng=np.random.RandomState(42)):
     return noisy_streamlines
 
 
-def horizon_flow(input_files, cluster=False, cluster_thr=15.,
-                 random_colors=False, verbose=True,
-                 length_lt=0, length_gt=1000,
-                 clusters_lt=0, clusters_gt=10**8,
-                 noisy_streamlines_sigma=0.):
+def horizon_flow(input_files, noisy_streamlines_sigma=0., verbose=True):
     """ Horizon
 
     Parameters
@@ -236,13 +184,8 @@ def horizon_flow(input_files, cluster=False, cluster_thr=15.,
     # nib.streamlines.save(tractogram, "tmp.tck")
     # exit()
 
-    horizon(tractograms, data, affine, cluster, cluster_thr, random_colors,
-            length_lt, length_gt, clusters_lt, clusters_gt)
+    horizon(tractograms, data, affine)
 
-
-parser = IntrospectiveArgumentParser()
-parser.add_workflow(horizon_flow)
 
 if __name__ == '__main__':
-    args = parser.get_flow_args()
-    horizon_flow(**args)
+    horizon_flow(input_files=sys.argv[1:])
