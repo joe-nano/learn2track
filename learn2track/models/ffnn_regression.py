@@ -68,12 +68,12 @@ class FFNN_Regression(FFNN):
         # data_at_coords.shape : (batch_size, input_size)
         data_at_coords = self.volume_manager.eval_at_coords(coords)
 
-        if self.use_previous_direction:
-            # previous_direction.shape : (batch_size, 3)
-            previous_direction = Xi[:, 4:]
-            fprop_input = T.concatenate([data_at_coords, previous_direction], axis=1)
-        else:
-            fprop_input = data_at_coords
+        # if self.use_previous_direction:
+        #     # previous_direction.shape : (batch_size, 3)
+        #     previous_direction = Xi[:, 4:]
+        #     fprop_input = T.concatenate([data_at_coords, previous_direction], axis=1)
+        # else:
+        fprop_input = data_at_coords
 
         # Hidden state to be passed to the next GRU iteration (next _fprop call)
         # next_hidden_state.shape : n_layers * (batch_size, layer_size)
@@ -81,6 +81,9 @@ class FFNN_Regression(FFNN):
 
         # Compute the direction to follow for step (t)
         regression_out = self.layer_regression.fprop(layer_outputs[-1])
+        if self.use_previous_direction:
+            previous_direction = Xi[:, 4:]
+            regression_out += previous_direction
 
         return layer_outputs + (regression_out,)
 
