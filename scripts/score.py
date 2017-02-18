@@ -69,12 +69,3 @@ if __name__ == "__main__":
 
     print(" ".join(cmd))
     subprocess.call(" ".join(cmd), shell=True)
-
-    # Compute bundle coverage scores.
-    cmd = ["python", "~/research/src/tractometer/scripts/scil_compute_bundle_overlap_overreach.py",
-           pjoin(tractometer_output, "scores", tractogram_name + ".pkl"),
-           pjoin(scoring_data, 'masks', 'bundles'),
-           '-v', '-f']
-
-    print(" ".join(cmd))
-    subprocess.call(" ".join(cmd), shell=True)
