@@ -70,9 +70,6 @@ def build_argparser():
     p.add_argument('--mask-threshold', type=float, default=0.05,
                    help="streamlines will be terminating if they pass through a voxel with a value from the mask lower than this value. Default: 0.05")
 
-    p.add_argument('--backward-tracking-algo', type=int,
-                   help="(Deprecated) if specified, both senses of the direction obtained from the seed point will be explored. Default: 0, (i.e. only do tracking one direction) ", default=0)
-
     p.add_argument('--filter-threshold', type=float,
                    help="If specified, only streamlines with a loss value lower than the specified value will be kept.")
 
@@ -83,9 +80,6 @@ def build_argparser():
 
     p.add_argument('--discard-stopped-by-curvature', action="store_true",
                    help='if specified, discard streamlines having a too high curvature (i.e. tracking stopped because of that).')
-
-    p.add_argument('--append-previous-direction', action="store_true",
-                   help="(Deprecated) if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
 
     pft = p.add_argument_group("Particle Filtering Tractography")
     pft.add_argument('--pft-nb-retry', type=int, default=0,
@@ -106,6 +100,13 @@ def build_argparser():
                    help="if specified, prediction direction will be flip in Y")
     p.add_argument('--flip-z', action="store_true",
                    help="if specified, prediction direction will be flip in Z")
+
+    deprecated = p.add_argument_group("Deprecated")
+    deprecated.add_argument('--append-previous-direction', action="store_true",
+                            help="(Deprecated) if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
+
+    deprecated.add_argument('--backward-tracking-algo', type=int,
+                            help="(Deprecated) if specified, both senses of the direction obtained from the seed point will be explored. Default: 0, (i.e. only do tracking one direction) ", default=0)
 
     # Optional parameters
     p.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
@@ -749,7 +750,7 @@ def main():
         if args.step_size is not None:
             step_size = np.float32(args.step_size / voxel_sizes.max())
             # Also convert max length (in mm) to voxel.
-            max_nb_points = int(args.max_length / step_size)
+            max_nb_points = int(np.ceil(args.max_length / args.step_size))
         else:
             step_size = None
             max_nb_points = args.max_length
