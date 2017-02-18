@@ -833,7 +833,7 @@ def main():
                 prefix = os.path.basename(os.path.dirname(args.dwi)) + dwi_name
                 prefix = prefix.replace(".", "_")
 
-            mask_type = args.seeds[0].replace(".", "_").replace("_", "")
+            mask_type = args.seeds[0].replace(".", "_").replace("_", "").replace("/", "-")
             if "int" in args.seeds[0]:
                 mask_type = "int"
             elif "wm" in args.seeds[0]:
@@ -841,8 +841,7 @@ def main():
             elif "rois" in args.seeds[0]:
                 mask_type = "rois"
 
-            filename = "{}-{}_seeding-{}_step-{:.2f}mm_nbSeeds-{}_maxAngle-{:.1f}deg_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_useMaxComponent-{}.tck".format(
-                os.path.basename(args.name.rstrip('/'))[:6],
+            filename = "{}_seeding-{}_step-{:.2f}mm_nbSeeds-{}_maxAngle-{:.1f}deg_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_useMaxComponent-{}.tck".format(
                 prefix,
                 mask_type,
                 args.step_size,
