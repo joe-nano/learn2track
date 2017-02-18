@@ -688,10 +688,10 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
         self.use_noisy_streamlines = self.noisy_streamlines_sigma is not None
 
         # Parameter use_data_augment cannot be used in the case of a FFNN model (or any other non-recurrent model,
-        # because the targets are flipped but the inputs stay the same)
-        self.use_augment_by_flipping = False
-        if use_data_augment:
-            print("WARNING: {} cannot use parameter use_data_augment and will ignore it.".format(type(self).__name__))
+        # without feed_previous_direction because the targets are flipped but the inputs stay the same)
+        self.use_augment_by_flipping = use_data_augment
+        if use_data_augment and not feed_previous_direction:
+            print("WARNING: {} should not use use_data_augment without feed_previous_direction.".format(type(self).__name__))
 
         self.seed = seed
         self.rng = np.random.RandomState(self.seed)
@@ -800,7 +800,7 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
             if self.use_augment_by_flipping:
                 flipped_start = start + half_batch_size
                 flipped_end = end + half_batch_size
-                batch_inputs[flipped_start:flipped_end] = inputs[offset + 1:offset + length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
+                batch_inputs[flipped_start:flipped_end, :3] = inputs[offset + 1:offset + length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
                 batch_targets[flipped_start:flipped_end] = -targets[offset:offset + length - 1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
 
                 if self.feed_previous_direction:
