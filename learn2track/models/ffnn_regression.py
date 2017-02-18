@@ -5,7 +5,7 @@ import smartlearner.initializers as initer
 import theano
 import theano.tensor as T
 from learn2track.models import FFNN
-from learn2track.models.layers import LayerRegression
+from learn2track.models.layers import LayerDense, LayerRegression
 from smartlearner.interfaces.loss import Loss
 
 from learn2track.utils import l2distance
@@ -38,7 +38,9 @@ class FFNN_Regression(FFNN):
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction
-        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
+        # self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
+        self.layer_regression = LayerDense(self.hidden_sizes[-1], self.output_size, activation="tanh")
+
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
