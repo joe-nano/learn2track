@@ -77,6 +77,8 @@ def build_argparser():
 
     p.add_argument('--dilate-mask', action="store_true",
                    help="if specified, apply binary dilation on the tracking mask.")
+    p.add_argument('--dilate-seeding-mask', action="store_true",
+                   help="if specified, apply binary dilation on the seeding mask.")
 
     p.add_argument('--discard-stopped-by-curvature', action="store_true",
                    help='if specified, discard streamlines having a too high curvature (i.e. tracking stopped because of that).')
@@ -802,7 +804,7 @@ def main():
 
                 nii_seeds_data = nii_seeds.get_data()
 
-                if args.dilate_mask:
+                if args.dilate_seeding_mask:
                     import scipy
                     nii_seeds_data = scipy.ndimage.morphology.binary_dilation(nii_seeds_data).astype(nii_seeds_data.dtype)
                     
@@ -879,7 +881,7 @@ def main():
         if args.discard_stopped_by_curvature:
             nb_streamlines = len(tractogram)
             stopping_curvature_flag_is_set = is_flag_set(tractogram.data_per_streamline['stopping_flags'][:, 0], STOPPING_CURVATURE)
-            tractogram = tractogram[stopping_curvature_flag_is_set]
+            tractogram = tractogram[np.logical_not(stopping_curvature_flag_is_set)]
             print("Removed {:,} streamlines stopped for having a curvature higher than {:.2f} degree".format(nb_streamlines - len(tractogram),
                                                                                                              np.rad2deg(theta)))
 
@@ -906,16 +908,28 @@ def main():
                 prefix = os.path.basename(os.path.dirname(args.dwi)) + dwi_name
                 prefix = prefix.replace(".", "_")
 
-            mask_type = args.seeds[0].replace(".", "_").replace("_", "").replace("/", "-")
+            seed_mask_type = args.seeds[0].replace(".", "_").replace("_", "").replace("/", "-")
             if "int" in args.seeds[0]:
-                mask_type = "int"
+                seed_mask_type = "int"
             elif "wm" in args.seeds[0]:
-                mask_type = "wm"
+                seed_mask_type = "wm"
             elif "rois" in args.seeds[0]:
-                mask_type = "rois"
+                seed_mask_type = "rois"
+            
+            if "fa" in args.mask:
+                mask_type = "fa"
+            elif "wm" in args.mask:
+                mask_type = "wm"
 
-            filename = "{}_seeding-{}_step-{:.2f}mm_nbSeeds-{}_maxAngle-{:.1f}deg_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_useMaxComponent-{}.tck".format(
+            if args.dilate_seeding_mask:
+                seed_mask_type += "D"
+
+            if args.dilate_mask:
+                mask_type += "D"
+
+            filename = "{}_seed-{}_mask-{}_step-{:.2f}mm_nbSeeds-{}_maxAngleDeg-{:.1f}_keepCurv-{}_filtered-{}_minLen-{}_pftRetry-{}_pftHist-{}_trackLikePeter-{}_useMaxComponent-{}.tck".format(
                 prefix,
+                seed_mask_type,
                 mask_type,
                 args.step_size,
                 args.nb_seeds_per_voxel,
@@ -925,6 +939,7 @@ def main():
                 args.min_length,
                 args.pft_nb_retry,
                 args.pft_nb_backtrack_steps,
+                args.track_like_peter,
                 args.use_max_component
                 )
 
