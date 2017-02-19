@@ -82,7 +82,7 @@ parameter of its value. E.g 'param1-value1_param2_value2.pkl' or
 'description_param1-value1_param2_value2.pkl'.
 """
 
-METRICS = ['IB', 'VB', 'NC', 'VCWP', 'IC', 'VC', 'VCCR', 'OL', 'OR', 'ORn', 'F1']
+METRICS = ['IB', 'VB', 'NC', 'VCWP', 'IC', 'VC', 'VCCR', 'mean_OL', 'mean_OR', 'mean_ORn', 'mean_F1']
 
 
 def buildArgsParser():
@@ -135,7 +135,7 @@ def main():
             param = dict([tuple(param.split('-'))
                           for param in infos.split('_')[ind:]])
         else:
-            param = {"filename": infos}
+            param = {"filename": infos[:60]}
         # score = pickle.load(open(scoring_file))
         score = json.load(open(scoring_file))
 
