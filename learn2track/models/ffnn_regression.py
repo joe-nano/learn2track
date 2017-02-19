@@ -1,11 +1,9 @@
-from os.path import join as pjoin
-
 import numpy as np
 import smartlearner.initializers as initer
 import theano
 import theano.tensor as T
 from learn2track.models import FFNN
-from learn2track.models.layers import LayerRegression
+from learn2track.models.layers import LayerDense
 from smartlearner.interfaces.loss import Loss
 
 from learn2track.utils import l2distance
@@ -17,7 +15,7 @@ class FFNN_Regression(FFNN):
     """ A standard FFNN model with a regression layer stacked on top of it.
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, use_previous_direction=False, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, use_previous_direction=False, predict_offset=False, **_):
         """
         Parameters
         ----------
@@ -33,12 +31,20 @@ class FFNN_Regression(FFNN):
             Name of the activation function to use in the hidden layers
         use_previous_direction : bool
             Use the previous direction as an additional input
+        predict_offset : bool
+            Predict the offset from the previous direction instead (need use_previous_direction).
         """
         super().__init__(input_size, hidden_sizes, activation)
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction
-        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
+        self.predict_offset = predict_offset
+
+        if self.predict_offset:
+            assert self.use_previous_direction  # Need previous direction to predict offset.
+
+        layer_regression_activation = "tanh" if self.predict_offset else "identity"
+        self.layer_regression = LayerDense(self.hidden_sizes[-1], self.output_size, activation=layer_regression_activation)
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -49,6 +55,7 @@ class FFNN_Regression(FFNN):
         hyperparameters = super().hyperparameters
         hyperparameters['output_size'] = self.output_size
         hyperparameters['use_previous_direction'] = self.use_previous_direction
+        hyperparameters['predict_offset'] = self.predict_offset
         return hyperparameters
 
     @property
@@ -81,6 +88,8 @@ class FFNN_Regression(FFNN):
 
         # Compute the direction to follow for step (t)
         regression_out = self.layer_regression.fprop(layer_outputs[-1])
+        if self.predict_offset:
+            regression_out += previous_direction  # Skip-connection from the previous direction.
 
         return layer_outputs + (regression_out,)
 

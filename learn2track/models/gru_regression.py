@@ -7,7 +7,7 @@ import theano.tensor as T
 from smartlearner.interfaces import Loss
 import smartlearner.initializers as initer
 
-from learn2track.models.layers import LayerRegression
+from learn2track.models.layers import LayerDense
 from learn2track.models import GRU
 from learn2track.utils import l2distance
 
@@ -17,7 +17,7 @@ floatX = theano.config.floatX
 class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
     """
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, predict_offset=False, **_):
         """
         Parameters
         ----------
@@ -31,12 +31,20 @@ class GRU_Regression(GRU):
             Number of units the regression layer should have.
         use_previous_direction : bool
             Use the previous direction as an additional input
+        predict_offset : bool
+            Predict the offset from the previous direction instead (need use_previous_direction).
         """
         super().__init__(input_size, hidden_sizes)
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction
-        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.output_size)
+        self.predict_offset = predict_offset
+
+        if self.predict_offset:
+            assert self.use_previous_direction  # Need previous direction to predict offset.
+
+        layer_regression_activation = "tanh" if self.predict_offset else "identity"
+        self.layer_regression = LayerDense(self.hidden_sizes[-1], self.output_size, activation=layer_regression_activation)
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -47,6 +55,7 @@ class GRU_Regression(GRU):
         hyperparameters = super().hyperparameters
         hyperparameters['output_size'] = self.output_size
         hyperparameters['use_previous_direction'] = self.use_previous_direction
+        hyperparameters['predict_offset'] = self.predict_offset
         return hyperparameters
 
     @property
@@ -79,6 +88,8 @@ class GRU_Regression(GRU):
 
         # Compute the direction to follow for step (t)
         regression_out = self.layer_regression.fprop(next_hidden_state[-1])
+        if self.predict_offset:
+            regression_out += previous_direction  # Skip-connection from the previous direction.
 
         return next_hidden_state + (regression_out,)
 

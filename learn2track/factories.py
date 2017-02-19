@@ -90,7 +90,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                               input_size=input_size,
                               hidden_sizes=hyperparams['hidden_sizes'],
                               output_size=output_size,
-                              use_previous_direction=hyperparams['feed_previous_direction'])
+                              use_previous_direction=hyperparams['feed_previous_direction'],
+                              predict_offset=hyperparams['predict_offset'])
 
     elif hyperparams['model'] == 'gru_multistep':
         from learn2track.models import GRU_Multistep_Gaussian
@@ -119,7 +120,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                                hidden_sizes=hyperparams['hidden_sizes'],
                                output_size=output_size,
                                activation=hyperparams['activation'],
-                               use_previous_direction=hyperparams['feed_previous_direction'])
+                               use_previous_direction=hyperparams['feed_previous_direction'],
+                               predict_offset=hyperparams['predict_offset'])
 
     else:
         raise ValueError("Unknown model!")
