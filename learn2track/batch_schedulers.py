@@ -148,7 +148,7 @@ class TractographyBatchScheduler(BatchScheduler):
 
         if self.feed_previous_direction:
             previous_directions = np.concatenate([np.zeros((batch_size, 1, 3), dtype=floatX), batch_targets[:, :-1]], axis=1)
-            previous_directions = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=2, keepdims=True))  # Normalized directions
+            previous_directions = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=2, keepdims=True) + 1e-6)  # Normalized directions
             batch_inputs = np.concatenate([batch_inputs, previous_directions], axis=2)  # Streamlines coords + dwi ID + previous direction
 
         return batch_inputs, batch_targets, batch_masks
@@ -424,7 +424,7 @@ class MultistepSequenceBatchScheduler(TractographyBatchSchedulerWithProportional
 
         if self.feed_previous_direction:
             previous_directions = np.concatenate([np.zeros((batch_size, 1, 3), dtype=floatX), batch_targets[:, :-self.k]], axis=1)
-            previous_directions = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=2, keepdims=True))  # Normalized directions
+            previous_directions = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=2, keepdims=True) + 1e-6)  # Normalized directions
             batch_inputs = np.concatenate([batch_inputs, previous_directions], axis=2)  # Streamlines coords + dwi ID + previous direction
 
         return batch_inputs, batch_targets, batch_masks
@@ -778,7 +778,7 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
             if self.feed_previous_direction:
                 batch_inputs[start, 3:] = np.zeros((1, 3))
                 previous_directions = batch_targets[start:end - 1]
-                batch_inputs[start + 1:end, 3:] = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=1, keepdims=True))  # Normalized directions
+                batch_inputs[start + 1:end, 3:] = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=1, keepdims=True) + 1e-6)  # Normalized directions
 
             if self.use_augment_by_flipping:
                 flipped_start = start + half_batch_size
@@ -789,7 +789,7 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
                 if self.feed_previous_direction:
                     batch_inputs[flipped_start, 3:] = np.zeros((1, 3))
                     previous_directions = batch_targets[flipped_start:flipped_end - 1]
-                    batch_inputs[flipped_start + 1:flipped_end, 3:] = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=1, keepdims=True))  # Normalized directions
+                    batch_inputs[flipped_start + 1:flipped_end, 3:] = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=1, keepdims=True) + 1e-6)  # Normalized directions
 
         batch_volume_ids = np.repeat(volume_ids, list(map(lambda x: len(x)-1, streamlines)))
         if self.use_augment_by_flipping:

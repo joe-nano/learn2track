@@ -193,7 +193,7 @@ class L2DistanceForSequences(Loss):
         self.samples = regression_outputs
 
         # loss_per_time_step.shape = (batch_size, seq_len)
-        self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets)
+        self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets, eps=self.eps)
         # loss_per_seq.shape = (batch_size,)
         self.loss_per_seq = T.sum(self.loss_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
 
