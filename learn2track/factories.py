@@ -132,7 +132,7 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         # return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize_output=hyperparams["normalize"])
 
     elif hyperparams['model'] == 'gru_regression':
-        if loss_type is not None and not loss_type == 'l2_distance':
+        if loss_type is not None:
             raise ValueError("loss_type not available for gru_regression: {}".format(loss_type))
 
         from learn2track.models.gru_regression import L2DistanceForSequences
