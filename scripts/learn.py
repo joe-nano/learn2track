@@ -58,6 +58,10 @@ def build_train_gru_argparser(subparser):
     model.add_argument('--feed-previous-direction', action="store_true",
                        help='if specified, the model will be given the previous direction as an additional input')
 
+    model.add_argument('--predict-offset', action="store_true",
+                       help=('if specified, the model will predict the offset from the previous direction instead',
+                             ' (need --feed-previous-direction)'))
+
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -152,6 +156,10 @@ def build_train_ffnn_regression_argparser(subparser):
 
     model.add_argument('--feed-previous-direction', action="store_true",
                        help='if specified, the model will be given the previous direction as an additional input')
+
+    model.add_argument('--predict-offset', action="store_true",
+                       help=('if specified, the model will predict the offset from the previous direction instead',
+                             ' (need --feed-previous-direction)'))
 
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
@@ -276,6 +284,7 @@ def main():
     hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view', 'shuffle_streamlines']
     # Use this for hyperparams added in a new version, but nonexistent from older versions
     retrocompatibility_defaults = {'feed_previous_direction': False,
+                                   'predict_offset': False,
                                    'normalize': False,
                                    'sort_streamlines': False,
                                    'keep_step_size': False}
