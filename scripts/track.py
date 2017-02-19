@@ -324,7 +324,7 @@ def rotate(directions, axis, degree=180):
     for a, b in zip(directions, axis):
         new_directions += [-a + 2 * np.dot(a, b) / np.dot(b, b) * b]
 
-    return np.concatenate(new_directions, axis=0)
+    return np.stack(new_directions, axis=0)
 
 
 class Tracker(object):
@@ -606,7 +606,7 @@ def track(tracker, seeds, step_size, is_stopping, nb_retry=0, nb_backtrack_steps
         else:
             tractogram += tracker.harvest()
 
-        if verbose:
+        if verbose and nb_retry == 0:
             print("")
 
         i += 1
@@ -800,7 +800,13 @@ def main():
                 # affine_seedsvox2dwivox = mask_vox => rasmm space => dwi_vox
                 affine_seedsvox2dwivox = np.dot(affine_rasmm2dwivox, nii_seeds.affine)
 
-                indices = np.array(np.where(nii_seeds.get_data())).T
+                nii_seeds_data = nii_seeds.get_data()
+
+                if args.dilate_mask:
+                    import scipy
+                    nii_seeds_data = scipy.ndimage.morphology.binary_dilation(nii_seeds_data).astype(nii_seeds_data.dtype)
+                    
+                indices = np.array(np.where(nii_seeds_data)).T
                 for idx in indices:
                     seeds_in_voxel = idx + rng.uniform(-0.5, 0.5, size=(args.nb_seeds_per_voxel, 3))
                     seeds_in_voxel = nib.affines.apply_affine(affine_seedsvox2dwivox, seeds_in_voxel)
