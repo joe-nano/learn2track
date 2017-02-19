@@ -32,7 +32,8 @@ def test_gru_mixture_fprop():
                        'SGD': "1e-2",
                        'hidden_sizes': hidden_sizes,
                        'learn_to_stop': False,
-                       'normalize': False}
+                       'normalize': False,
+                       'feed_previous_direction': False}
         model = factories.model_factory(hyperparams,
                                         input_size=volume_manager.data_dimension,
                                         output_size=batch_scheduler.target_size,
