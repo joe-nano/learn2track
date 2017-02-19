@@ -20,3 +20,47 @@ Run the conversion script.
 
 If everything went right, clean temporary files.
 - `source las2ras_for_hcp.sh 100307 clean`
+
+
+
+# Tractometer scoring (Python 2 only)
+
+## Prerequisites
+- TractConverter
+`pip install https://github.com/MarcCote/tractconverter/archive/master.zip`
+
+- Nibabel (Marc's bleeding_edge)
+`pip install https://github.com/MarcCote/nibabel/archive/bleeding_edge.zip`
+
+- texttable
+`pip install texttable`
+
+- Cython
+`pip install cython`
+
+- Dipy (Marc's bleeding_edge_for_learn2track)
+`pip install https://github.com/MarcCote/dipy/archive/bleeding_edge_for_learn2track.zip`
+
+- Scilpy found at https://bitbucket.org/MarcCote/scilpy (ask Marc)
+`git clone https://MarcCote@bitbucket.org/MarcCote/scilpy.git`
+`python setup.py build_no_gsl`
+`pip install -e .`
+
+- Tractometer found at https://bitbucket.org/MarcCote/tractometer/overview (ask Marc)
+`git clone https://MarcCote@bitbucket.org/MarcCote/tractometer.git`
+`cd tractometer`
+`git checkout bleeding_edge`
+`pip install -e .`
+
+
+## Data
+
+### ISMRM 2015 Challenge
+Download the scoring data ``
+More data available here `http://tractometer.org/ismrm_2015_challenge/data`
+
+## Perform evaluation
+`python ~/research/src/learn2track/scripts/score.py tractogram.tck scoring_data/ --out tractometer_folder --ismrm-tractometer`
+
+## View score
+`python ~/research/src/learn2track/scripts/tractometer/score_viewer.py --scores tractometer_folder/*/scores/*json`
