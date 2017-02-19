@@ -16,7 +16,7 @@ class TractographyBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines coming from multiple subjects. """
 
     def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False,
-                 shuffle_streamlines=True, resample_streamlines=True, feed_previous_direction=False):
+                 shuffle_streamlines=True, resample_streamlines=True, feed_previous_direction=False, sort_streamlines_by_length=False):
         """
         Parameters
         ----------
@@ -37,6 +37,8 @@ class TractographyBatchScheduler(BatchScheduler):
             Should be always set to True for now (until the method _process_batch supports it).
         feed_previous_direction : bool
             Should the previous direction be appended to the input when making a prediction?
+        sort_streamlines_by_length : bool
+            Streamlines will be approximatively regrouped according to their length.
         """
         self.dataset = dataset
         self.batch_size = batch_size
@@ -51,9 +53,12 @@ class TractographyBatchScheduler(BatchScheduler):
         self.rng_noise = np.random.RandomState(self.seed+1)
         self.shuffle_streamlines = shuffle_streamlines
         self.resample_streamlines = resample_streamlines
-        self.indices = np.arange(len(self.dataset))
-
+        self.sort_streamlines_by_length = sort_streamlines_by_length
         self.feed_previous_direction = feed_previous_direction
+        
+        # Sort streamlines according to their length by default.
+        # This should speed up validation.
+        self.indices = np.argsort(self.dataset.streamlines._lengths)
 
         # Shared variables
         self._shared_batch_inputs = sharedX(np.ndarray((0, 0, 0)))
@@ -148,7 +153,7 @@ class TractographyBatchScheduler(BatchScheduler):
 
         if self.feed_previous_direction:
             previous_directions = np.concatenate([np.zeros((batch_size, 1, 3), dtype=floatX), batch_targets[:, :-1]], axis=1)
-            previous_directions = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=2, keepdims=True))  # Normalized directions
+            previous_directions = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=2, keepdims=True) + 1e-6)  # Normalized directions
             batch_inputs = np.concatenate([batch_inputs, previous_directions], axis=2)  # Streamlines coords + dwi ID + previous direction
 
         return batch_inputs, batch_targets, batch_masks
@@ -168,6 +173,12 @@ class TractographyBatchScheduler(BatchScheduler):
     def __iter__(self):
         if self.shuffle_streamlines:
             self.rng.shuffle(self.indices)
+
+        if self.sort_streamlines_by_length:
+            lengths = self.dataset.streamlines._lengths
+            step = len(lengths) // 100
+            intervals = range(step, len(lengths), step)
+            self.indices = np.argpartition(lengths, intervals)
 
         for batch_count in range(self.nb_updates_per_epoch):
             batch_inputs, batch_targets, batch_mask = self._next_batch(batch_count)
@@ -193,7 +204,8 @@ class TractographyBatchScheduler(BatchScheduler):
                  "seed": self.seed,
                  "rng": pickle.dumps(self.rng),
                  "rng_noise": pickle.dumps(self.rng_noise),
-                 "indices": self.indices
+                 "indices": self.indices,
+                 "sort_streamlines_by_length": self.sort_streamlines_by_length
                  }
         return state
 
@@ -217,6 +229,11 @@ class TractographyBatchScheduler(BatchScheduler):
             self.feed_previous_direction = False
         else:
             self.feed_previous_direction = state["feed_previous_direction"]
+
+        if state["version"] < 5:
+            self.sort_streamlines_by_length = False
+        else:
+            self.sort_streamlines_by_length = state["sort_streamlines_by_length"]
 
     def save(self, savedir):
         state = self.get_state()
