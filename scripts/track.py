@@ -550,6 +550,7 @@ class BackwardTracker(Tracker):
         self.seeds = [self.seeds[i] for i in np.arange(len(self.seeds))[idx]]
         self.nb_init_steps = self.nb_init_steps[idx]
 
+
 class BackwardPeterTracker(BackwardTracker, PeterTracker):
 
     def regrow(self, idx, step_size, backtrack_n_steps):
@@ -617,8 +618,10 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
     if batch_size is None:
         batch_size = len(seeds)
 
-    TrackerCls = PeterTracker if args['track_like_peter'] else Tracker
-    BackwardTrackerCls = BackwardPeterTracker if args['track_like_peter'] else BackwardTracker
+    nb_retry = 1 if args.track_like_peter else args.pft_nb_retry
+    nb_backtrack_steps = 1 if args.track_like_peter else args.pft_nb_backtrack_steps
+    TrackerCls = PeterTracker if args.track_like_peter else Tracker
+    BackwardTrackerCls = BackwardPeterTracker if args.track_like_peter else BackwardTracker
 
     while True:
         try:
@@ -634,7 +637,7 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
                 tracker = TrackerCls(model, is_stopping, args.pft_nb_backtrack_steps, args.use_max_component,
                                      args.flip_x, args.flip_y, args.flip_z, compress_streamlines=False)
                 batch_tractogram = track(tracker=tracker, seeds=seeds[start:end], step_size=step_size, is_stopping=is_stopping,
-                                         nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
+                                         nb_retry=nb_retry, nb_backtrack_steps=nb_backtrack_steps, verbose=args.verbose)
 
                 stopping_flags = batch_tractogram.data_per_streamline['stopping_flags'].astype(np.uint8)
                 print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
@@ -646,7 +649,7 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
                                              args.flip_x, args.flip_y, args.flip_z, compress_streamlines=True)
                 streamlines = [s[::-1] for s in batch_tractogram.streamlines]  # Flip streamlines (the first half).
                 batch_tractogram = track(tracker=tracker, seeds=streamlines, step_size=step_size, is_stopping=is_stopping,
-                                         nb_retry=args.pft_nb_retry, nb_backtrack_steps=args.pft_nb_backtrack_steps, verbose=args.verbose)
+                                         nb_retry=nb_retry, nb_backtrack_steps=nb_backtrack_steps, verbose=args.verbose)
 
                 stopping_flags = batch_tractogram.data_per_streamline['stopping_flags'].astype(np.uint8)
                 print("Backward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
