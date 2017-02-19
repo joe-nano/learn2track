@@ -63,7 +63,8 @@ def main():
     # Use this for hyperparams added in a new version, but nonexistent from older versions
     retrocompatibility_defaults = {'feed_previous_direction': False,
                                    'normalize': False,
-                                   'keep_step_size': False}
+                                   'keep_step_size': False,
+                                   'sort_streamlines': False}
     for new_hyperparams, default_value in retrocompatibility_defaults.items():
         if new_hyperparams not in hyperparams:
             hyperparams[new_hyperparams] = default_value

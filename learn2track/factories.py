@@ -205,7 +205,8 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                           noisy_streamlines_sigma=hyperparams['noisy_streamlines_sigma'] if train_mode else None,
                                           shuffle_streamlines=train_mode,
                                           resample_streamlines=(not hyperparams['keep_step_size']) and train_mode,
-                                          feed_previous_direction=hyperparams['feed_previous_direction'])
+                                          feed_previous_direction=hyperparams['feed_previous_direction'],
+                                          sort_streamlines_by_length=hyperparams['sort_streamlines'] and train_mode)
 
     elif hyperparams['model'] == 'gru_multistep':
         from learn2track.batch_schedulers import MultistepSequenceBatchScheduler
