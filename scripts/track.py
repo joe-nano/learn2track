@@ -915,6 +915,8 @@ def main():
                 seed_mask_type = "wm"
             elif "rois" in args.seeds[0]:
                 seed_mask_type = "rois"
+            elif "bundles" in args.seeds[0]:
+                seed_mask_type = "bundles"
             
             if "fa" in args.mask:
                 mask_type = "fa"
