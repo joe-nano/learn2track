@@ -55,7 +55,7 @@ class TractographyBatchScheduler(BatchScheduler):
         self.resample_streamlines = resample_streamlines
         self.sort_streamlines_by_length = sort_streamlines_by_length
         self.feed_previous_direction = feed_previous_direction
-        
+
         # Sort streamlines according to their length by default.
         # This should speed up validation.
         self.indices = np.argsort(self.dataset.streamlines._lengths)
@@ -193,7 +193,7 @@ class TractographyBatchScheduler(BatchScheduler):
         return {}  # No updates
 
     def get_state(self):
-        state = {"version": 4,
+        state = {"version": 5,
                  "batch_size": self.batch_size,
                  "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
                  "use_augment_by_flipping": self.use_augment_by_flipping,
