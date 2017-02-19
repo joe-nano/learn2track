@@ -132,7 +132,7 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         # return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize_output=hyperparams["normalize"])
 
     elif hyperparams['model'] == 'gru_regression':
-        if loss_type is not None:
+        if loss_type is not None and not loss_type == 'l2_distance':
             raise ValueError("loss_type not available for gru_regression: {}".format(loss_type))
 
         from learn2track.models.gru_regression import L2DistanceForSequences
@@ -160,10 +160,14 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
             return MultivariateGaussianMixtureNLL(model, dataset)
         else:
             raise ValueError("Unrecognized loss_type: {}".format(loss_type))
+
     elif hyperparams['model'] == 'ffnn_regression':
         if loss_type == 'expected_value':
             from learn2track.models.ffnn_regression import UndirectedL2Distance
             return UndirectedL2Distance(model, dataset, hyperparams['normalize'])
+        elif loss_type == 'l2_distance':
+            from learn2track.models.ffnn_regression import L2Distance
+            return L2Distance(model, dataset, hyperparams['normalize'])
         else:
             from learn2track.models.ffnn_regression import CosineSquaredLoss
             return CosineSquaredLoss(model, dataset, normalize_output=hyperparams['normalize'])
