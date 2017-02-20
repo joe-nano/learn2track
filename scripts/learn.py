@@ -382,9 +382,9 @@ def main():
                                                              dataset=validset,
                                                              train_mode=False)
 
-            valid_l2 = loss_factory(hyperparams, model, validset, loss_type="l2_distance")
+            valid_l2 = loss_factory(hyperparams, model, validset, loss_type="expected_value")
             valid_l2_error = views.LossView(loss=valid_l2, batch_scheduler=valid_batch_scheduler2)
-            trainer.append_task(tasks.Print("Validset - L2           : {0:.2f} | {1:.2f}", valid_l2_error.sum, valid_l2_error.mean))
+            trainer.append_task(tasks.Print("Validset - {}".format(valid_l2.__class__.__name__) + "\t: {0:.2f} | {1:.2f}", valid_l2_error.sum, valid_l2_error.mean))
 
         # HACK: Restore trainset volume manager
         model.volume_manager = trainset_volume_manager
