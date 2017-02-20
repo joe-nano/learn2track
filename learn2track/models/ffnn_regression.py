@@ -159,35 +159,6 @@ class FFNN_Regression(FFNN):
         return _gen
 
 
-class L2Distance(Loss):
-    """ Computes the L2 error of the output.
-
-    Notes
-    -----
-    This loss assumes the regression target is a vector.
-    """
-    def __init__(self, model, dataset, normalize_output=False, eps=1e-6):
-        super().__init__(model, dataset)
-        self.normalize_output = normalize_output
-        self.eps = eps
-
-    def _get_updates(self):
-        return {}  # There is no updates for L2Distance.
-
-    def _compute_losses(self, model_output):
-        # regression_outputs.shape = (batch_size, out_dim)
-        regression_outputs = model_output
-        if self.normalize_output:
-            regression_outputs /= l2distance(regression_outputs, keepdims=True, eps=self.eps)
-
-        self.samples = regression_outputs
-
-        # loss_per_time_step.shape = (batch_size,)
-        self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets)
-
-        return self.loss_per_time_step
-
-
 class CosineSquaredLoss(Loss):
     """ Computes the sine squared error of the angle between the target and the output.
 

@@ -165,12 +165,8 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
 
     elif hyperparams['model'] == 'ffnn_regression':
         if loss_type == 'expected_value':
-            if hyperparams['predict_offset']:
-                from learn2track.models.ffnn_regression import L2Distance
-                return L2Distance(model, dataset, hyperparams['normalize'])
-            else:
-               from learn2track.models.ffnn_regression import UndirectedL2Distance
-               return UndirectedL2Distance(model, dataset, hyperparams['normalize'])
+            from learn2track.models.ffnn_regression import UndirectedL2Distance
+            return UndirectedL2Distance(model, dataset, hyperparams['normalize'])
         else:
             from learn2track.models.ffnn_regression import CosineSquaredLoss
             return CosineSquaredLoss(model, dataset, normalize_output=hyperparams['normalize'])
