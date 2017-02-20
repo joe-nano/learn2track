@@ -27,30 +27,30 @@ If everything went right, clean temporary files.
 
 ## Prerequisites
 - TractConverter
-`pip install https://github.com/MarcCote/tractconverter/archive/master.zip`
+  - `pip install https://github.com/MarcCote/tractconverter/archive/master.zip`
 
 - Nibabel (Marc's bleeding_edge)
-`pip install https://github.com/MarcCote/nibabel/archive/bleeding_edge.zip`
+  - `pip install https://github.com/MarcCote/nibabel/archive/bleeding_edge.zip`
 
 - texttable
-`pip install texttable`
+  - `pip install texttable`
 
 - Cython
-`pip install cython`
+  - `pip install cython`
 
 - Dipy (Marc's bleeding_edge_for_learn2track)
-`pip install https://github.com/MarcCote/dipy/archive/bleeding_edge_for_learn2track.zip`
+  - `pip install https://github.com/MarcCote/dipy/archive/bleeding_edge_for_learn2track.zip`
 
 - Scilpy found at https://bitbucket.org/MarcCote/scilpy (ask Marc)
-`git clone https://MarcCote@bitbucket.org/MarcCote/scilpy.git`
-`python setup.py build_no_gsl`
-`pip install -e .`
+  - `git clone https://MarcCote@bitbucket.org/MarcCote/scilpy.git`
+  - `python setup.py build_no_gsl`
+  - `pip install -e .`
 
 - Tractometer found at https://bitbucket.org/MarcCote/tractometer/overview (ask Marc)
-`git clone https://MarcCote@bitbucket.org/MarcCote/tractometer.git`
-`cd tractometer`
-`git checkout bleeding_edge`
-`pip install -e .`
+  - `git clone https://MarcCote@bitbucket.org/MarcCote/tractometer.git`
+  - `cd tractometer`
+  - `git checkout bleeding_edge`
+  - `pip install -e .`
 
 
 ## Data
