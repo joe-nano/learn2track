@@ -145,9 +145,9 @@ def maybe_create_experiment_folder(args, exclude=[], retrocompatibility_defaults
             if name in hyperparams_loaded:
                 del hyperparams_loaded[name]
 
-        for new_hyperparams, default_value in retrocompatibility_defaults.items():
-            if new_hyperparams not in hyperparams_loaded:
-                hyperparams_loaded[new_hyperparams] = default_value
+        for new_hyperparam, default_value in retrocompatibility_defaults.items():
+            if new_hyperparam in hyperparams and new_hyperparam not in hyperparams_loaded:
+                hyperparams_loaded[new_hyperparam] = default_value
 
         if hyperparams != hyperparams_loaded:
             print("{\n" + "\n".join(["{}: {}".format(k, hyperparams[k]) for k in sorted(hyperparams.keys())]) + "\n}")
