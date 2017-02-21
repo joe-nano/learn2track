@@ -63,6 +63,9 @@ def build_argparser():
     DESCRIPTION = ("Script performing T-SNE visualization of some datasets.")
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
+    p.add_argument('--nb-streamlines-per-subject', type=int, default=2000,
+                   help='nb of streamlines per subject to use. Default: %(default)s.')
+
     # Dataset options
     dataset = p.add_argument_group("Data options")
     dataset.add_argument('subjects', nargs='+',
