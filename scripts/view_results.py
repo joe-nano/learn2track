@@ -101,6 +101,8 @@ def extract_result_from_experiment(e):
     """e: `Experiment` object"""
     entry = OrderedDict()
     entry["Hidden Size(s)"] = "-".join(map(str, e.hyperparams.get("hidden_sizes", [])))
+    entry["Feed previous direction"] = e.hyperparams.get("feed_previous_direction", "")
+    entry["Use sh coeff"] = e.hyperparams.get("use_sh_coeff", "")
     entry["Optimizer"] = get_optimizer(e)
     entry["Optimizer params"] = e.hyperparams.get(get_optimizer(e), "")
     entry["Noise sigma"] = e.hyperparams.get("noisy_streamlines_sigma", "")
