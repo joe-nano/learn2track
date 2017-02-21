@@ -9,12 +9,10 @@ sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
 
 import numpy as np
 import argparse
-from os.path import join as pjoin
 
 import theano
 import theano.tensor as T
 
-from learn2track import utils
 from learn2track.utils import Timer
 
 from learn2track import datasets
@@ -89,22 +87,6 @@ def main():
     args = parser.parse_args()
     print(args)
     print("Using Theano v.{}".format(theano.version.short_version))
-
-    hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view', 'shuffle_streamlines']
-    # Use this for hyperparams added in a new version, but nonexistent from older versions
-    retrocompatibility_defaults = {'feed_previous_direction': False,
-                                   'predict_offset': False,
-                                   'normalize': False,
-                                   'sort_streamlines': False,
-                                   'keep_step_size': False}
-    experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
-                                                                                  retrocompatibility_defaults=retrocompatibility_defaults)
-
-    # Log the command currently running.
-    with open(pjoin(experiment_path, 'cmd.txt'), 'a') as f:
-        f.write(" ".join(sys.argv) + "\n")
-
-    print("Resuming:" if resuming else "Creating:", experiment_path)
 
     with Timer("Loading dataset", newline=True):
         volume_manager = VolumeManager()
