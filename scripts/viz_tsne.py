@@ -110,9 +110,9 @@ def main():
         # Keep the same number of streamlines per subject
         new_inputs = []
         new_mask = []
-        for i in range(len(args.subject)):
+        for i in range(len(args.subjects)):
             subset = inputs[:, 0, -1] == i
-            if len(subset.sum()) < args.nb_streamlines_per_subject:
+            if subset.sum() < args.nb_streamlines_per_subject:
                 raise NameError("Not enough streamlines for subject #{}".format(i))
 
             new_inputs += [inputs[subset][:args.nb_streamlines_per_subject]]
@@ -128,7 +128,8 @@ def main():
         coords = T.matrix('coords')
         eval_at_coords = theano.function([coords], volume_manager.eval_at_coords(coords))
 
-        coords = inputs[mask][idx]
+        M = 2000 * len(dataset.subjects)
+        coords = inputs[mask][idx[:M]]
         X = eval_at_coords(coords)
 
         from sklearn.manifold.t_sne import TSNE
