@@ -14,6 +14,7 @@ import itertools
 import theano
 import time
 import nibabel as nib
+import theano.tensor as T
 from nibabel.streamlines import ArraySequence, Tractogram
 
 from smartlearner import views
@@ -131,13 +132,15 @@ def main():
     with Timer("Scoring...", newline=True):
         dummy_status = Status()  # Forces recomputing results
         losses = l2_error.losses.view(dummy_status)
+
         mean = float(l2_error.mean.view(dummy_status))
         stderror = float(l2_error.stderror.view(dummy_status))
 
         if args.loss_type == "NLL":
-            losses = np.exp(-losses)
-            mean = np.exp(-mean)
-            stderror = np.exp(-stderror)
+            # Renormalize probs
+            losses = T.nnet.softmax(losses).eval()
+            mean = np.mean(losses)  #np.exp(-mean)
+            stderror = np.std(losses)  #np.exp(-stderror)
 
         print("Loss: {:.4f} ± {:.4f}".format(mean, stderror))
         print("Min: {:.4f}".format(losses.min()))
@@ -146,7 +149,14 @@ def main():
 
     with Timer("Saving streamlines"):
         tractogram = Tractogram(dataset.streamlines, affine_to_rasmm=dataset.subjects[0].signal.affine)
-        tractogram.data_per_streamline['loss'] = losses
+        #tractogram.data_per_streamline['loss'] = losses  # Not supported in MI-Brain for now.
+
+        # Color streamlines
+        from dipy.viz import fvtk
+        colors = fvtk.create_colormap(losses)
+        colors_per_point = nib.streamlines.ArraySequence([np.tile(c*255, (len(s), 1)) for s, c in zip(tractogram.streamlines, colors)])
+        tractogram.data_per_point['color'] = colors_per_point
+
         nib.streamlines.save(tractogram, args.out)
 
     if args.prune is not None:
