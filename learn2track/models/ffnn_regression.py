@@ -77,6 +77,7 @@ class FFNN_Regression(FFNN):
 
         if self.use_previous_direction:
             # previous_direction.shape : (batch_size, 3)
+            print("Using previous direction")
             previous_direction = Xi[:, 4:]
             fprop_input = T.concatenate([data_at_coords, previous_direction], axis=1)
         else:
@@ -89,6 +90,7 @@ class FFNN_Regression(FFNN):
         # Compute the direction to follow for step (t)
         regression_out = self.layer_regression.fprop(layer_outputs[-1])
         if self.predict_offset:
+            print("Predicting offset")
             regression_out += previous_direction  # Skip-connection from the previous direction.
 
         return layer_outputs + (regression_out,)
