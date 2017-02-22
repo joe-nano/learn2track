@@ -49,7 +49,8 @@ def build_parser():
                            help='Use timestep expected value L2 error to color streamlines')
     loss_type.add_argument('--maximum-component', action='store_const', dest='loss_type', const='maximum_component',
                            help='Use timestep maximum distribution component L2 error to color streamlines')
-
+    loss_type.add_argument('--NLL', action='store_const', dest='loss_type', const='NLL',
+                           help='Use NLL to color streamlines')
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
@@ -120,6 +121,10 @@ def main():
                                                   use_data_augment=False,  # Otherwise it doubles the number of losses :-/
                                                   train_mode=False,
                                                   batch_size_override=args.batch_size)
+        loss_type = args.loss_type
+        if loss_type == "NLL":
+            loss_type = None
+
         loss = loss_factory(hyperparams, model, dataset, loss_type=args.loss_type)
         l2_error = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
 
@@ -128,6 +133,12 @@ def main():
         losses = l2_error.losses.view(dummy_status)
         mean = float(l2_error.mean.view(dummy_status))
         stderror = float(l2_error.stderror.view(dummy_status))
+
+        if loss_type == "NLL":
+            losses = np.exp(-losses)
+            mean = np.exp(-mean)
+            stderror = np.exp(-stderror)
+
         print("Loss: {:.4f} ± {:.4f}".format(mean, stderror))
         print("Min: {:.4f}".format(losses.min()))
         print("Max: {:.4f}".format(losses.max()))
