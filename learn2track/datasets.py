@@ -1,10 +1,12 @@
 from __future__ import division
 
+import re
 import numpy as np
 
 import theano
 import theano.tensor as T
 import nibabel as nib
+from dipy.core.gradients import gradient_table
 
 from smartlearner import Dataset
 from learn2track.utils import Timer
@@ -219,3 +221,42 @@ def load_tractography_dataset(subject_files, volume_manager, name="HCP", use_sh_
             subjects.append(tracto_data)
 
     return TractographyDataset(subjects, name, keep_on_cpu=True)
+
+
+def load_tractography_dataset_from_dwi_and_tractogram(dwi, tractogram, volume_manager, use_sh_coeffs=False, bvals=None, bvecs=None):
+    # Load signal
+    signal = nib.load(dwi)
+    signal.get_data()  # Forces loading volume in-memory.
+    basename = re.sub('(\.gz|\.nii.gz)$', '', dwi)
+    bvals = basename + '.bvals' if bvals is None else bvals
+    bvecs = basename + '.bvecs' if bvecs is None else bvecs
+
+    gradients = gradient_table(bvals, bvecs)
+    tracto_data = TractographyData(signal, gradients)
+
+    # Compute matrix that brings streamlines back to diffusion voxel space.
+    rasmm2vox_affine = np.linalg.inv(signal.affine)
+
+    # Load streamlines
+    tfile = nib.streamlines.load(tractogram)
+    tfile.tractogram.apply_affine(rasmm2vox_affine)
+
+    # Add streamlines to the TractogramData
+    tracto_data.add(tfile.streamlines, "tractogram")
+
+    dwi = tracto_data.signal
+    bvals = tracto_data.gradients.bvals
+    bvecs = tracto_data.gradients.bvecs
+
+    if use_sh_coeffs:
+        # Use 45 spherical harmonic coefficients to represent the diffusion signal.
+        volume = neurotools.get_spherical_harmonics_coefficients(dwi, bvals, bvecs).astype(np.float32)
+    else:
+        # Resample the diffusion signal to have 100 directions.
+        volume = neurotools.resample_dwi(dwi, bvals, bvecs).astype(np.float32)
+
+    tracto_data.signal.uncache()  # Free some memory as we don't need the original signal.
+    subject_id = volume_manager.register(volume)
+    tracto_data.subject_id = subject_id
+
+    return TractographyDataset([tracto_data], "dataset", keep_on_cpu=True)
