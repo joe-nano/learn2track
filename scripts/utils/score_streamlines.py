@@ -129,6 +129,9 @@ def main():
         mean = float(l2_error.mean.view(dummy_status))
         stderror = float(l2_error.stderror.view(dummy_status))
         print("Loss: {:.4f} ± {:.4f}".format(mean, stderror))
+        print("Min: {:.4f}".format(losses.min()))
+        print("Max: {:.4f}".format(losses.max()))
+        print("Percentiles: {}".format(np.percentile(losses, [0, 25, 50, 75, 100])))
 
     with Timer("Saving streamlines"):
         tractogram = Tractogram(dataset.streamlines, affine_to_rasmm=dataset.subjects[0].signal.affine)
