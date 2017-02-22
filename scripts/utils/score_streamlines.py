@@ -35,8 +35,8 @@ def build_parser():
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
     p.add_argument('name', help='name/path of the experiment.')
-    p.add_argument('tractogram', help='tractogram to score.')
     p.add_argument('signal', help='Diffusion signal (.nii|.nii.gz).')
+    p.add_argument('tractogram', help='tractogram to score.')
     p.add_argument('--bvals', help='File containing diffusion gradient lengths (Default: guess it from `signal`).')
     p.add_argument('--bvecs', help='File containing diffusion gradient directions (Default: guess it from `signal`).')
     p.add_argument('--out', default="tractogram.trk", help='output filename (TRK). Default: %(default)s')
