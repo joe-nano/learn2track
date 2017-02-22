@@ -42,7 +42,7 @@ def build_parser():
     p.add_argument('--out', default="tractogram.trk", help='output filename (TRK). Default: %(default)s')
 
     p.add_argument('--batch_size', type=int, default=200, help='size of the batch.')
-    p.add_argument('--prune', type=float, help='prune streamlines having a loss higher than the specified threshold.')
+    p.add_argument('--prune', type=float, help='prune streamlines having a loss higher (or lower if --NLL is used) than the specified threshold.')
 
     loss_type = p.add_mutually_exclusive_group(required=False)
     loss_type.add_argument('--expected-value', action='store_const', dest='loss_type', const='expected_value',
@@ -134,8 +134,6 @@ def main():
         mean = float(l2_error.mean.view(dummy_status))
         stderror = float(l2_error.stderror.view(dummy_status))
 
-        idx_to_keep = losses <= args.prune
-
         if args.loss_type == "NLL":
             losses = np.exp(-losses)
             mean = np.exp(-mean)
@@ -153,7 +151,11 @@ def main():
 
     if args.prune is not None:
         with Timer("Saving pruned streamlines"):
-            tractogram = tractogram[idx_to_keep]
+            if args.loss_type == "NLL":
+                tractogram = tractogram[losses > args.prune]
+            else:
+                tractogram = tractogram[losses <= args.prune]
+
             out_filename = args.out[:-4] + "_p{}".format(args.prune) + args.out[-4:]
             nib.streamlines.save(tractogram, out_filename)
 
