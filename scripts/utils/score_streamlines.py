@@ -125,7 +125,7 @@ def main():
         if loss_type == "NLL":
             loss_type = None
 
-        loss = loss_factory(hyperparams, model, dataset, loss_type=args.loss_type)
+        loss = loss_factory(hyperparams, model, dataset, loss_type=loss_type)
         l2_error = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
 
     with Timer("Scoring...", newline=True):
@@ -134,7 +134,9 @@ def main():
         mean = float(l2_error.mean.view(dummy_status))
         stderror = float(l2_error.stderror.view(dummy_status))
 
-        if loss_type == "NLL":
+        idx_to_keep = losses <= args.prune
+
+        if args.loss_type == "NLL":
             losses = np.exp(-losses)
             mean = np.exp(-mean)
             stderror = np.exp(-stderror)
@@ -151,7 +153,7 @@ def main():
 
     if args.prune is not None:
         with Timer("Saving pruned streamlines"):
-            tractogram = tractogram[losses <= args.prune]
+            tractogram = tractogram[idx_to_keep]
             out_filename = args.out[:-4] + "_p{}".format(args.prune) + args.out[-4:]
             nib.streamlines.save(tractogram, out_filename)
 
