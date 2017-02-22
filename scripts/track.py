@@ -380,6 +380,8 @@ class Tracker(object):
         else:
             previous_direction = np.zeros_like(sprouts[:, -1, :])
 
+        previous_direction = previous_direction / np.sqrt(np.sum(previous_direction ** 2, axis=1, keepdims=True) + 1e-6)
+
         # Get next unnormalized directions
         directions, new_states = self.grower(x_t=sprouts[:, -1, :], states=states, previous_direction=previous_direction)
         if self.flip_x:
