@@ -74,7 +74,7 @@ def main():
     args = parser.parse_args()
     print(args)
 
-    if args.keep_top < 0:
+    if min(args.keep_top) < 0:
         parser.error("--keep-top must be between in [0, 1].")
 
     # Get experiment folder
@@ -186,7 +186,7 @@ def main():
 
         nib.streamlines.save(tractogram.copy(), args.out, header=header)
 
-    if args.keep_top is not None:
+    if len(args.keep_top) > 0:
         for keep_top in args.keep_top:
             with Timer("Saving top {}% streamlines".format(keep_top)):
                 idx = np.argsort(losses)
