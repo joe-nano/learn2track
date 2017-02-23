@@ -237,24 +237,25 @@ def load_tractography_dataset_from_dwi_and_tractogram(dwi, tractogram, volume_ma
 
     # Load streamlines
     tfile = nib.streamlines.load(tractogram)
+    tractogram = tfile.tractogram
 
     # Resample streamline to have a fixed step size, if needed.
     if step_size is not None:
         print("Resampling streamlines to have a step size of {}mm".format(step_size))
-        streamlines = tfile.streamlines
+        streamlines = tractogram.streamlines
         streamlines._lengths = streamlines._lengths.astype(int)
         streamlines._offsets = streamlines._offsets.astype(int)
         lengths = length(streamlines)
         nb_points = np.ceil(lengths / step_size).astype(int)
         new_streamlines = (set_number_of_points(s, n) for s, n in zip(streamlines, nb_points))
-        tfile.tractogram = nib.streamlines.Tractogram(new_streamlines, affine_to_rasmm=np.eye(4))
+        tractogram = nib.streamlines.Tractogram(new_streamlines, affine_to_rasmm=np.eye(4))
 
     # Compute matrix that brings streamlines back to diffusion voxel space.
     rasmm2vox_affine = np.linalg.inv(signal.affine)
-    tfile.tractogram.apply_affine(rasmm2vox_affine)
+    tractogram.apply_affine(rasmm2vox_affine)
 
     # Add streamlines to the TractogramData
-    tracto_data.add(tfile.streamlines, "tractogram")
+    tracto_data.add(tractogram.streamlines, "tractogram")
 
     dwi = tracto_data.signal
     bvals = tracto_data.gradients.bvals
