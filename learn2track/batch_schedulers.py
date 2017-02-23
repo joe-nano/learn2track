@@ -689,7 +689,7 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
 
         # Parameter use_data_augment cannot be used in the case of a FFNN model (or any other non-recurrent model,
         # without feed_previous_direction because the targets are flipped but the inputs stay the same)
-        self.use_augment_by_flipping = feed_previous_direction
+        self.use_augment_by_flipping = feed_previous_direction and use_data_augment
         self.seed = seed
         self.rng = np.random.RandomState(self.seed)
         self.rng_noise = np.random.RandomState(self.seed + 1)

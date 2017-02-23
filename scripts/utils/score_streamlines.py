@@ -57,6 +57,10 @@ def build_parser():
                            help='Use NLL averaged over the time steps to color streamlines')
     loss_type.add_argument('--nll-sum', action='store_const', dest='loss_type', const='nll_sum',
                            help='Use NLL summed over the time steps to color streamlines')
+    loss_type.add_argument('--l2-mean', action='store_const', dest='loss_type', const='l2_mean',
+                           help='Use L2 distance averaged over the time steps to color streamlines')
+    loss_type.add_argument('--l2-sum', action='store_const', dest='loss_type', const='l2_sum',
+                           help='Use l2 distance summed over the time steps to color streamlines')
 
     if vizu_available:
         p.add_argument('--vizu', action='store_true', help='check that streamlines fit on top of the diffusion signal.')

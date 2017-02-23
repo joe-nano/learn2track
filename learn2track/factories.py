@@ -134,11 +134,14 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         # return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize_output=hyperparams["normalize"])
 
     elif hyperparams['model'] == 'gru_regression':
-        if loss_type is not None:
+        if loss_type == "l2_mean" or loss_type is None:
+            from learn2track.models.gru_regression import L2DistanceForSequences
+            return L2DistanceForSequences(model, dataset)
+        elif loss_type == "l2_sum":
+            from learn2track.models.gru_regression import L2DistanceForSequences
+            return L2DistanceForSequences(model, dataset, sum_over_timestep=True)
+        else:
             raise ValueError("loss_type not available for gru_regression: {}".format(loss_type))
-
-        from learn2track.models.gru_regression import L2DistanceForSequences
-        return L2DistanceForSequences(model, dataset, normalize_output=hyperparams["normalize"])
 
     elif hyperparams['model'] == 'gru_multistep':
         if loss_type == 'expected_value' or loss_type == 'maximum_component':

@@ -185,10 +185,11 @@ class L2DistanceForSequences(Loss):
     -----
     This loss assumes the regression target at every time step is a vector.
     """
-    def __init__(self, model, dataset, normalize_output=False, eps=1e-6):
+    def __init__(self, model, dataset, normalize_output=False, eps=1e-6, sum_over_timestep=False):
         super().__init__(model, dataset)
         self.normalize_output = normalize_output
         self.eps = eps
+        self.sum_over_timestep = sum_over_timestep
 
     def _get_updates(self):
         return {}  # There is no updates for L2Distance.
@@ -206,6 +207,9 @@ class L2DistanceForSequences(Loss):
         # loss_per_time_step.shape = (batch_size, seq_len)
         self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets, eps=self.eps)
         # loss_per_seq.shape = (batch_size,)
-        self.loss_per_seq = T.sum(self.loss_per_time_step*mask, axis=1) / T.sum(mask, axis=1)
+        self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1)
+
+        if not self.sum_over_timestep:
+            self.loss_per_seq /= T.sum(mask, axis=1)
 
         return self.loss_per_seq
