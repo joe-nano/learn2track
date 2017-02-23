@@ -192,9 +192,9 @@ def main():
                 idx = np.argsort(losses)
                 idx = idx[:int(keep_top * len(losses))]
                 print("Keeping {}/{} streamlines".format(len(idx), len(losses)))
-                tractogram = tractogram[idx]
+                sub_tractogram = tractogram[idx]
                 out_filename = args.out[:-4] + "_top{}".format(keep_top) + ".tck"
-                nib.streamlines.save(tractogram, out_filename)
+                nib.streamlines.save(sub_tractogram, out_filename)
 
 
 if __name__ == "__main__":
