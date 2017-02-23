@@ -129,6 +129,10 @@ def main():
         elif hyperparams['model'] == 'ffnn_regression':
             from learn2track.models import FFNN_Regression
             model = FFNN_Regression.create(experiment_path, volume_manager=volume_manager)
+
+            if args.loss_type in ['l2_sum', 'l2_mean']:
+                args.loss_type = "expected_value"
+
         else:
             raise NameError("Unknown model: {}".format(hyperparams['model']))
 
@@ -147,6 +151,18 @@ def main():
     with Timer("Scoring...", newline=True):
         dummy_status = Status()  # Forces recomputing results
         losses = l2_error.losses.view(dummy_status)
+
+        if hyperparams['model'] == 'ffnn_regression':
+            _losses = dataset.streamlines.copy()
+            _losses._data = losses.copy()
+            _losses._lengths -= 1
+            _losses._offsets -= np.arange(len(dataset.streamlines))
+
+            if args.loss_type == 'l2_sum':
+                losses = np.asarray([l.sum() for l in _losses])
+            elif args.loss_type == 'l2_sum':
+                losses = np.asarray([l.mean() for l in _losses])
+
         mean = float(l2_error.mean.view(dummy_status))
         stderror = float(l2_error.stderror.view(dummy_status))
 
