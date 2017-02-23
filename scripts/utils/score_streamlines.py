@@ -151,7 +151,7 @@ def main():
         header[Field.DIMENSIONS] = nii.shape[:3]
         header[Field.VOXEL_ORDER] = "".join(aff2axcodes(nii.affine))
 
-        nib.streamlines.save(tractogram, args.out, header=header)
+        nib.streamlines.save(tractogram.copy(), args.out, header=header)
 
     if args.keep_top is not None:
         with Timer("Saving top {}% streamlines".format(args.keep_top)):
@@ -159,7 +159,7 @@ def main():
             idx = idx[:int(args.keep_top * len(losses))]
             print("Keeping {}/{} streamlines".format(len(idx), len(losses)))
             tractogram = tractogram[idx]
-            out_filename = args.out[:-4] + "_top{}".format(args.keep_top) + args.out[-4:]
+            out_filename = args.out[:-4] + "_top{}".format(args.keep_top) + ".tck"
             nib.streamlines.save(tractogram, out_filename)
 
 
