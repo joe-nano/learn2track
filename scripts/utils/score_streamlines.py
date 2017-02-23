@@ -22,6 +22,7 @@ from learn2track.utils import Timer
 from learn2track.factories import loss_factory, batch_scheduler_factory
 
 from learn2track import datasets
+from learn2track import vizu
 from learn2track.neurotools import VolumeManager
 
 
@@ -52,6 +53,7 @@ def build_parser():
     loss_type.add_argument('--nll-sum', action='store_const', dest='loss_type', const='nll_sum',
                            help='Use NLL summed over the time steps to color streamlines')
 
+    p.add_argument('--vizu', action='store_true', help='check that streamlines fit on top of the diffusion signal.')
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
 
@@ -96,6 +98,9 @@ def main():
                                                                              bvals=args.bvals, bvecs=args.bvecs,
                                                                              step_size=args.step_size)
         print("Dataset size:", len(dataset))
+
+        if args.vizu:
+            vizu.check_dataset_integrity(dataset, subset=0.2)
 
     with Timer("Loading model"):
         model = None
