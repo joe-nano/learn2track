@@ -82,7 +82,7 @@ parameter of its value. E.g 'param1-value1_param2_value2.pkl' or
 'description_param1-value1_param2_value2.pkl'.
 """
 
-METRICS = ['IB', 'VB', 'NC', 'VCWP', 'IC', 'VC', 'VCCR', 'mean_OL', 'mean_OR', 'mean_ORn', 'mean_F1']
+METRICS = ['IB', 'VB', 'NC', 'VCWP', 'IC', 'VC', 'VCCR', 'mean_OL', 'mean_OR', 'mean_ORn', 'mean_F1', 'total_streamlines_count']
 
 
 def buildArgsParser():
