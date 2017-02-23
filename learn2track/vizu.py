@@ -177,17 +177,11 @@ class Bundle(object):
 
 class StreamlinesVizu(object):
     def __init__(self, tractogram, anat=None, screen_size=(1360, 768), default_clustering_threshold=None, verbose=False):
-        self.prefix = prefix
-        self.savedir = os.path.dirname(pjoin(".", self.prefix))
         self.screen_size = screen_size
         self.default_clustering_threshold = default_clustering_threshold
         self.verbose = verbose
 
-        self.inliers = Tractogram(affine_to_rasmm=np.eye(4))
-        self.outliers = Tractogram(affine_to_rasmm=np.eye(4))
-        self.undo_memory = collections.deque(maxlen=undo_memory_size)
         self.cpt = None  # Used for iterating through the clusters.
-
         self.bundles = {}
         self.root_bundle = "/"
         self.keys = [self.root_bundle]
@@ -278,7 +272,6 @@ class StreamlinesVizu(object):
         if bundle_name is None:
             # Close panels
             self.selected_bundle = None
-            self.like_dislike_panel.set_visibility(False)
             self.clustering_panel.set_visibility(False)
             self._set_bundles_visibility("visible")
             self.iren.force_render()
@@ -297,9 +290,6 @@ class StreamlinesVizu(object):
             self.clustering_panel.slider.set_value(self.default_clustering_threshold)
         self.clustering_panel.slider.update()
         self.clustering_panel.set_visibility(True)
-
-        # Show like/dislike panel.
-        self.like_dislike_panel.set_visibility(True)
 
         # Dim other bundles
         self._set_bundles_visibility("visible", bundles=[bundle])
@@ -323,119 +313,6 @@ class StreamlinesVizu(object):
 
         self.iren.add_callback(bundle.actor, "RightButtonPressEvent", open_clustering_panel)
         self.iren.add_callback(bundle.actor, "LeftButtonPressEvent", ctrl_leftcklick_open_clustering_panel)  # Support for MAC OSX
-
-    def _make_like_dislike_panel(self):
-        # Panel
-        size = (self.screen_size[0]//25, self.screen_size[1]//10)
-        center = (self.screen_size[0]-size[0]/2., self.screen_size[1] / 2.)  # Middle right of the screen.
-        panel = gui_2d.Panel2D(center=center, size=size, color=(1, 1, 1), align="left")
-
-        # "Like" button
-        def like_bundle():
-            bundle_name = self.selected_bundle
-            bundle = self.bundles[self.selected_bundle]
-            print("Liking {} streamlines...".format(len(bundle.streamlines)))
-
-            # Memorize action
-            action_to_memorize = {"action": "like", "bundle_name": bundle_name, "bundle": bundle}
-            self.undo_memory.append(action_to_memorize)
-
-            # Keep its streamlines in a tractogram of outliers.
-            self.inliers.streamlines.extend(bundle.streamlines)
-
-            # Remove original bundle.
-            self.select_next()
-            self.remove_bundle(bundle_name)
-
-        def like_button_callback(iren, obj, button):
-            like_bundle()
-            button.color = (0, 0.5, 0)  # Restore color.
-            iren.force_render()
-            iren.event.abort()  # Stop propagating the event.
-
-        like_button = gui_2d.Button2D(icon_fnames={'keep_bundle': read_viz_icons(fname='like_neg.png')})
-        like_button.color = (0, 0.5, 0)
-        like_button.add_callback("LeftButtonPressEvent", animate_button_callback)
-        like_button.add_callback("LeftButtonReleaseEvent", like_button_callback)
-        panel.add_element(like_button, (0.5, 0.75))
-
-        # "Dislike" button
-        def dislike_bundle():
-            bundle_name = self.selected_bundle
-            bundle = self.bundles[self.selected_bundle]
-            print("Disliking {} streamlines...".format(len(bundle.streamlines)))
-
-            # Memorize action
-            action_to_memorize = {"action": "dislike", "bundle_name": bundle_name, "bundle": bundle}
-            self.undo_memory.append(action_to_memorize)
-
-            # Keep its streamlines in a tractogram of outliers.
-            self.outliers.streamlines.extend(bundle.streamlines)
-
-            # Remove original bundle.
-            self.select_next()
-            self.remove_bundle(bundle_name)
-
-        def dislike_button_callback(iren, obj, button):
-            dislike_bundle()
-            button.color = (1, 0, 0)  # Restore color.
-            iren.force_render()
-            iren.event.abort()  # Stop propagating the event.
-
-        dislike_button = gui_2d.Button2D(icon_fnames={'delete_bundle': read_viz_icons(fname='dislike_neg.png')})
-        dislike_button.color = (1, 0, 0)
-        dislike_button.add_callback("LeftButtonPressEvent", animate_button_callback)
-        dislike_button.add_callback("LeftButtonReleaseEvent", dislike_button_callback)
-        panel.add_element(dislike_button, (0.5, 0.25))
-
-        def undo():
-            print("Trying to undo last action...")
-            try:
-                memory = self.undo_memory.pop()
-            except IndexError:
-                print("Memory empty, cannot undo...")
-                return
-
-            action = memory["action"]
-            bundle_name = memory["bundle_name"]
-            bundle = memory["bundle"]
-
-            if action == "like":
-                self.inliers._set_streamlines(self.inliers.streamlines[:-len(bundle.streamlines)])
-                action_msg = "Liking"
-            elif action == "dislike":
-                self.outliers._set_streamlines(self.outliers.streamlines[:-len(bundle.streamlines)])
-                action_msg = "Disliking"
-            else:
-                print("WARNING: Unrecognized saved action, ignoring undo request")
-                return
-
-            print("Undid last action : {} {} streamlines".format(action_msg, len(bundle.streamlines)))
-
-            self.add_bundle(bundle_name, bundle)
-            self.select(bundle_name)
-
-        # Add shortcut keys.
-        def like_dislike_undo_onchar_callback(iren, evt_name):
-            key = iren.event.key
-
-            if key == "u":
-                undo()
-
-            if self.selected_bundle is None:
-                return
-
-            if key == "r":
-                dislike_bundle()
-            elif key == "a":
-                like_bundle()
-
-            iren.force_render()
-            iren.event.abort()  # Stop propagating the event.
-
-        self.iren.AddObserver("CharEvent", like_dislike_undo_onchar_callback)
-
-        return panel
 
     def _make_clustering_panel(self):
         # Panel
@@ -712,79 +589,12 @@ class StreamlinesVizu(object):
         self.clustering_panel.set_visibility(False)
         self.ren.add(self.clustering_panel)
 
-        # Add like/dislike panel to the scene.
-        self.like_dislike_panel = self._make_like_dislike_panel()
-        self.like_dislike_panel.set_visibility(False)
-        self.ren.add(self.like_dislike_panel)
-
-        # Add "Save" button
-        def save_button_callback(iren, obj, button):
-            # iren: CustomInteractorStyle
-            # obj: vtkActor picked
-            # button: Button2D
-            print("Saving...")
-            if not os.path.isdir(self.savedir):
-                os.makedirs(self.savedir)
-
-            # Empty undo memory
-            self.undo_memory.clear()
-
-            # Remove old clusters
-            files = os.listdir(self.savedir)
-            if "_inliers.tck" in files:
-                os.remove(self.prefix + "_inliers.tck")
-
-            if "_outliers.tck" in files:
-                os.remove(self.prefix + "_outliers.tck")
-
-            for i, f in enumerate(files):
-                if self.prefix + "_bundle_{}.tck".format(i) in files:
-                    os.remove(self.prefix + "_bundle_{}.tck".format(i))
-
-            for i, k in enumerate(sorted(self.bundles.keys())):
-                bundle = self.bundles[k]
-                filename = self.prefix + "_bundle_{}.tck".format(i)
-
-                t = Tractogram(streamlines=bundle.streamlines,
-                               affine_to_rasmm=np.eye(4))
-                nib.streamlines.save(t, filename)
-                print(filename, len(t))
-
-
-            # Save inliers, if any.
-            if len(self.inliers):
-                filename = self.prefix + "_inliers.tck"
-                nib.streamlines.save(self.inliers, filename)
-                print(filename, len(self.inliers))
-
-            # Save outliers, if any.
-            if len(self.outliers):
-                filename = self.prefix + "_outliers.tck"
-                nib.streamlines.save(self.outliers, filename)
-                print(filename, len(self.outliers))
-
-            # TODO: apply clustering if needed, close panel, add command to history, re-enable bundles context-menu.
-            button.color = (1, 1, 1)  # Restore color.
-            print("Done.")
-            iren.force_render()
-            iren.event.abort()  # Stop propagating the event.
-
-        save_button = gui_2d.Button2D(icon_fnames={'save': read_viz_icons(fname='floppy-disk_neg.png')})
-        save_button.color = (1, 1, 1)
-        save_button.add_callback("LeftButtonPressEvent", animate_button_callback)
-        save_button.add_callback("LeftButtonReleaseEvent", save_button_callback)
-        save_button.set_center(np.asarray(self.screen_size) - 20)
-        self.ren.add(save_button)
-
         # Add "Reset/Home" button
         def reset_button_callback(iren, obj, button):
             # iren: CustomInteractorStyle
             # obj: vtkActor picked
             # button: Button2D
             print("Merging remaining bundles...")
-
-            # Empty undo memory
-            self.undo_memory.clear()
 
             streamlines = nib.streamlines.ArraySequence()
             for k, bundle in self.bundles.items():
@@ -904,6 +714,11 @@ def check_dataset_integrity(dataset, subset=1):
         tractogram = tractogram[idx[:int(subset*len(tractogram))]]
 
     anat = dataset.subjects[0].signal
+
+    # In a `TractographyDataset` object, streamlines are supposed to be in voxel space.
+    # We will bring the streamline into rasmm as they should be displayed.
+    tractogram.apply_affine(anat.affine)
+
     vizu = StreamlinesVizu(tractogram, anat=anat, screen_size=(800, 600))
     vizu.initialize_scene()
     vizu.run()
