@@ -37,8 +37,8 @@ def build_parser():
     p.add_argument('--out', default="tractogram.trk", help='output filename (TRK). Default: %(default)s')
 
     p.add_argument('--batch_size', type=int, default=200, help='size of the batch.')
-    p.add_argument('--prune', type=float,
-                   help='prune streamlines having a loss higher (or lower if --NLL is used) than the specified threshold.')
+    p.add_argument('--keep-top', type=float,
+                   help='top percent of streamlines to keep. Streamlines are ranked according to their NLL.')
     p.add_argument('--step-size', type=float,
                    help='If specified, all streamlines will have this step size (in mm).')
 
@@ -60,6 +60,9 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
     print(args)
+
+    if args.keep_top < 0:
+        parser.error("--keep-top must be between in [0, 1].")
 
     # Get experiment folder
     experiment_path = args.name
@@ -150,10 +153,13 @@ def main():
 
         nib.streamlines.save(tractogram, args.out, header=header)
 
-    if args.prune is not None:
-        with Timer("Saving pruned streamlines"):
-            tractogram = tractogram[losses <= args.prune]
-            out_filename = args.out[:-4] + "_p{}".format(args.prune) + args.out[-4:]
+    if args.keep_top is not None:
+        with Timer("Saving top {}% streamlines".format(args.keep_top)):
+            idx = np.argsort(losses)
+            idx = idx[:int(args.keep_top * len(losses))]
+            print("Keeping {}/{} streamlines".format(len(idx), len(losses)))
+            tractogram = tractogram[idx]
+            out_filename = args.out[:-4] + "_top{}".format(args.keep_top) + args.out[-4:]
             nib.streamlines.save(tractogram, out_filename)
 
 

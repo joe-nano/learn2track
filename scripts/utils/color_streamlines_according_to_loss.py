@@ -43,21 +43,28 @@ def main():
         del trk.tractogram.data_per_streamline['loss']  # Not supported in MI-Brain for my version.
 
     with Timer("Coloring streamlines"):
-        viridis = plt.get_cmap('viridis')
+        viridis = plt.get_cmap('RdYlGn')
 
-        vmin = None
-        vmax = None
+        losses = -losses[:, 0]
+        losses -= losses.mean()
+
+        vmin = losses.min()
+        vmax = losses.max()
 
         if args.normalization == "norm":
-            cNorm  = colors.Normalize(vmin=vmin, vmax=vmax)
-        elif args.normalization == "norm":
-            cNorm  = colors.LogNorm()
+            cNorm = colors.Normalize(vmin=vmin, vmax=vmax)
+        elif args.normalization == "log":
+            cNorm = colors.LogNorm(vmin=vmin, vmax=vmax)
+        elif args.normalization == "symlog":
+            cNorm = colors.SymLogNorm(linthresh=0.03, linscale=1, vmin=vmin, vmax=vmax)
         else:
             raise ValueError("Unkown normalization: {}".format(args.normalization))
 
         scalarMap = cm.ScalarMappable(norm=cNorm, cmap=viridis)
         print(scalarMap.get_clim())
-        streamlines_colors = scalarMap.to_rgba(-losses[:, 0], bytes=True)[:, :-1]
+        # losses -= losses.mean()
+        # losses /= losses.std()
+        streamlines_colors = scalarMap.to_rgba(losses, bytes=True)[:, :-1]
 
         # from dipy.viz import fvtk
         # streamlines_colors = fvtk.create_colormap(-losses[:, 0]) * 255
@@ -66,9 +73,9 @@ def main():
 
     with Timer("Saving streamlines"):
         if args.out is None:
-           args.out = args.tractogram[:-4] + "_color" + args.tractogram[-4:]
+           args.out = args.tractogram[:-4] + "_color_" + args.normalization + args.tractogram[-4:]
 
-        nib.streamlines.save(trk, args.out)
+        nib.streamlines.save(trk.tractogram, args.out)
 
 
 if __name__ == "__main__":
