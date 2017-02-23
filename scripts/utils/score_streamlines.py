@@ -43,7 +43,7 @@ def build_parser():
     p.add_argument('--out', default="tractogram.trk", help='output filename (TRK). Default: %(default)s')
 
     p.add_argument('--batch_size', type=int, default=200, help='size of the batch.')
-    p.add_argument('--keep-top', type=float,
+    p.add_argument('--keep-top', type=float, nargs='+',
                    help='top percent of streamlines to keep. Streamlines are ranked according to their NLL.')
     p.add_argument('--step-size', type=float,
                    help='If specified, all streamlines will have this step size (in mm).')
@@ -174,7 +174,7 @@ def main():
 
     with Timer("Saving streamlines"):
         nii = dataset.subjects[0].signal
-        tractogram = nib.streamlines.Tractogram(dataset.streamlines,
+        tractogram = nib.streamlines.Tractogram(dataset.streamlines[batch_scheduler.indices],
                                                 affine_to_rasmm=nii.affine)
         tractogram.data_per_streamline['loss'] = losses
 
@@ -187,13 +187,14 @@ def main():
         nib.streamlines.save(tractogram.copy(), args.out, header=header)
 
     if args.keep_top is not None:
-        with Timer("Saving top {}% streamlines".format(args.keep_top)):
-            idx = np.argsort(losses)
-            idx = idx[:int(args.keep_top * len(losses))]
-            print("Keeping {}/{} streamlines".format(len(idx), len(losses)))
-            tractogram = tractogram[idx]
-            out_filename = args.out[:-4] + "_top{}".format(args.keep_top) + ".tck"
-            nib.streamlines.save(tractogram, out_filename)
+        for keep_top in args.keep_top:
+            with Timer("Saving top {}% streamlines".format(keep_top)):
+                idx = np.argsort(losses)
+                idx = idx[:int(keep_top * len(losses))]
+                print("Keeping {}/{} streamlines".format(len(idx), len(losses)))
+                tractogram = tractogram[idx]
+                out_filename = args.out[:-4] + "_top{}".format(keep_top) + ".tck"
+                nib.streamlines.save(tractogram, out_filename)
 
 
 if __name__ == "__main__":
