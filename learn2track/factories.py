@@ -157,9 +157,12 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         elif loss_type == 'maximum_component':
             from learn2track.models.gru_mixture import MultivariateGaussianMixtureMaxComponentL2Distance
             return MultivariateGaussianMixtureMaxComponentL2Distance(model, dataset)
-        elif loss_type is None:
+        elif loss_type is None or loss_type == "nll_mean":
             from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
             return MultivariateGaussianMixtureNLL(model, dataset)
+        elif loss_type == "nll_sum":
+            from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
+            return MultivariateGaussianMixtureNLL(model, dataset, sum_over_timestep=True)
         else:
             raise ValueError("Unrecognized loss_type: {}".format(loss_type))
 

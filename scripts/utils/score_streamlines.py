@@ -10,11 +10,7 @@ import sys
 import numpy as np
 from os.path import join as pjoin
 import argparse
-import itertools
-import theano
-import time
 import nibabel as nib
-import theano.tensor as T
 from nibabel.streamlines import ArraySequence, Tractogram
 
 from smartlearner import views
@@ -50,8 +46,10 @@ def build_parser():
                            help='Use timestep expected value L2 error to color streamlines')
     loss_type.add_argument('--maximum-component', action='store_const', dest='loss_type', const='maximum_component',
                            help='Use timestep maximum distribution component L2 error to color streamlines')
-    loss_type.add_argument('--NLL', action='store_const', dest='loss_type', const='NLL',
-                           help='Use NLL to color streamlines')
+    loss_type.add_argument('--nll_mean', action='store_const', dest='loss_type', const='nll_mean',
+                           help='Use NLL averaged over the time steps to color streamlines')
+    loss_type.add_argument('--nll_sum', action='store_const', dest='loss_type', const='nll_sum',
+                           help='Use NLL summed over the time steps to color streamlines')
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
     return p
@@ -122,25 +120,14 @@ def main():
                                                   use_data_augment=False,  # Otherwise it doubles the number of losses :-/
                                                   train_mode=False,
                                                   batch_size_override=args.batch_size)
-        loss_type = args.loss_type
-        if loss_type == "NLL":
-            loss_type = None
-
-        loss = loss_factory(hyperparams, model, dataset, loss_type=loss_type)
+        loss = loss_factory(hyperparams, model, dataset, loss_type=args.loss_type)
         l2_error = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
 
     with Timer("Scoring...", newline=True):
         dummy_status = Status()  # Forces recomputing results
         losses = l2_error.losses.view(dummy_status)
-
         mean = float(l2_error.mean.view(dummy_status))
         stderror = float(l2_error.stderror.view(dummy_status))
-
-        if args.loss_type == "NLL":
-            # Renormalize probs
-            losses = T.nnet.softmax(losses).eval()
-            mean = np.mean(losses)  #np.exp(-mean)
-            stderror = np.std(losses)  #np.exp(-stderror)
 
         print("Loss: {:.4f} ± {:.4f}".format(mean, stderror))
         print("Min: {:.4f}".format(losses.min()))
@@ -149,23 +136,12 @@ def main():
 
     with Timer("Saving streamlines"):
         tractogram = Tractogram(dataset.streamlines, affine_to_rasmm=dataset.subjects[0].signal.affine)
-        #tractogram.data_per_streamline['loss'] = losses  # Not supported in MI-Brain for now.
-
-        # Color streamlines
-        from dipy.viz import fvtk
-        colors = fvtk.create_colormap(losses)
-        colors_per_point = nib.streamlines.ArraySequence([np.tile(c*255, (len(s), 1)) for s, c in zip(tractogram.streamlines, colors)])
-        tractogram.data_per_point['color'] = colors_per_point
-
+        tractogram.data_per_streamline['loss'] = losses
         nib.streamlines.save(tractogram, args.out)
 
     if args.prune is not None:
         with Timer("Saving pruned streamlines"):
-            if args.loss_type == "NLL":
-                tractogram = tractogram[losses > args.prune]
-            else:
-                tractogram = tractogram[losses <= args.prune]
-
+            tractogram = tractogram[losses <= args.prune]
             out_filename = args.out[:-4] + "_p{}".format(args.prune) + args.out[-4:]
             nib.streamlines.save(tractogram, out_filename)
 
