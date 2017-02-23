@@ -11,19 +11,17 @@ import numpy as np
 from os.path import join as pjoin
 import argparse
 import nibabel as nib
-from nibabel.streamlines import ArraySequence, Tractogram
+from nibabel.streamlines import Field
+from nibabel.orientations import aff2axcodes
 
 from smartlearner import views
 from smartlearner.status import Status
 from smartlearner import utils as smartutils
 
-from learn2track.utils import Timer, log_variables
-from learn2track.factories import model_factory
+from learn2track.utils import Timer
 from learn2track.factories import loss_factory, batch_scheduler_factory
 
 from learn2track import datasets
-from learn2track import utils
-from learn2track import batch_schedulers
 from learn2track.neurotools import VolumeManager
 
 
@@ -39,16 +37,19 @@ def build_parser():
     p.add_argument('--out', default="tractogram.trk", help='output filename (TRK). Default: %(default)s')
 
     p.add_argument('--batch_size', type=int, default=200, help='size of the batch.')
-    p.add_argument('--prune', type=float, help='prune streamlines having a loss higher (or lower if --NLL is used) than the specified threshold.')
+    p.add_argument('--prune', type=float,
+                   help='prune streamlines having a loss higher (or lower if --NLL is used) than the specified threshold.')
+    p.add_argument('--step-size', type=float,
+                   help='If specified, all streamlines will have this step size (in mm).')
 
     loss_type = p.add_mutually_exclusive_group(required=False)
     loss_type.add_argument('--expected-value', action='store_const', dest='loss_type', const='expected_value',
                            help='Use timestep expected value L2 error to color streamlines')
     loss_type.add_argument('--maximum-component', action='store_const', dest='loss_type', const='maximum_component',
                            help='Use timestep maximum distribution component L2 error to color streamlines')
-    loss_type.add_argument('--nll_mean', action='store_const', dest='loss_type', const='nll_mean',
+    loss_type.add_argument('--nll-mean', action='store_const', dest='loss_type', const='nll_mean',
                            help='Use NLL averaged over the time steps to color streamlines')
-    loss_type.add_argument('--nll_sum', action='store_const', dest='loss_type', const='nll_sum',
+    loss_type.add_argument('--nll-sum', action='store_const', dest='loss_type', const='nll_sum',
                            help='Use NLL summed over the time steps to color streamlines')
 
     p.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -89,7 +90,8 @@ def main():
         volume_manager = VolumeManager()
         dataset = datasets.load_tractography_dataset_from_dwi_and_tractogram(args.signal, args.tractogram, volume_manager,
                                                                              use_sh_coeffs=hyperparams['use_sh_coeffs'],
-                                                                             bvals=args.bvals, bvecs=args.bvecs)
+                                                                             bvals=args.bvals, bvecs=args.bvecs,
+                                                                             step_size=args.step_size)
         print("Dataset size:", len(dataset))
 
     with Timer("Loading model"):
@@ -135,9 +137,18 @@ def main():
         print("Percentiles: {}".format(np.percentile(losses, [0, 25, 50, 75, 100])))
 
     with Timer("Saving streamlines"):
-        tractogram = Tractogram(dataset.streamlines, affine_to_rasmm=dataset.subjects[0].signal.affine)
+        nii = dataset.subjects[0].signal
+        tractogram = nib.streamlines.Tractogram(dataset.streamlines,
+                                                affine_to_rasmm=nii.affine)
         tractogram.data_per_streamline['loss'] = losses
-        nib.streamlines.save(tractogram, args.out)
+
+        header = {}
+        header[Field.VOXEL_TO_RASMM] = nii.affine.copy()
+        header[Field.VOXEL_SIZES] = nii.header.get_zooms()[:3]
+        header[Field.DIMENSIONS] = nii.shape[:3]
+        header[Field.VOXEL_ORDER] = "".join(aff2axcodes(nii.affine))
+
+        nib.streamlines.save(tractogram, args.out, header=header)
 
     if args.prune is not None:
         with Timer("Saving pruned streamlines"):
