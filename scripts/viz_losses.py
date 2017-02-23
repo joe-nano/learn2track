@@ -62,7 +62,7 @@ def create_hist_actor(outlierness, colormap_name="jet"):
 
     import pylab as plt
     if not hasattr(plt, 'style'):
-        print "Use Matplotlib >= 1.4 to have better colormap."
+        print("Use Matplotlib >= 1.4 to have better colormap.")
     else:
         plt.style.use('dark_background')
 
@@ -122,7 +122,7 @@ def interactive_viewer(streamlines, outlierness):
     ren_outlierness.background(bg)
     ren_outlierness.SetViewport(0, 0.3, 0.5, 1)
     ren_outlierness.add(stream_actor)
-    ren_outlierness.reset_camera_tight()
+    # ren_outlierness.reset_camera_tight()
 
     ren_split = window.Renderer()
     show_m.window.AddRenderer(ren_split)
@@ -198,7 +198,7 @@ def interactive_viewer(streamlines, outlierness):
         # save_button.GetRepresentation().PlaceWidget(bds)
 
     def _window_callback(obj, event):
-        ren_hist.reset_camera_tight(margin_factor=1.2)
+        # ren_hist.reset_camera_tight(margin_factor=1.2)
         _place_buttons()
 
     show_m.add_window_callback(_window_callback)
