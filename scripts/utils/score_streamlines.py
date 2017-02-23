@@ -114,6 +114,7 @@ def main():
             vizu.check_dataset_integrity(dataset, subset=0.2)
 
     with Timer("Loading model"):
+        loss_type = args.loss_type
         model = None
         if hyperparams['model'] == 'gru_regression':
             from learn2track.models import GRU_Regression
@@ -130,8 +131,8 @@ def main():
             from learn2track.models import FFNN_Regression
             model = FFNN_Regression.create(experiment_path, volume_manager=volume_manager)
 
-            if args.loss_type in ['l2_sum', 'l2_mean']:
-                args.loss_type = "expected_value"
+            if loss_type in ['l2_sum', 'l2_mean']:
+                loss_type = "expected_value"
 
         else:
             raise NameError("Unknown model: {}".format(hyperparams['model']))
@@ -145,7 +146,7 @@ def main():
                                                   use_data_augment=False,  # Otherwise it doubles the number of losses :-/
                                                   train_mode=False,
                                                   batch_size_override=args.batch_size)
-        loss = loss_factory(hyperparams, model, dataset, loss_type=args.loss_type)
+        loss = loss_factory(hyperparams, model, dataset, loss_type=loss_type)
         l2_error = views.LossView(loss=loss, batch_scheduler=batch_scheduler)
 
     with Timer("Scoring...", newline=True):
