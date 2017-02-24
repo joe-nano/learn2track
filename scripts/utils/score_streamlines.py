@@ -161,7 +161,7 @@ def main():
 
             if args.loss_type == 'l2_sum':
                 losses = np.asarray([l.sum() for l in _losses])
-            elif args.loss_type == 'l2_sum':
+            elif args.loss_type == 'l2_mean':
                 losses = np.asarray([l.mean() for l in _losses])
 
         mean = float(l2_error.mean.view(dummy_status))
