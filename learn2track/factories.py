@@ -166,6 +166,9 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         elif loss_type == "nll_sum":
             from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
             return MultivariateGaussianMixtureNLL(model, dataset, sum_over_timestep=True)
+        elif loss_type == "nll_top_10":
+            from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
+            return MultivariateGaussianMixtureNLL(model, dataset, consider_only_top_10=True)
         else:
             raise ValueError("Unrecognized loss_type: {}".format(loss_type))
 
