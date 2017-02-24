@@ -169,12 +169,12 @@ class MultivariateGaussianMixtureNLL(Loss):
     """ Computes the likelihood of a multivariate gaussian mixture
     """
 
-    def __init__(self, model, dataset, sum_over_timestep=False, consider_only_top_10=False):
+    def __init__(self, model, dataset, sum_over_timestep=False, consider_only_top_n=None):
         super().__init__(model, dataset)
         self.n = model.n_gaussians
         self.d = model.output_size
         self.sum_over_timestep = sum_over_timestep
-        self.consider_only_top_10 = consider_only_top_10
+        self.consider_only_top_n = consider_only_top_n
 
     def _get_updates(self):
         return {}  # There is no updates for L2Distance.
@@ -219,8 +219,8 @@ class MultivariateGaussianMixtureNLL(Loss):
 
         if not self.sum_over_timestep:
             self.loss_per_seq /= T.sum(mask, axis=1)
-        elif self.consider_only_top_10:
-            n = 10
+        elif self.consider_only_top_n:
+            n = self.consider_only_top_n
             masked_loss_per_time_step = self.loss_per_time_step * mask
             self.loss_per_seq = T.sum(
                 masked_loss_per_time_step[
