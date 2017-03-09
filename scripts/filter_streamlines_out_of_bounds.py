@@ -59,9 +59,9 @@ def main():
         for i,s in enumerate(tractogram.streamlines):
 
             # Identify streamlines out of bounds
-            oob_test = np.logical_or.reduce((s[:, 0] < -0.5, s[:, 0] > x_max,  # Out of bounds on axis X
-                                             s[:, 1] < -0.5, s[:, 1] > y_max,  # Out of bounds on axis Y
-                                             s[:, 2] < -0.5, s[:, 2] > z_max))  # Out of bounds on axis Z
+            oob_test = np.logical_or.reduce((s[:, 0] < -0.5, s[:, 0] >= x_max,  # Out of bounds on axis X
+                                             s[:, 1] < -0.5, s[:, 1] >= y_max,  # Out of bounds on axis Y
+                                             s[:, 2] < -0.5, s[:, 2] >= z_max))  # Out of bounds on axis Z
 
             if np.any(oob_test):
                 mask[i] = False
