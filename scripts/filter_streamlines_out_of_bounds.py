@@ -50,18 +50,18 @@ def main():
     with Timer("Filtering streamlines"):
 
         # Get volume bounds
-        x_max = data.shape[0]
-        y_max = data.shape[1]
-        z_max = data.shape[2]
+        x_max = data.shape[0] - 0.5
+        y_max = data.shape[1] - 0.5
+        z_max = data.shape[2] - 0.5
 
         mask = np.ones((len(tractogram),)).astype(bool)
 
         for i,s in enumerate(tractogram.streamlines):
 
             # Identify streamlines out of bounds
-            oob_test = np.logical_or.reduce((s[:, 0] < 0., s[:, 0] > x_max,  # Out of bounds on axis X
-                                             s[:, 1] < 0., s[:, 1] > y_max,  # Out of bounds on axis Y
-                                             s[:, 2] < 0., s[:, 2] > z_max))  # Out of bounds on axis Z
+            oob_test = np.logical_or.reduce((s[:, 0] < -0.5, s[:, 0] > x_max,  # Out of bounds on axis X
+                                             s[:, 1] < -0.5, s[:, 1] > y_max,  # Out of bounds on axis Y
+                                             s[:, 2] < -0.5, s[:, 2] > z_max))  # Out of bounds on axis Z
 
             if np.any(oob_test):
                 mask[i] = False
