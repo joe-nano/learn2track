@@ -16,6 +16,54 @@ from learn2track.interpolation import eval_volume_at_3d_coordinates_in_theano
 from learn2track.neurotools import eval_volume_at_3d_coordinates
 
 
+def test_interpolation():
+    coords = T.matrix("coords")
+    volume = T.tensor3("image")
+    fct = theano.function([volume, coords], eval_volume_at_3d_coordinates_in_theano(volume, coords))
+
+    # Create a simple 3D volume, i.e. a voxel.
+    data = np.ones((1, 1, 1), dtype="f4")
+
+    # Create some points for interpolation.
+    pts = np.array([(0, 0, 0),      # Middle of the voxel.
+                    (-0.5, 0, 0),   # Far right of the voxel.
+                    (0.49, 0, 0),   # Far left of the voxel
+                    (-0.51, 0, 0),  # Left of the voxel
+                    (0.5, 0, 0)],   # Right of the voxel
+                    dtype="f4")
+
+    volume.tag.test_value = data
+    coords.tag.test_value = pts
+    expected = eval_volume_at_3d_coordinates(data, pts)
+    values = fct(data, pts)
+    print(expected)
+    print(values)
+
+    # Create a simple 3D volume, i.e. three voxels in a row.
+    data = np.zeros((3, 1, 1), dtype="f4")
+    data[1, 0, 0] = 1.
+
+    # Create some points for interpolation.
+    pts = np.array([(1, 0, 0),      # Middle of the voxel.
+                    (0.75, 0, 0),   # Far right of the voxel.
+                    (0.5, 0, 0),   # Far right of the voxel.
+                    (0.25, 0, 0),   # Far right of the voxel.
+                    (0.1, 0, 0),   # Far right of the voxel.
+                    (0., 0, 0),   # Far right of the voxel.
+                    (-0.5, 0, 0),   # Far right of the voxel.
+                    (1.1, 0, 0),   # Far left of the voxel
+                    (1.25, 0, 0),  # Left of the voxel
+                    (1.5, 0, 0),   # Right of the voxel
+                    (1.75, 0, 0),   # Right of the voxel
+                    (2., 0, 0),   # Right of the voxel
+                   ], dtype="f4")
+
+    expected = eval_volume_at_3d_coordinates(data, pts)
+    values = fct(data, pts)
+    print(expected)
+    print(values)
+
+
 def test_trilinear_interpolation():
     trk = nib.streamlines.load(os.path.abspath(pjoin(__file__, '..', 'data', 'CA.trk')))
     trk.tractogram.apply_affine(np.linalg.inv(trk.affine))
@@ -66,4 +114,5 @@ def test_trilinear_interpolation():
     assert_array_almost_equal(values, expected, decimal=4)
 
 
-test_trilinear_interpolation()
+test_interpolation()
+#test_trilinear_interpolation()
