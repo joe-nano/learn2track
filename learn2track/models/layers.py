@@ -34,6 +34,43 @@ class LayerDense(object):
         return out
 
 
+class LayerDenseNormalized(object):
+    """
+    LayerNormalization applied to dense FFNN layer. See: https://arxiv.org/abs/1607.06450
+    """
+    def __init__(self, input_size, output_size, activation="identity", name="DenseNormalized", eps=1e-5):
+        self.input_size = input_size
+        self.output_size = output_size
+        self.name = name
+        self.activation = activation
+        self.activation_fct = factories.make_activation_function(self.activation)
+        self.eps = eps
+
+        # Regression output weights, biases and gains
+        self.W = sharedX(value=np.zeros((self.input_size, self.output_size)), name=self.name+'_W')
+        self.b = sharedX(value=np.zeros(output_size), name=self.name+'_b')
+        self.g = sharedX(value=np.ones(output_size), name=self.name+'_g')
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        weights_initializer(self.W)
+
+    @property
+    def parameters(self):
+        return [self.W, self.b, self.g]
+
+    def fprop(self, X):
+        units_inputs = T.dot(X, self.W)
+
+        mean = T.mean(units_inputs, axis=1, keepdims=True)
+        std = T.std(units_inputs, axis=1, keepdims=True)
+
+        units_inputs_normalized = (units_inputs - mean) / (std + self.eps)
+
+        out = self.activation_fct(self.g * units_inputs_normalized + self.b)
+
+        return out
+
+
 class LayerRegression(object):
     def __init__(self, input_size, output_size, normed=False, name="Regression"):
 
@@ -55,6 +92,47 @@ class LayerRegression(object):
 
     def fprop(self, X):
         out = T.dot(X, self.W) + self.b
+        # Normalize the output vector.
+        if self.normed:
+            out /= l2distance(out, keepdims=True, eps=1e-8)
+
+        return out
+
+
+class LayerRegressionNormalized(object):
+    """
+    LayerNormalization applied to dense FFNN layer. See: https://arxiv.org/abs/1607.06450
+    """
+    def __init__(self, input_size, output_size, normed=False, name="Regression", eps=1e-5):
+
+        self.input_size = input_size
+        self.output_size = output_size
+        self.normed = normed
+        self.name = name
+        self.eps = eps
+
+        # Regression output weights, biases and gains
+        self.W = sharedX(value=np.zeros((self.input_size, self.output_size)), name=self.name+'_W')
+        self.b = sharedX(value=np.zeros(output_size), name=self.name+'_b')
+        self.g = sharedX(value=np.ones(output_size), name=self.name+'_g')
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        weights_initializer(self.W)
+
+    @property
+    def parameters(self):
+        return [self.W, self.b, self.g]
+
+    def fprop(self, X):
+        units_inputs = T.dot(X, self.W)
+
+        mean = T.mean(units_inputs, axis=1, keepdims=True)
+        std = T.std(units_inputs, axis=1, keepdims=True)
+
+        units_inputs_normalized = (units_inputs - mean) / (std + self.eps)
+
+        out = self.g * units_inputs_normalized + self.b
+
         # Normalize the output vector.
         if self.normed:
             out /= l2distance(out, keepdims=True, eps=1e-8)
@@ -204,5 +282,82 @@ class LayerGRU(object):
         # Candidate activation
         c = self.activation_fct(slice_(Xi, 'h') + T.dot(last_h*gate_r, self.Uh))
         h = (1-gate_z)*last_h + gate_z*c
+
+        return h
+
+
+class LayerGruNormalized(object):
+    """ Gated Recurrent Unit
+
+    LayerNormalization applied to dense GRU layer. See: https://arxiv.org/abs/1607.06450
+
+    References
+    ----------
+    .. [Chung14] Junyoung Chung, Caglar Gulcehre, KyungHyun Cho, Yoshua Bengio
+                 "Empirical Evaluation of Gated Recurrent Neural Networks on Sequence Modeling",
+                 http://arxiv.org/pdf/1412.3555v1.pdf, 2014
+    """
+    def __init__(self, input_size, hidden_size, activation="tanh", name="GRU", eps=1e-5):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.name = name
+        self.activation = activation
+        self.activation_fct = factories.make_activation_function(self.activation)
+        self.eps = eps
+
+        # Input weights (z:update, r:reset)
+        # Concatenation of the weights in that order: Wz, Wr, Wh
+        self.W = sharedX(value=np.zeros((input_size, 3*hidden_size)), name=self.name+'_W')
+
+        self.b_x = sharedX(value=np.zeros(3 * hidden_size), name=self.name + '_b_x')
+        self.b_u = sharedX(value=np.zeros(2 * hidden_size), name=self.name + '_b_u')
+        self.b_uh = sharedX(value=np.zeros(hidden_size), name=self.name+'_b_uh')
+
+        self.g_x = sharedX(value=np.ones(3 * hidden_size), name=self.name + '_g_x')
+        self.g_u = sharedX(value=np.ones(2*hidden_size), name=self.name+'_g_u')
+        self.g_uh = sharedX(value=np.ones(hidden_size), name=self.name+'_g_uh')
+
+        # Recurrence weights (z:update, r:reset)
+        # Concatenation of the recurrence weights in that order: Uz, Ur
+        self.U = sharedX(value=np.zeros((hidden_size, 2*hidden_size)), name=self.name+'_U')
+        self.Uh = sharedX(value=np.zeros((hidden_size, hidden_size)), name=self.name+'_Uh')
+
+    def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
+        weights_initializer(self.W)
+        weights_initializer(self.U)
+        weights_initializer(self.Uh)
+
+    @property
+    def parameters(self):
+        return [self.W, self.b_x, self.b_u, self.b_uh, self.U, self.Uh, self.g_x, self.g_u, self.g_uh]
+
+    def fprop(self, Xi, last_h):
+        def slice_(x, no):
+            if type(no) is str:
+                if no == 'zr':
+                    return x[:, :2*self.hidden_size]
+
+                no = ['z', 'r', 'h'].index(no)
+
+            return x[:, no*self.hidden_size: (no+1)*self.hidden_size]
+
+        def layer_normalize(x, g, b):
+            mean = T.mean(x, axis=1, keepdims=True)
+            std = T.std(x, axis=1, keepdims=True)
+            x_normalized = (x - mean) / (std + self.eps)
+            return g * x_normalized + b
+
+        Xi = layer_normalize(T.dot(Xi, self.W), self.g_x, self.b_x)
+        X_zr = slice_(Xi, 'zr')
+        preactivation = X_zr + layer_normalize(T.dot(last_h, self.U), self.g_u, self.b_u)
+
+        gate_z = T.nnet.sigmoid(slice_(preactivation, 'z'))  # Update gate
+        gate_r = T.nnet.sigmoid(slice_(preactivation, 'r'))  # Reset gate
+
+        # Candidate activation
+        X_h = slice_(Xi, 'h')
+        c_preact = X_h + layer_normalize(T.dot(last_h, self.Uh), self.g_uh, self.b_uh) * gate_r
+        c = self.activation_fct(c_preact)
+        h = (1 - gate_z) * last_h + gate_z * c
 
         return h
