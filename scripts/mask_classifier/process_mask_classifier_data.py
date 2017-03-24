@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import sys
-
-import os
-
-# Hack so you don't have to put the library containing this script in the PYTHONPATH.
-sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
-
-import re
 import argparse
 import textwrap
 
-import numpy as np
-
 import nibabel as nib
+import numpy as np
+import os
+import re
 from dipy.core.gradients import gradient_table
 
 from learn2track.neurotools import MaskClassifierData
@@ -26,7 +19,7 @@ def build_argparser():
 
             This results in a .npz file containing the following keys:\n"
             'mask': :class: numpy.ndarray
-                4D binary mask
+                3D binary mask
             'signal': :class:`Nifti1Image` object (from nibabel)
                 Diffusion signal
             'gradients': :class:`GradientTable` object (from dipy)

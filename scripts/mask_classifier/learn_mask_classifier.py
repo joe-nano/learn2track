@@ -1,35 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import argparse
 import sys
 
-import os
-# Hack so you don't have to put the library containing this script in the PYTHONPATH.
-
-from learn2track.models.ffnn_classification import FFNN_Classification, BinaryCrossEntropy
-
-sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
-
 import numpy as np
-import argparse
-from os.path import join as pjoin
-
+import os
 import theano
 import theano.tensor as T
-
+from os.path import join as pjoin
 from smartlearner import Trainer
 from smartlearner import tasks, views, stopping_criteria
 from smartlearner.direction_modifiers import DirectionClipping
 
-
+from learn2track import datasets
 from learn2track import utils
-from learn2track.utils import Timer
+from learn2track.batch_schedulers import MaskClassifierBatchScheduler
 from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory
 from learn2track.factories import optimizer_factory
-
-from learn2track import datasets
-from learn2track.batch_schedulers import MaskClassifierBatchScheduler
+from learn2track.models.ffnn_classification import FFNN_Classification, BinaryCrossEntropy
 from learn2track.neurotools import VolumeManager
+from learn2track.utils import Timer
 
 
 def build_train_ffnn_argparser(subparser):

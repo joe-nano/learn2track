@@ -190,7 +190,7 @@ class MaskClassifierData(object):
         gradients: :class:`dipy.core.gradients.GradientTable` object
             Diffusion gradient information for the `signal`.
         mask: :class:`nibabel.Nifti1Image` object
-            4D binary mask image
+            3D binary mask image
         positive_coords: :class: `numpy.ndarray` object
             List of positive examples coordinates
         negative_coords: :class: `numpy.ndarray` object
@@ -219,7 +219,8 @@ class MaskClassifierData(object):
     @classmethod
     def load(cls, filename):
         data = np.load(filename)
-        mask_classifier_data = cls(data['signal'].item(), data['gradients'].item(), data['mask'].item(), data['positive_coords'], data['negative_coords'])
+        mask_classifier_data = cls(data['signal'].item(), data['gradients'].item(), data['mask'].item(), data['positive_coords'],
+                                   data['negative_coords'])
         mask_classifier_data.filename = filename
         return mask_classifier_data
 

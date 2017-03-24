@@ -12,7 +12,7 @@ from dipy.tracking.streamline import set_number_of_points, length
 from smartlearner import Dataset
 from learn2track.utils import Timer
 from learn2track import neurotools
-from learn2track.neurotools import TractographyData, MaskClassifierData
+from learn2track.neurotools import TractographyData, MaskClassifierData, eval_volume_at_3d_coordinates
 
 floatX = theano.config.floatX
 
@@ -285,26 +285,31 @@ class MaskClassifierDataset(Dataset):
         self.subjects = subjects
 
         # Combine all tractograms in one.
-        self.coords = []
+        coords = []
+        targets = []
         for i, subject in enumerate(self.subjects):
-            self.coords.extend(subject.positive_coords)
-            self.coords.extend(subject.negative_coords)
+            coords.extend(subject.positive_coords)
+            targets.extend(eval_volume_at_3d_coordinates(subject.mask.get_data(), subject.positive_coords))
 
-        self.coords = np.array(self.coords)
+            coords.extend(subject.negative_coords)
+            targets.extend(eval_volume_at_3d_coordinates(subject.mask.get_data(), subject.negative_coords))
 
-        super().__init__(self.coords, targets=None, name=name, keep_on_cpu=keep_on_cpu)
+        coords = np.array(coords)
+        targets = np.array(targets)
+
+        super().__init__(coords, targets=targets, name=name, keep_on_cpu=keep_on_cpu)
 
         # Build int2indices
-        self.coord_id_to_volume_id = np.nan * np.ones((len(self.coords),))
+        self.input_id_to_volume_id = np.nan * np.ones((len(coords),))
 
         start = 0
         for subject in self.subjects:
             end = start + len(subject.positive_coords) + len(subject.negative_coords)
-            self.coord_id_to_volume_id[start:end] = subject.subject_id
+            self.input_id_to_volume_id[start:end] = subject.subject_id
             start = end
 
-        assert not np.isnan(self.coord_id_to_volume_id.sum())
-        self.coord_id_to_volume_id = self.coord_id_to_volume_id.astype(floatX)
+        assert not np.isnan(self.input_id_to_volume_id.sum())
+        self.input_id_to_volume_id = self.input_id_to_volume_id.astype(floatX)
 
     def get_subject_from_id(self, idx):
         for s in self.subjects:
@@ -312,11 +317,8 @@ class MaskClassifierDataset(Dataset):
                 return s
         raise IndexError("Subject id {} not found!".format(id))
 
-    def __len__(self):
-        return sum([len(s.positive_coords) + len(s.negative_coords) for s in self.subjects])
-
     def __getitem__(self, idx):
-        return self.coords[idx], self.coord_id_to_volume_id[idx]
+        return self.inputs.get_value()[idx], self.input_id_to_volume_id[idx], self.targets.get_value()[idx]
 
 
 def load_mask_classifier_dataset(subject_files, volume_manager, name="HCP", use_sh_coeffs=False):

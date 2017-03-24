@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import sys
+import argparse
 
+import numpy as np
 import os
 
-# Hack so you don't have to put the library containing this script in the PYTHONPATH.
-sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
-
-import argparse
-import numpy as np
-
-from learn2track.utils import Timer
 from learn2track.neurotools import MaskClassifierData
+from learn2track.utils import Timer
 
 
 def buildArgsParser():

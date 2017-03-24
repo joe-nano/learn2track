@@ -910,7 +910,7 @@ class MaskClassifierBatchScheduler(BatchScheduler):
 
         # Shared variables
         self._shared_batch_inputs = sharedX(np.ndarray((0, 0)))
-        self._shared_batch_targets = sharedX(np.ndarray((0, 0)))
+        self._shared_batch_targets = sharedX(np.ndarray((0,)))
 
         # Test value
         batch_inputs, batch_targets = self._next_batch(0)
@@ -952,15 +952,10 @@ class MaskClassifierBatchScheduler(BatchScheduler):
         pass
 
     def _prepare_batch(self, indices):
-        coords, volume_ids = self.dataset[indices]
-
-        inputs = coords  # Streamlines coordinates
-        targets = []
-        for coord, volume_id in zip(coords, volume_ids):
-            targets.append(self.dataset.get_subject_from_id(volume_id).mask.get_data()[tuple(coord)])
+        inputs, volume_ids, targets = self.dataset[indices]
 
         batch_inputs = np.array(inputs)
-        batch_targets = np.array(targets)[:, None]  # batch_targets.shape : (batch_size, 1)
+        batch_targets = np.array(targets)
         batch_volume_ids = np.array(volume_ids)
 
         # Add dwi ID.

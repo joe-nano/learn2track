@@ -63,60 +63,10 @@ class FFNN_Classification(FFNN):
         # Compute positive class probability
         classification_out = self.layer_classification.fprop(layer_outputs[-1])
 
+        # Remove single-dimension from shape
+        classification_out = classification_out[:, 0]
+
         return layer_outputs + (classification_out,)
-
-    def make_sequence_generator(self, subject_id=0, **_):
-        """ Makes function that returns the class_probability for x_{t+1} for every
-        sequence in the batch given x_{t}.
-
-        Parameters
-        ----------
-        subject_id : int, optional
-            ID of the subject from which its diffusion data will be used. Default: 0.
-        """
-
-        # Build the sequence generator as a theano function.
-        symb_x_t = T.matrix(name="x_t")
-
-        layer_outputs = self._fprop(symb_x_t)
-
-        # predictions.shape : (batch_size, 1)
-        predictions = layer_outputs[-1]
-
-        f = theano.function(inputs=[symb_x_t], outputs=[predictions])
-
-        def _gen(x_t, states, *args, **kwargs):
-            """ Returns the positive class probability for x_{t+1} for every
-                sequence in the batch given x_{t}.
-
-            Parameters
-            ----------
-            x_t : ndarray with shape (batch_size, 3)
-                coordinate (x, y, z).
-            states : list of 2D array of shape (batch_size, hidden_size)
-                Currrent states of the network.
-
-            Returns
-            -------
-            class_probability : ndarray with shape (batch_size, 1)
-                Positive class probability
-            new_states : list of 2D array of shape (batch_size, hidden_size)
-                Updated states of the network after seeing x_t.
-            """
-            # Append the DWI ID of each sequence after the 3D coordinates.
-            subject_ids = np.array([subject_id] * len(x_t), dtype=floatX)[:, None]
-
-            x_t = np.c_[x_t, subject_ids]
-
-            results = f(x_t)
-            class_probability = results[-1]
-
-            # FFNN is not a recurrent network, return original states
-            new_states = states
-
-            return class_probability, new_states
-
-        return _gen
 
 
 class BinaryCrossEntropy(Loss):
@@ -129,9 +79,9 @@ class BinaryCrossEntropy(Loss):
         return {}  # No updates
 
     def _compute_losses(self, model_output):
-        # model_output.shape : (batch_size, 1)
+        # model_output.shape : (batch_size,)
 
-        # symb_targets.shape : (batch_size, 1)  # 0/1
+        # targets.shape : (batch_size,)  # 0/1
         targets = self.dataset.symb_targets
 
-        return T.squeeze(T.nnet.binary_crossentropy(model_output, targets))
+        return T.nnet.binary_crossentropy(model_output, targets)

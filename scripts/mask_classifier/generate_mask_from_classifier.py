@@ -1,35 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import itertools
-import sys
-
-import os
-
-# Hack so you don't have to put the library containing this script in the PYTHONPATH.
-sys.path = [os.path.abspath(os.path.join(__file__, '..', '..'))] + sys.path
-
-import numpy as np
 import argparse
-from os.path import join as pjoin
-
-import theano
-import theano.tensor as T
+import itertools
 
 import dipy
 import nibabel as nib
-
+import numpy as np
+import os
+import theano
+import theano.tensor as T
+from os.path import join as pjoin
 from smartlearner import utils as smartutils
 
-from learn2track.utils import Timer
-
 from learn2track import neurotools
+from learn2track.utils import Timer
 
 floatX = theano.config.floatX
 
 
 def build_argparser():
-    DESCRIPTION = "Generate a tractogram from a LSTM model trained on ismrm2015 challenge data."
+    DESCRIPTION = "Generate a white matter mask from diffusion information using a trained model."
     p = argparse.ArgumentParser(description=DESCRIPTION)
 
     p.add_argument('name', type=str, help='name/path of the experiment.')
@@ -39,11 +30,12 @@ def build_argparser():
     p.add_argument('--prefix', type=str,
                    help="prefix to use for the name of the output tractogram, only if it is auto generated.")
 
-    p.add_argument('--batch-size', type=int, help="number of streamlines to process at the same time. Default: the biggest possible")
+    p.add_argument('--batch-size', type=int, help="number of coordinates to process at the same time. "
+                                                  "Default: the biggest possible, divide by half until it fits in memory")
 
     # Optional parameters
     p.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
-    p.add_argument('-f', '--force', action='store_true', help='overwrite existing tractogram')
+    p.add_argument('-f', '--force', action='store_true', help='overwrite existing mask')
 
     return p
 
@@ -86,8 +78,6 @@ def main():
             # Resample the diffusion signal to have 100 directions.
             weights = neurotools.resample_dwi(dwi, bvals, bvecs).astype(np.float32)
 
-        affine_rasmm2dwivox = np.linalg.inv(dwi.affine)
-
     with Timer("Loading model"):
         if hyperparams["model"] == "ffnn_classification":
             from learn2track.models import FFNN_Classification
@@ -109,21 +99,36 @@ def main():
         model_symb_pred = model.get_output(symb_input)
         f = theano.function(inputs=[symb_input], outputs=[model_symb_pred])
 
-        generated_mask = np.zeros(dwi.shape[:3])
+        generated_mask = np.zeros(dwi.shape[:3]).astype(np.float32)
 
         # all_coords.shape = (n_coords, 3)
-        xs = np.arange(generated_mask.shape[0])
-        ys = np.arange(generated_mask.shape[1])
-        zs = np.arange(generated_mask.shape[2])
-        all_coords = np.array(list(itertools.product(xs, ys, zs)))
+        all_coords = np.argwhere(generated_mask == 0)
 
         volume_ids = np.zeros((all_coords.shape[0], 1))
-        all_coords_and_volume_ids = np.concatenate((all_coords, volume_ids), axis=1)
+        all_coords_and_volume_ids = np.concatenate((all_coords, volume_ids), axis=1).astype(np.float32)
 
-        probs = f(all_coords_and_volume_ids)[-1]
+        batch_size = args.batch_size if args.batch_size else len(all_coords_and_volume_ids)
+        probs = []
+        while batch_size > 1:
+            print("Trying to to process batches of size {} out of {}".format(batch_size, len(all_coords_and_volume_ids)))
+            nb_batches = int(np.ceil(len(all_coords_and_volume_ids) / batch_size))
+            try:
+                for batch_count in range(nb_batches):
+                    start = batch_count * batch_size
+                    end = (batch_count + 1) * batch_size
+                    probs.extend(f(all_coords_and_volume_ids[start:end])[-1])
+                    print("Generated batch {} out of {}".format(batch_count+1, nb_batches))
+                break
+            except MemoryError:
+                print("{} coordinates at the same time is too much!".format(batch_size))
+                batch_size //= 2
+            except RuntimeError:
+                print("{} coordinates at the same time is too much!".format(batch_size))
+                batch_size //= 2
+        if not probs:
+            raise RuntimeError("Could not generate predictions...")
 
-        for coord, prob in zip(all_coords, probs):
-            generated_mask[tuple(coord)] = prob > 0.5
+        generated_mask[np.where(generated_mask == 0)] = np.array(probs) > 0.5
 
     with Timer("Saving generated mask"):
         filename = args.out
