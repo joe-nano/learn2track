@@ -180,6 +180,85 @@ class VolumeManager(object):
         return data_at_coords
 
 
+class MaskClassifierData(object):
+    def __init__(self, signal, gradients, mask, positive_coords, negative_coords):
+        """
+        Parameters
+        ----------
+        signal: :class:`nibabel.Nifti1Image` object
+            Diffusion signal used to generate the streamlines.
+        gradients: :class:`dipy.core.gradients.GradientTable` object
+            Diffusion gradient information for the `signal`.
+        mask: :class:`nibabel.Nifti1Image` object
+            4D binary mask image
+        positive_coords: :class: `numpy.ndarray` object
+            List of positive examples coordinates
+        negative_coords: :class: `numpy.ndarray` object
+            List of negative examples coordinates
+        """
+        self.signal = signal
+        self.gradients = gradients
+        self.mask = mask
+        self.positive_coords = positive_coords
+        self.negative_coords = negative_coords
+        self.subject_id = None
+        self.filename = None
+
+    @property
+    def volume(self):
+        if self._volume is None:
+            # Returns original signal
+            return self.signal.get_data()
+
+        return self._volume
+
+    @volume.setter
+    def volume(self, value):
+        self._volume = value
+
+    @classmethod
+    def load(cls, filename):
+        data = np.load(filename)
+        mask_classifier_data = cls(data['signal'].item(), data['gradients'].item(), data['mask'].item(), data['positive_coords'], data['negative_coords'])
+        mask_classifier_data.filename = filename
+        return mask_classifier_data
+
+    def save(self, filename):
+        np.savez(filename,
+                 signal=self.signal,
+                 gradients=self.gradients,
+                 mask=self.mask,
+                 positive_coords=self.positive_coords,
+                 negative_coords=self.negative_coords)
+
+    def __str__(self):
+        import textwrap
+        msg = textwrap.dedent("""
+                              ################################################
+                              Dataset "{dataset_name}"
+                              ################################################
+                              --------------------- Image --------------------
+                              Dimension:     {dimension}
+                              Voxel size:    {voxel_size}
+                              Nb. B0 images: {nb_b0s}
+                              Nb. gradients: {nb_gradients}
+                              dwi filename:  {dwi_filename}
+                              affine: {affine}
+                              ---------------------- Mask --------------------
+                              Shape:         {mask_shape}
+                              """)
+
+        msg = msg.format(dataset_name=self.filename,
+                         dimension=self.signal.shape,
+                         voxel_size=tuple(self.signal.header.get_zooms()),
+                         nb_b0s=self.gradients.b0s_mask.sum(),
+                         nb_gradients=np.logical_not(self.gradients.b0s_mask).sum(),
+                         dwi_filename=self.signal.get_filename(),
+                         affine="\n        ".join(str(self.signal.affine).split('\n')),
+                         mask_shape=self.mask.shape)
+        return msg[1:]  # Without the first newline.
+
+
 def map_coordinates_3d_4d(input_array, indices, affine=None, order=1):
     """ Evaluate the input_array data at the given indices
     using trilinear interpolation

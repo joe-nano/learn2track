@@ -881,3 +881,136 @@ class SingleInputTractographyBatchScheduler(BatchScheduler):
     def load(self, loaddir):
         state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
         self.set_state(state)
+
+
+class MaskClassifierBatchScheduler(BatchScheduler):
+    """
+    Batch scheduler for diffusion data coming from multiple subjects, where each data point must be fed as a single input to the model.
+    Each batch will contain random points within the volume
+    """
+
+    def __init__(self, dataset, batch_size, seed=1234):
+        """
+        Parameters
+        ----------
+        dataset : :class:`MaskClassifierDataset`
+            Dataset from which to get the examples.
+        batch_size : int
+            Nb. of examples per batch.
+        seed : int, optional
+            Seed for the random generator when shuffling streamlines or adding noise to the streamlines.
+        """
+        self.dataset = dataset
+        self.batch_size = batch_size
+
+        self.indices = np.arange(len(self.dataset))
+
+        self.seed = seed
+        self.rng = np.random.RandomState(self.seed)
+
+        # Shared variables
+        self._shared_batch_inputs = sharedX(np.ndarray((0, 0)))
+        self._shared_batch_targets = sharedX(np.ndarray((0, 0)))
+
+        # Test value
+        batch_inputs, batch_targets = self._next_batch(0)
+
+        # Redefine symbolic variables for single input model
+        self.dataset.symb_inputs = T.TensorVariable(type=T.TensorType("floatX", [False] * batch_inputs.ndim),
+                                                    name=self.dataset.name + '_symb_inputs')
+        self.dataset.symb_inputs.tag.test_value = batch_inputs
+
+        # Since this batch scheduler creates its own targets.
+        if self.dataset.symb_targets is None:
+            self.dataset.symb_targets = T.TensorVariable(type=T.TensorType("floatX", [False] * batch_targets.ndim),
+                                                         name=self.dataset.name + '_symb_targets')
+
+        self.dataset.symb_targets.tag.test_value = batch_targets
+
+    @property
+    def input_size(self):
+        # Number of diffusion directions or Spherical Harmonics (SH) coefficients
+        return self.dataset.volumes[0].shape[-1]
+
+    @property
+    def target_size(self):
+        return 1  # Positive class probability
+
+    @property
+    def nb_updates_per_epoch(self):
+        return int(np.ceil(len(self.dataset) / self.batch_size))
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @batch_size.setter
+    def batch_size(self, value):
+        self._batch_size = value
+
+    def _augment_data(self, inputs):
+        pass
+
+    def _prepare_batch(self, indices):
+        coords, volume_ids = self.dataset[indices]
+
+        inputs = coords  # Streamlines coordinates
+        targets = []
+        for coord, volume_id in zip(coords, volume_ids):
+            targets.append(self.dataset.get_subject_from_id(volume_id).mask.get_data()[tuple(coord)])
+
+        batch_inputs = np.array(inputs)
+        batch_targets = np.array(targets)[:, None]  # batch_targets.shape : (batch_size, 1)
+        batch_volume_ids = np.array(volume_ids)
+
+        # Add dwi ID.
+        batch_inputs = np.concatenate([batch_inputs, batch_volume_ids[:, None]], axis=1)  # Image coords + dwi ID
+
+        return batch_inputs, batch_targets
+
+    def _next_batch(self, batch_count):
+        # Simply take the next slice.
+        start = batch_count * self.batch_size
+        end = (batch_count + 1) * self.batch_size
+        return self._prepare_batch(self.indices[slice(start, end)])
+
+    @property
+    def givens(self):
+        return {self.dataset.symb_inputs: self._shared_batch_inputs,
+                self.dataset.symb_targets: self._shared_batch_targets}
+
+    def __iter__(self):
+        self.rng.shuffle(self.indices)
+
+        for batch_count in range(self.nb_updates_per_epoch):
+            batch_inputs, batch_targets = self._next_batch(batch_count)
+            self._shared_batch_inputs.set_value(batch_inputs)
+            self._shared_batch_targets.set_value(batch_targets)
+
+            yield batch_count + 1
+
+    @property
+    def updates(self):
+        return {}  # No updates
+
+    def get_state(self):
+        state = {"version": 1,
+                 "batch_size": self.batch_size,
+                 "seed": self.seed,
+                 "rng": pickle.dumps(self.rng),
+                 "indices": self.indices
+                 }
+        return state
+
+    def set_state(self, state):
+        self.batch_size = state["batch_size"]
+        self.rng = pickle.loads(state["rng"])
+        self.indices = state["indices"]
+
+    def save(self, savedir):
+        state = self.get_state()
+        np.savez(pjoin(savedir, type(self).__name__ + '.npz'), **state)
+
+    def load(self, loaddir):
+        state = np.load(pjoin(loaddir, type(self).__name__ + '.npz'))
+        self.set_state(state)
