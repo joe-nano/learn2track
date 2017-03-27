@@ -62,6 +62,9 @@ def build_train_gru_argparser(subparser):
                        help=('if specified, the model will predict the offset from the previous direction instead',
                              ' (need --feed-previous-direction)'))
 
+    model.add_argument('--use-layer-normalization', action="store_true",
+                       help='if specified, the model will be use LayerNormalization in the hidden layers')
+
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -93,6 +96,9 @@ def build_train_gru_mixture_argparser(subparser):
     model.add_argument('--feed-previous-direction', action="store_true",
                        help='if specified, the model will be given the previous direction as an additional input')
 
+    model.add_argument('--use-layer-normalization', action="store_true",
+                       help='if specified, the model will be use LayerNormalization in the hidden layers')
+
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -122,6 +128,9 @@ def build_train_gru_multistep_argparser(subparser):
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
     model.add_argument('--initialization-seed', type=int, default=1234,
                        help='seed used to generate random numbers. Default=1234')
+
+    model.add_argument('--use-layer-normalization', action="store_true",
+                       help='if specified, the model will be use LayerNormalization in the hidden layers')
 
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
@@ -160,6 +169,9 @@ def build_train_ffnn_regression_argparser(subparser):
     model.add_argument('--predict-offset', action="store_true",
                        help=('if specified, the model will predict the offset from the previous direction instead',
                              ' (need --feed-previous-direction)'))
+
+    model.add_argument('--use-layer-normalization', action="store_true",
+                       help='if specified, the model will be use LayerNormalization in the hidden layers')
 
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
@@ -287,7 +299,8 @@ def main():
                                    'predict_offset': False,
                                    'normalize': False,
                                    'sort_streamlines': False,
-                                   'keep_step_size': False}
+                                   'keep_step_size': False,
+                                   'use_layer_normalization': False}
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
                                                                                   retrocompatibility_defaults=retrocompatibility_defaults)
 

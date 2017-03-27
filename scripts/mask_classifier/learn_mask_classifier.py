@@ -36,6 +36,9 @@ def build_train_ffnn_argparser(subparser):
     model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
                        help="Size of the hidden layers. Default: 500")
 
+    model.add_argument('--use-layer-normalization', action="store_true",
+                       help='if specified, the model will be use LayerNormalization in the hidden layers')
+
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
     model.add_argument('--initialization-seed', type=int, default=1234,
@@ -110,7 +113,7 @@ def main():
 
     hyperparams_to_exclude = ['max_epoch', 'force', 'name', 'view']
     # Use this for hyperparams added in a new version, but nonexistent from older versions
-    retrocompatibility_defaults = {}
+    retrocompatibility_defaults = {'use_layer_normalization': False}
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
                                                                                   retrocompatibility_defaults=retrocompatibility_defaults)
 
