@@ -12,7 +12,7 @@ from dipy.tracking.streamline import set_number_of_points, length
 from smartlearner import Dataset
 from learn2track.utils import Timer
 from learn2track import neurotools
-from learn2track.neurotools import TractographyData
+from learn2track.neurotools import TractographyData, MaskClassifierData, eval_volume_at_3d_coordinates
 
 floatX = theano.config.floatX
 
@@ -273,3 +273,74 @@ def load_tractography_dataset_from_dwi_and_tractogram(dwi, tractogram, volume_ma
     tracto_data.subject_id = subject_id
 
     return TractographyDataset([tracto_data], "dataset", keep_on_cpu=True)
+
+
+class MaskClassifierDataset(Dataset):
+    def __init__(self, subjects, name="dataset", keep_on_cpu=False):
+        """
+        Parameters
+        ----------
+        subjects: list of MaskClassifierData
+        """
+        self.subjects = subjects
+
+        # Combine all tractograms in one.
+        coords = []
+        targets = []
+        for i, subject in enumerate(self.subjects):
+            coords.extend(subject.positive_coords)
+            targets.extend(eval_volume_at_3d_coordinates(subject.mask.get_data(), subject.positive_coords))
+
+            coords.extend(subject.negative_coords)
+            targets.extend(eval_volume_at_3d_coordinates(subject.mask.get_data(), subject.negative_coords))
+
+        coords = np.array(coords)
+        targets = np.array(targets)
+
+        super().__init__(coords, targets=targets, name=name, keep_on_cpu=keep_on_cpu)
+
+        # Build int2indices
+        self.input_id_to_volume_id = np.nan * np.ones((len(coords),))
+
+        start = 0
+        for subject in self.subjects:
+            end = start + len(subject.positive_coords) + len(subject.negative_coords)
+            self.input_id_to_volume_id[start:end] = subject.subject_id
+            start = end
+
+        assert not np.isnan(self.input_id_to_volume_id.sum())
+        self.input_id_to_volume_id = self.input_id_to_volume_id.astype(floatX)
+
+    def get_subject_from_id(self, idx):
+        for s in self.subjects:
+            if s.subject_id == idx:
+                return s
+        raise IndexError("Subject id {} not found!".format(id))
+
+    def __getitem__(self, idx):
+        return self.inputs.get_value()[idx], self.input_id_to_volume_id[idx], self.targets.get_value()[idx]
+
+
+def load_mask_classifier_dataset(subject_files, volume_manager, name="HCP", use_sh_coeffs=False):
+    subjects = []
+    with Timer("  Loading subject(s)", newline=True):
+        for subject_file in sorted(subject_files):
+            print("    {}".format(subject_file))
+            mask_data = MaskClassifierData.load(subject_file)
+
+            dwi = mask_data.signal
+            bvals = mask_data.gradients.bvals
+            bvecs = mask_data.gradients.bvecs
+            if use_sh_coeffs:
+                # Use 45 spherical harmonic coefficients to represent the diffusion signal.
+                volume = neurotools.get_spherical_harmonics_coefficients(dwi, bvals, bvecs).astype(np.float32)
+            else:
+                # Resample the diffusion signal to have 100 directions.
+                volume = neurotools.resample_dwi(dwi, bvals, bvecs).astype(np.float32)
+
+            mask_data.signal.uncache()  # Free some memory as we don't need the original signal.
+            subject_id = volume_manager.register(volume)
+            mask_data.subject_id = subject_id
+            subjects.append(mask_data)
+
+    return MaskClassifierDataset(subjects, name, keep_on_cpu=True)
