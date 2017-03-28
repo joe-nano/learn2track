@@ -343,7 +343,7 @@ class LayerGruNormalized(object):
 
         def layer_normalize(x, g, b):
             mean = T.mean(x, axis=1, keepdims=True)
-            std = T.std(x, axis=1, keepdims=True)
+            std = T.sqrt(T.var(x, axis=1, keepdims=True) + self.eps)
             x_normalized = (x - mean) / (std + self.eps)
             return g * x_normalized + b
 
