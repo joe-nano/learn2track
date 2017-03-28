@@ -3,7 +3,7 @@ import smartlearner.initializers as initer
 import theano
 import theano.tensor as T
 from learn2track.models import FFNN
-from learn2track.models.layers import LayerDense
+from learn2track.models.layers import LayerDense, LayerDenseNormalized
 from smartlearner.interfaces.loss import Loss
 
 from learn2track.utils import l2distance
@@ -15,7 +15,7 @@ class FFNN_Regression(FFNN):
     """ A standard FFNN model with a regression layer stacked on top of it.
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, use_previous_direction=False, predict_offset=False, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, use_previous_direction=False, predict_offset=False, use_layer_normalization=False, **_):
         """
         Parameters
         ----------
@@ -33,8 +33,10 @@ class FFNN_Regression(FFNN):
             Use the previous direction as an additional input
         predict_offset : bool
             Predict the offset from the previous direction instead (need use_previous_direction).
+        use_layer_normalization : bool
+            Use LayerNormalization to normalize preactivations
         """
-        super().__init__(input_size, hidden_sizes, activation)
+        super().__init__(input_size, hidden_sizes, activation, use_layer_normalization)
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction

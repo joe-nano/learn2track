@@ -7,7 +7,7 @@ import theano.tensor as T
 from smartlearner.interfaces import Loss
 import smartlearner.initializers as initer
 
-from learn2track.models.layers import LayerDense
+from learn2track.models.layers import LayerDense, LayerDenseNormalized
 from learn2track.models import GRU
 from learn2track.utils import l2distance
 
@@ -17,7 +17,7 @@ floatX = theano.config.floatX
 class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
     """
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, predict_offset=False, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, predict_offset=False, use_layer_normalization=False, **_):
         """
         Parameters
         ----------
@@ -33,8 +33,10 @@ class GRU_Regression(GRU):
             Use the previous direction as an additional input
         predict_offset : bool
             Predict the offset from the previous direction instead (need use_previous_direction).
+        use_layer_normalization : bool
+            Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
         """
-        super().__init__(input_size, hidden_sizes)
+        super().__init__(input_size, hidden_sizes, use_layer_normalization)
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction

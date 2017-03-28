@@ -5,7 +5,7 @@ import numpy as np
 import smartlearner.initializers as initer
 import theano
 import theano.tensor as T
-from learn2track.models.layers import LayerDense
+from learn2track.models.layers import LayerDense, LayerDenseNormalized
 from smartlearner import utils as smartutils
 from smartlearner.interfaces import Model
 
@@ -18,7 +18,7 @@ class FFNN(Model):
     The output is simply the state of the last hidden layer.
     """
 
-    def __init__(self, input_size, hidden_sizes, activation='tanh'):
+    def __init__(self, input_size, hidden_sizes, activation='tanh', use_layer_normalization=False):
         """
         Parameters
         ----------
@@ -28,6 +28,8 @@ class FFNN(Model):
             Number of hidden units the model should have.
         activation : str
             Name of the activation function to use in the hidden layers
+        use_layer_normalization : bool
+            Use LayerNormalization to normalize preactivations
         """
         self.graph_updates = OrderedDict()
         self._gen = None
@@ -35,11 +37,16 @@ class FFNN(Model):
         self.input_size = input_size
         self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
         self.activation = activation
+        self.use_layer_normalization = use_layer_normalization
+
+        layer_class = LayerDense
+        if self.use_layer_normalization:
+            layer_class = LayerDenseNormalized
 
         self.layers = []
         last_hidden_size = self.input_size
         for i, hidden_size in enumerate(self.hidden_sizes):
-            self.layers.append(LayerDense(last_hidden_size, hidden_size, activation=activation, name="Dense{}".format(i)))
+            self.layers.append(layer_class(last_hidden_size, hidden_size, activation=activation, name="Dense{}".format(i)))
             last_hidden_size = hidden_size
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
@@ -55,7 +62,8 @@ class FFNN(Model):
         hyperparameters = {'version': 1,
                            'input_size': self.input_size,
                            'hidden_sizes': self.hidden_sizes,
-                           'activation': self.activation}
+                           'activation': self.activation,
+                           'use_layer_normalization': self.use_layer_normalization}
 
         return hyperparameters
 

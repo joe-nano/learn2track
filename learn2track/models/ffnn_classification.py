@@ -15,7 +15,7 @@ class FFNN_Classification(FFNN):
     """ A standard FFNN model with a classification (sigmoid) layer stacked on top of it.
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, use_layer_normalization=False, **_):
         """
         Parameters
         ----------
@@ -25,8 +25,10 @@ class FFNN_Classification(FFNN):
             Number of units each element X has.
         hidden_sizes : int, list of int
             Number of hidden units each FFNN layer should have.
+        use_layer_normalization : bool
+            Use LayerNormalization to normalize preactivations
         """
-        super().__init__(input_size, hidden_sizes)
+        super().__init__(input_size, hidden_sizes, use_layer_normalization=use_layer_normalization)
         self.volume_manager = volume_manager
         self.output_size = 1  # Positive class probability
 

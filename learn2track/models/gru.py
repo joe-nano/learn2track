@@ -10,7 +10,7 @@ from smartlearner import utils as smartutils
 from smartlearner.utils import sharedX
 import smartlearner.initializers as initer
 
-from learn2track.models.layers import LayerGRU, LayerRegression, LayerDense
+from learn2track.models.layers import LayerGRU, LayerRegression, LayerDense, LayerGruNormalized
 
 floatX = theano.config.floatX
 
@@ -21,25 +21,32 @@ class GRU(Model):
 
     The output is simply the state of the last hidden layer.
     """
-    def __init__(self, input_size, hidden_sizes):
+    def __init__(self, input_size, hidden_sizes, use_layer_normalization=False):
         """
         Parameters
         ----------
         input_size : int
             Number of units each element Xi in the input sequence X has.
         hidden_sizes : int, list of int
-            Number of hidden units each LSTM should have.
+            Number of hidden units each GRU should have.
+        use_layer_normalization : bool
+            Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
         """
         self.graph_updates = OrderedDict()
         self._gen = None
 
         self.input_size = input_size
         self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
+        self.use_layer_normalization = use_layer_normalization
+
+        layer_class = LayerGRU
+        if self.use_layer_normalization:
+            layer_class = LayerGruNormalized
 
         self.layers = []
         last_hidden_size = self.input_size
         for i, hidden_size in enumerate(self.hidden_sizes):
-            self.layers.append(LayerGRU(last_hidden_size, hidden_size, name="GRU{}".format(i)))
+            self.layers.append(layer_class(last_hidden_size, hidden_size, name="GRU{}".format(i)))
             last_hidden_size = hidden_size
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
@@ -54,7 +61,8 @@ class GRU(Model):
     def hyperparameters(self):
         hyperparameters = {'version': 1,
                            'input_size': self.input_size,
-                           'hidden_sizes': self.hidden_sizes}
+                           'hidden_sizes': self.hidden_sizes,
+                           'use_layer_normalization': self.use_layer_normalization}
 
         return hyperparameters
 
