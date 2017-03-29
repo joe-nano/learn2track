@@ -16,7 +16,7 @@ class GRU_Mixture(GRU_Regression):
     """ A GRU_Regression model with the output size computed for a mixture of gaussians, using a diagonal covariance matrix
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, use_previous_direction=False, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, use_previous_direction=False, use_layer_normalization=False, **_):
         """
         Parameters
         ----------
@@ -32,8 +32,10 @@ class GRU_Mixture(GRU_Regression):
             Number of gaussians in the mixture
         use_previous_direction : bool
             Use the previous direction as an additional input
+        use_layer_normalization : bool
+            Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
         """
-        super(GRU_Regression, self).__init__(input_size, hidden_sizes)
+        super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization)
         self.volume_manager = volume_manager
         self.n_gaussians = n_gaussians
 
