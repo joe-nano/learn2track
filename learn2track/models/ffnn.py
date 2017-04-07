@@ -58,10 +58,11 @@ class FFNN(Model):
             self.layers.append(layer_class(last_hidden_size, hidden_size, activation=activation, name="Dense{}".format(i)))
             last_hidden_size = hidden_size
 
-        self.dropout_matrices = {}
+        self.dropout_vectors = {}
         if self.dropout_prob:
+            p = 1 - self.dropout_prob
             for layer in self.layers:
-                self.dropout_matrices[layer.name] = self.srng.binomial(size=layer.W.shape, n=1, p=1 - self.dropout_prob, dtype=floatX)
+                self.dropout_vectors[layer.name] = self.srng.binomial(size=(layer.W.shape[0],), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         for layer in self.layers:
@@ -104,7 +105,7 @@ class FFNN(Model):
 
         next_input = Xi
         for i, layer in enumerate(self.layers):
-            dropout_W = self.dropout_matrices[layer.name] if self.dropout_prob else None
+            dropout_W = self.dropout_vectors[layer.name] if self.dropout_prob else None
             layer_output = layer.fprop(next_input, dropout_W)
             layers_h.append(layer_output)
             next_input = layer_output

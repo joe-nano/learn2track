@@ -52,8 +52,8 @@ class GRU_Regression(GRU):
         self.layer_regression = LayerDense(self.hidden_sizes[-1], self.output_size, activation=layer_regression_activation, name="GRU_Regression")
 
         if self.dropout_prob:
-            self.dropout_matrices[self.layer_regression.name] = self.srng.binomial(size=self.layer_regression.W.shape, n=1, p=1 - self.dropout_prob,
-                                                                                   dtype=floatX)
+            p = 1 - self.dropout_prob
+            self.dropout_vectors[self.layer_regression.name] = self.srng.binomial(size=(self.layer_regression.W.shape[0],), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -96,7 +96,7 @@ class GRU_Regression(GRU):
         next_hidden_state = super()._fprop(fprop_input, *args)
 
         # Compute the direction to follow for step (t)
-        dropout_W = self.dropout_matrices[self.layer_regression.name] if self.dropout_prob else None
+        dropout_W = self.dropout_vectors[self.layer_regression.name] if self.dropout_prob else None
         regression_out = self.layer_regression.fprop(next_hidden_state[-1], dropout_W)
 
         if self.predict_offset:

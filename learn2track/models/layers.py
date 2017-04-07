@@ -29,9 +29,10 @@ class LayerDense(object):
         return [self.W, self.b]
 
     def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
         W = self.W
         if dropout_W:
-            W *= dropout_W
+            W *= dropout_W[:, None]
         preactivation = T.dot(X, W) + self.b
         out = self.activation_fct(preactivation)
         return out
@@ -62,9 +63,10 @@ class LayerDenseNormalized(object):
         return [self.W, self.b, self.g]
 
     def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
         W = self.W
         if dropout_W:
-            W *= dropout_W
+            W *= dropout_W[:, None]
         units_inputs = T.dot(X, W)
 
         mean = T.mean(units_inputs, axis=1, keepdims=True)
@@ -97,9 +99,10 @@ class LayerRegression(object):
         return [self.W, self.b]
 
     def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
         W = self.W
         if dropout_W:
-            W *= dropout_W
+            W *= dropout_W[:, None]
         out = T.dot(X, W) + self.b
         # Normalize the output vector.
         if self.normed:
@@ -133,9 +136,10 @@ class LayerRegressionNormalized(object):
         return [self.W, self.b, self.g]
 
     def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
         W = self.W
         if dropout_W:
-            W *= dropout_W
+            W *= dropout_W[:, None]
         units_inputs = T.dot(X, W)
 
         mean = T.mean(units_inputs, axis=1, keepdims=True)
@@ -171,9 +175,10 @@ class LayerSoftmax(object):
         return [self.W, self.b]
 
     def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
         W = self.W
         if dropout_W:
-            W *= dropout_W
+            W *= dropout_W[:, None]
         preactivation = T.dot(X, W) + self.b
         # The softmax function, applied to a matrix, computes the softmax values row-wise.
         out = T.nnet.softmax(preactivation)
@@ -215,13 +220,14 @@ class LayerLstmWithPeepholes(object):
                 self.Vi, self.Vo, self.Vf]
 
     def fprop(self, Xi, last_h, last_m, dropout_W=None, dropout_U=None):
+        # dropout_W, dropout_U are row vectors of inputs to be dropped
         W = self.W
         if dropout_W:
-            W *= dropout_W
+            W *= dropout_W[:, None]
 
         U = self.U
         if dropout_U:
-            U *= dropout_U
+            U *= dropout_U[:, None]
 
         def slice_(x, no):
             if type(no) is str:
@@ -287,17 +293,18 @@ class LayerGRU(object):
         return [self.W, self.b, self.U, self.Uh]
 
     def fprop(self, Xi, last_h, dropout_W=None, dropout_U=None, dropout_Uh=None):
+        # dropout_W, dropout_U, dropout_Uh are row vectors of inputs to be dropped
         W = self.W
         if dropout_W:
-            W *= dropout_W
+            W *= dropout_W[:, None]
 
         U = self.U
         if dropout_U:
-            U *= dropout_U
+            U *= dropout_U[:, None]
 
         Uh = self.Uh
         if dropout_Uh:
-            U *= dropout_Uh
+            U *= dropout_Uh[:, None]
 
         def slice_(x, no):
             if type(no) is str:
@@ -367,17 +374,18 @@ class LayerGruNormalized(object):
         return [self.W, self.b_x, self.b_u, self.b_uh, self.U, self.Uh, self.g_x, self.g_u, self.g_uh]
 
     def fprop(self, Xi, last_h, dropout_W=None, dropout_U=None, dropout_Uh=None):
+        # dropout_W, dropout_U, dropout_Uh are row vectors of inputs to be dropped
         W = self.W
         if dropout_W:
-            W *= dropout_W
+            W *= dropout_W[:, None]
 
         U = self.U
         if dropout_U:
-            U *= dropout_U
+            U *= dropout_U[:, None]
 
         Uh = self.Uh
         if dropout_Uh:
-            U *= dropout_Uh
+            U *= dropout_Uh[:, None]
 
         def slice_(x, no):
             if type(no) is str:

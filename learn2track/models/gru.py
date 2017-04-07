@@ -54,13 +54,14 @@ class GRU(Model):
             self.layers.append(layer_class(last_hidden_size, hidden_size, name="GRU{}".format(i)))
             last_hidden_size = hidden_size
 
-        self.dropout_matrices = {}
+        self.dropout_vectors = {}
         if self.dropout_prob:
+            p = 1 - self.dropout_prob
             for layer in self.layers:
-                self.dropout_matrices[layer.name] = {}
-                self.dropout_matrices[layer.name]['W'] = self.srng.binomial(size=layer.W.shape, n=1, p=1 - self.dropout_prob, dtype=floatX)
-                self.dropout_matrices[layer.name]['U'] = self.srng.binomial(size=layer.U.shape, n=1, p=1 - self.dropout_prob, dtype=floatX)
-                self.dropout_matrices[layer.name]['Uh'] = self.srng.binomial(size=layer.Uh.shape, n=1, p=1 - self.dropout_prob, dtype=floatX)
+                self.dropout_vectors[layer.name] = {}
+                self.dropout_vectors[layer.name]['W'] = self.srng.binomial(size=(layer.W.shape[0],), n=1, p=p, dtype=floatX) / p
+                self.dropout_vectors[layer.name]['U'] = self.srng.binomial(size=(layer.U.shape[0],), n=1, p=p, dtype=floatX) / p
+                self.dropout_vectors[layer.name]['Uh'] = self.srng.binomial(size=(layer.Uh.shape[0],), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         for layer in self.layers:
@@ -104,10 +105,10 @@ class GRU(Model):
         for i, layer in enumerate(self.layers):
             dropout_W, dropout_U, dropout_Uh = None, None, None
             if self.dropout_prob:
-                dropout_matrices = self.dropout_matrices[layer.name]
-                dropout_W = dropout_matrices['W']
-                dropout_U = dropout_matrices['U']
-                dropout_Uh = dropout_matrices['Uh']
+                dropout_vectors = self.dropout_vectors[layer.name]
+                dropout_W = dropout_vectors['W']
+                dropout_U = dropout_vectors['U']
+                dropout_Uh = dropout_vectors['Uh']
 
             last_h = args[i]
             h = layer.fprop(input, last_h, dropout_W, dropout_U, dropout_Uh)

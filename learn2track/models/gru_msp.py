@@ -62,8 +62,8 @@ class GRU_Multistep_Gaussian(GRU):
         self.srng = MRG_RandomStreams(self.seed)
 
         if self.dropout_prob:
-            self.dropout_matrices[self.layer_regression.name] = self.srng.binomial(size=self.layer_regression.W.shape, n=1, p=1 - self.dropout_prob,
-                                                                                   dtype=floatX)
+            p = 1 - self.dropout_prob
+            self.dropout_vectors[self.layer_regression.name] = self.srng.binomial(size=(self.layer_regression.W.shape[0],), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -173,7 +173,7 @@ class GRU_Multistep_Gaussian(GRU):
     def _predict_distribution_params(self, hidden_state):
         # regression layer outputs an array [mean_x, mean_y, mean_z, log(std_x), log(std_y), log(std_z)]
         # regression_output.shape : (batch_size, target_size)
-        dropout_W = self.dropout_matrices[self.layer_regression.name] if self.dropout_prob else None
+        dropout_W = self.dropout_vectors[self.layer_regression.name] if self.dropout_prob else None
         regression_output = self.layer_regression.fprop(hidden_state, dropout_W)
 
         # Use T.exp to retrieve a positive sigma

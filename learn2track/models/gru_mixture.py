@@ -57,8 +57,8 @@ class GRU_Mixture(GRU_Regression):
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.layer_regression_size)
 
         if self.dropout_prob:
-            self.dropout_matrices[self.layer_regression.name] = self.srng.binomial(size=self.layer_regression.W.shape, n=1, p=1 - self.dropout_prob,
-                                                                                   dtype=floatX)
+            p = 1 - self.dropout_prob
+            self.dropout_vectors[self.layer_regression.name] = self.srng.binomial(size=(self.layer_regression.W.shape[0],), n=1, p=p, dtype=floatX) / p
 
     @property
     def hyperparameters(self):
