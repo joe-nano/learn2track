@@ -92,7 +92,9 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                               output_size=output_size,
                               use_previous_direction=hyperparams['feed_previous_direction'],
                               predict_offset=hyperparams['predict_offset'],
-                              use_layer_normalization=hyperparams['use_layer_normalization'])
+                              use_layer_normalization=hyperparams['use_layer_normalization'],
+                              dropout_prob=hyperparams['dropout_prob'],
+                              seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'gru_multistep':
         from learn2track.models import GRU_Multistep_Gaussian
@@ -104,7 +106,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                                       m=hyperparams['m'],
                                       seed=hyperparams['seed'],
                                       use_previous_direction=hyperparams['feed_previous_direction'],
-                                      use_layer_normalization=hyperparams['use_layer_normalization'])
+                                      use_layer_normalization=hyperparams['use_layer_normalization'],
+                                      dropout_prob=hyperparams['dropout_prob'])
 
     elif hyperparams['model'] == 'gru_mixture':
         from learn2track.models import GRU_Mixture
@@ -114,7 +117,9 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                            output_size=output_size,
                            n_gaussians=hyperparams['n_gaussians'],
                            use_previous_direction=hyperparams['feed_previous_direction'],
-                           use_layer_normalization=hyperparams['use_layer_normalization'])
+                           use_layer_normalization=hyperparams['use_layer_normalization'],
+                           dropout_prob=hyperparams['dropout_prob'],
+                           seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'ffnn_regression':
         from learn2track.models import FFNN_Regression
@@ -125,7 +130,9 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                                activation=hyperparams['activation'],
                                use_previous_direction=hyperparams['feed_previous_direction'],
                                predict_offset=hyperparams['predict_offset'],
-                               use_layer_normalization=hyperparams['use_layer_normalization'])
+                               use_layer_normalization=hyperparams['use_layer_normalization'],
+                               dropout_prob=hyperparams['dropout_prob'],
+                               seed=hyperparams['seed'])
 
     else:
         raise ValueError("Unknown model!")

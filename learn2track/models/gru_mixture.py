@@ -1,7 +1,6 @@
 import numpy as np
 import theano
 import theano.tensor as T
-from collections import OrderedDict
 from smartlearner.interfaces import Loss
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 
@@ -16,7 +15,8 @@ class GRU_Mixture(GRU_Regression):
     """ A GRU_Regression model with the output size computed for a mixture of gaussians, using a diagonal covariance matrix
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, use_previous_direction=False, use_layer_normalization=False, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, use_previous_direction=False,
+                 use_layer_normalization=False, dropout_prob=0., seed=1234, **_):
         """
         Parameters
         ----------
@@ -34,8 +34,12 @@ class GRU_Mixture(GRU_Regression):
             Use the previous direction as an additional input
         use_layer_normalization : bool
             Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
+        dropout_prob : float
+            Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
+        seed : int
+            Random seed used for dropout normalization
         """
-        super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization)
+        super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization, dropout_prob, seed)
         self.volume_manager = volume_manager
         self.n_gaussians = n_gaussians
 
@@ -51,6 +55,10 @@ class GRU_Mixture(GRU_Regression):
                                           n_gaussians * output_size,  # Means
                                           n_gaussians * output_size])  # Stds
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.layer_regression_size)
+
+        if self.dropout_prob:
+            self.dropout_matrices[self.layer_regression.name] = self.srng.binomial(size=self.layer_regression.W.shape, n=1, p=1 - self.dropout_prob,
+                                                                                   dtype=floatX)
 
     @property
     def hyperparameters(self):

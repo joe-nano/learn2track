@@ -768,6 +768,7 @@ def main():
 
         # Load the actual model.
         model = model_class.create(pjoin(experiment_path), **kwargs)  # Create new instance and restore model.
+        model.dropout_prob = 0.
         print(str(model))
 
     mask = None

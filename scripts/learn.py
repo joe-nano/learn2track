@@ -65,6 +65,8 @@ def build_train_gru_argparser(subparser):
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
 
+    model.add_argument('-d', '--dropout-prob', type=float, default=0., help='Dropout probability. Default: 0')
+
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -99,6 +101,8 @@ def build_train_gru_mixture_argparser(subparser):
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
 
+    model.add_argument('-d', '--dropout-prob', type=float, default=0., help='Dropout probability. Default: 0')
+
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
     general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
@@ -131,6 +135,8 @@ def build_train_gru_multistep_argparser(subparser):
 
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
+
+    model.add_argument('-d', '--dropout-prob', type=float, default=0., help='Dropout probability. Default: 0')
 
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
@@ -172,6 +178,8 @@ def build_train_ffnn_regression_argparser(subparser):
 
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
+
+    model.add_argument('-d', '--dropout-prob', type=float, default=0., help='Dropout probability. Default: 0')
 
     # General parameters (optional)
     general = p.add_argument_group("General arguments")
@@ -300,7 +308,8 @@ def main():
                                    'normalize': False,
                                    'sort_streamlines': False,
                                    'keep_step_size': False,
-                                   'use_layer_normalization': False}
+                                   'use_layer_normalization': False,
+                                   'dropout_prob': 0.}
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
                                                                                   retrocompatibility_defaults=retrocompatibility_defaults)
 
@@ -382,6 +391,7 @@ def main():
 
         # HACK: To make sure all subjects in the volume_manager are used in a batch, we have to split the trainset/validset in 2 volume managers
         model.volume_manager = validset_volume_manager
+        model.dropout_prob = 0.  # Do not use dropout for evaluation
         valid_loss = loss_factory(hyperparams, model, validset)
         valid_batch_scheduler = batch_scheduler_factory(hyperparams,
                                                         dataset=validset,
@@ -401,6 +411,7 @@ def main():
 
         # HACK: Restore trainset volume manager
         model.volume_manager = trainset_volume_manager
+        model.dropout_prob = hyperparams['dropout_prob']  # Restore dropout
 
         lookahead_loss = valid_error.sum
 

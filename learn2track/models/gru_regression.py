@@ -1,14 +1,11 @@
 import numpy as np
-from collections import OrderedDict
-
+import smartlearner.initializers as initer
 import theano
 import theano.tensor as T
-
 from smartlearner.interfaces import Loss
-import smartlearner.initializers as initer
 
-from learn2track.models.layers import LayerDense, LayerDenseNormalized
 from learn2track.models import GRU
+from learn2track.models.layers import LayerDense
 from learn2track.utils import l2distance
 
 floatX = theano.config.floatX
@@ -17,7 +14,9 @@ floatX = theano.config.floatX
 class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
     """
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, predict_offset=False, use_layer_normalization=False, **_):
+
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, predict_offset=False,
+                 use_layer_normalization=False, dropout_prob=0., seed=1234, **_):
         """
         Parameters
         ----------
@@ -35,8 +34,12 @@ class GRU_Regression(GRU):
             Predict the offset from the previous direction instead (need use_previous_direction).
         use_layer_normalization : bool
             Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
+        dropout_prob : float
+            Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
+        seed : int
+            Random seed used for dropout normalization
         """
-        super().__init__(input_size, hidden_sizes, use_layer_normalization)
+        super().__init__(input_size, hidden_sizes, use_layer_normalization, dropout_prob, seed)
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction
@@ -46,7 +49,11 @@ class GRU_Regression(GRU):
             assert self.use_previous_direction  # Need previous direction to predict offset.
 
         layer_regression_activation = "tanh" if self.predict_offset else "identity"
-        self.layer_regression = LayerDense(self.hidden_sizes[-1], self.output_size, activation=layer_regression_activation)
+        self.layer_regression = LayerDense(self.hidden_sizes[-1], self.output_size, activation=layer_regression_activation, name="GRU_Regression")
+
+        if self.dropout_prob:
+            self.dropout_matrices[self.layer_regression.name] = self.srng.binomial(size=self.layer_regression.W.shape, n=1, p=1 - self.dropout_prob,
+                                                                                   dtype=floatX)
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -89,7 +96,9 @@ class GRU_Regression(GRU):
         next_hidden_state = super()._fprop(fprop_input, *args)
 
         # Compute the direction to follow for step (t)
-        regression_out = self.layer_regression.fprop(next_hidden_state[-1])
+        dropout_W = self.dropout_matrices[self.layer_regression.name] if self.dropout_prob else None
+        regression_out = self.layer_regression.fprop(next_hidden_state[-1], dropout_W)
+
         if self.predict_offset:
             regression_out += previous_direction  # Skip-connection from the previous direction.
 
