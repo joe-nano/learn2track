@@ -2,7 +2,6 @@ import numpy as np
 import smartlearner.initializers as initer
 import theano
 import theano.tensor as T
-from collections import OrderedDict
 from os.path import join as pjoin
 from smartlearner import utils as smartutils
 from smartlearner.interfaces import Loss
@@ -21,7 +20,8 @@ class GRU_Multistep_Gaussian(GRU):
     For each target dimension, the model outputs (m) distribution parameters estimates for each prediction horizon up to (k)
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, target_dims, k, m, seed, use_previous_direction=False, **_):
+    def __init__(self, volume_manager, input_size, hidden_sizes, target_dims, k, m, seed, use_previous_direction=False, use_layer_normalization=False,
+                 dropout_prob=0., **_):
         """
         Parameters
         ----------
@@ -38,11 +38,15 @@ class GRU_Multistep_Gaussian(GRU):
         m : int
             Number of Monte-Carlo samples used to estimate the gaussian parameters
         seed : int
-            Random seed to initialize the random noise used for sampling
+            Random seed to initialize the random noise used for sampling and dropout.
         use_previous_direction : bool
             Use the previous direction as an additional input
+        use_layer_normalization : bool
+            Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
+        dropout_prob : float
+            Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
         """
-        super().__init__(input_size, hidden_sizes)
+        super().__init__(input_size, hidden_sizes, use_layer_normalization, dropout_prob, seed)
         self.target_dims = target_dims
         self.target_size = 2 * self.target_dims  # Output distribution parameters mu and sigma for each dimension
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.target_size, normed=False)
@@ -56,6 +60,10 @@ class GRU_Multistep_Gaussian(GRU):
         self.use_previous_direction = use_previous_direction
 
         self.srng = MRG_RandomStreams(self.seed)
+
+        if self.dropout_prob:
+            p = 1 - self.dropout_prob
+            self.dropout_vectors[self.layer_regression.name] = self.srng.binomial(size=(self.layer_regression.W.shape[0],), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -165,7 +173,8 @@ class GRU_Multistep_Gaussian(GRU):
     def _predict_distribution_params(self, hidden_state):
         # regression layer outputs an array [mean_x, mean_y, mean_z, log(std_x), log(std_y), log(std_z)]
         # regression_output.shape : (batch_size, target_size)
-        regression_output = self.layer_regression.fprop(hidden_state)
+        dropout_W = self.dropout_vectors[self.layer_regression.name] if self.dropout_prob else None
+        regression_output = self.layer_regression.fprop(hidden_state, dropout_W)
 
         # Use T.exp to retrieve a positive sigma
         distribution_params = T.set_subtensor(regression_output[..., 3:6], T.exp(regression_output[..., 3:6]))

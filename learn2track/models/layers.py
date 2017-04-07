@@ -28,8 +28,12 @@ class LayerDense(object):
     def parameters(self):
         return [self.W, self.b]
 
-    def fprop(self, X):
-        preactivation = T.dot(X, self.W) + self.b
+    def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
+        W = self.W
+        if dropout_W:
+            W *= dropout_W[:, None]
+        preactivation = T.dot(X, W) + self.b
         out = self.activation_fct(preactivation)
         return out
 
@@ -58,8 +62,12 @@ class LayerDenseNormalized(object):
     def parameters(self):
         return [self.W, self.b, self.g]
 
-    def fprop(self, X):
-        units_inputs = T.dot(X, self.W)
+    def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
+        W = self.W
+        if dropout_W:
+            W *= dropout_W[:, None]
+        units_inputs = T.dot(X, W)
 
         mean = T.mean(units_inputs, axis=1, keepdims=True)
         std = T.std(units_inputs, axis=1, keepdims=True)
@@ -90,8 +98,12 @@ class LayerRegression(object):
     def parameters(self):
         return [self.W, self.b]
 
-    def fprop(self, X):
-        out = T.dot(X, self.W) + self.b
+    def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
+        W = self.W
+        if dropout_W:
+            W *= dropout_W[:, None]
+        out = T.dot(X, W) + self.b
         # Normalize the output vector.
         if self.normed:
             out /= l2distance(out, keepdims=True, eps=1e-8)
@@ -123,8 +135,12 @@ class LayerRegressionNormalized(object):
     def parameters(self):
         return [self.W, self.b, self.g]
 
-    def fprop(self, X):
-        units_inputs = T.dot(X, self.W)
+    def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
+        W = self.W
+        if dropout_W:
+            W *= dropout_W[:, None]
+        units_inputs = T.dot(X, W)
 
         mean = T.mean(units_inputs, axis=1, keepdims=True)
         std = T.std(units_inputs, axis=1, keepdims=True)
@@ -158,8 +174,12 @@ class LayerSoftmax(object):
     def parameters(self):
         return [self.W, self.b]
 
-    def fprop(self, X):
-        preactivation = T.dot(X, self.W) + self.b
+    def fprop(self, X, dropout_W=None):
+        # dropout_W is a row vector of inputs to be dropped
+        W = self.W
+        if dropout_W:
+            W *= dropout_W[:, None]
+        preactivation = T.dot(X, W) + self.b
         # The softmax function, applied to a matrix, computes the softmax values row-wise.
         out = T.nnet.softmax(preactivation)
         return out
@@ -199,7 +219,16 @@ class LayerLstmWithPeepholes(object):
         return [self.W, self.U, self.b,
                 self.Vi, self.Vo, self.Vf]
 
-    def fprop(self, Xi, last_h, last_m):
+    def fprop(self, Xi, last_h, last_m, dropout_W=None, dropout_U=None):
+        # dropout_W, dropout_U are row vectors of inputs to be dropped
+        W = self.W
+        if dropout_W:
+            W *= dropout_W[:, None]
+
+        U = self.U
+        if dropout_U:
+            U *= dropout_U[:, None]
+
         def slice_(x, no):
             if type(no) is str:
                 no = ['i', 'o', 'f', 'm'].index(no)
@@ -207,8 +236,8 @@ class LayerLstmWithPeepholes(object):
 
         # SPEEDUP: compute the first linear transformation outside the scan i.e. for all timestep at once.
         # EDIT: I try and didn't see much speedup!
-        Xi = (T.dot(Xi, self.W) + self.b)
-        preactivation = Xi + T.dot(last_h, self.U)
+        Xi = (T.dot(Xi, W) + self.b)
+        preactivation = Xi + T.dot(last_h, U)
 
         gate_i = T.nnet.sigmoid(slice_(preactivation, 'i') + last_m*self.Vi)
         mi = self.activation_fct(slice_(preactivation, 'm'))
@@ -263,7 +292,20 @@ class LayerGRU(object):
     def parameters(self):
         return [self.W, self.b, self.U, self.Uh]
 
-    def fprop(self, Xi, last_h):
+    def fprop(self, Xi, last_h, dropout_W=None, dropout_U=None, dropout_Uh=None):
+        # dropout_W, dropout_U, dropout_Uh are row vectors of inputs to be dropped
+        W = self.W
+        if dropout_W:
+            W *= dropout_W[:, None]
+
+        U = self.U
+        if dropout_U:
+            U *= dropout_U[:, None]
+
+        Uh = self.Uh
+        if dropout_Uh:
+            U *= dropout_Uh[:, None]
+
         def slice_(x, no):
             if type(no) is str:
                 if no == 'zr':
@@ -273,14 +315,14 @@ class LayerGRU(object):
 
             return x[:, no*self.hidden_size: (no+1)*self.hidden_size]
 
-        Xi = (T.dot(Xi, self.W) + self.b)
-        preactivation = slice_(Xi, 'zr') + T.dot(last_h, self.U)
+        Xi = (T.dot(Xi, W) + self.b)
+        preactivation = slice_(Xi, 'zr') + T.dot(last_h, U)
 
         gate_z = T.nnet.sigmoid(slice_(preactivation, 'z'))  # Update gate
         gate_r = T.nnet.sigmoid(slice_(preactivation, 'r'))  # Reset gate
 
         # Candidate activation
-        c = self.activation_fct(slice_(Xi, 'h') + T.dot(last_h*gate_r, self.Uh))
+        c = self.activation_fct(slice_(Xi, 'h') + T.dot(last_h*gate_r, Uh))
         h = (1-gate_z)*last_h + gate_z*c
 
         return h
@@ -331,7 +373,20 @@ class LayerGruNormalized(object):
     def parameters(self):
         return [self.W, self.b_x, self.b_u, self.b_uh, self.U, self.Uh, self.g_x, self.g_u, self.g_uh]
 
-    def fprop(self, Xi, last_h):
+    def fprop(self, Xi, last_h, dropout_W=None, dropout_U=None, dropout_Uh=None):
+        # dropout_W, dropout_U, dropout_Uh are row vectors of inputs to be dropped
+        W = self.W
+        if dropout_W:
+            W *= dropout_W[:, None]
+
+        U = self.U
+        if dropout_U:
+            U *= dropout_U[:, None]
+
+        Uh = self.Uh
+        if dropout_Uh:
+            U *= dropout_Uh[:, None]
+
         def slice_(x, no):
             if type(no) is str:
                 if no == 'zr':
@@ -347,16 +402,16 @@ class LayerGruNormalized(object):
             x_normalized = (x - mean) / (std + self.eps)
             return g * x_normalized + b
 
-        Xi = layer_normalize(T.dot(Xi, self.W), self.g_x, self.b_x)
+        Xi = layer_normalize(T.dot(Xi, W), self.g_x, self.b_x)
         X_zr = slice_(Xi, 'zr')
-        preactivation = X_zr + layer_normalize(T.dot(last_h, self.U), self.g_u, self.b_u)
+        preactivation = X_zr + layer_normalize(T.dot(last_h, U), self.g_u, self.b_u)
 
         gate_z = T.nnet.sigmoid(slice_(preactivation, 'z'))  # Update gate
         gate_r = T.nnet.sigmoid(slice_(preactivation, 'r'))  # Reset gate
 
         # Candidate activation
         X_h = slice_(Xi, 'h')
-        c_preact = X_h + layer_normalize(T.dot(last_h, self.Uh), self.g_uh, self.b_uh) * gate_r
+        c_preact = X_h + layer_normalize(T.dot(last_h, Uh), self.g_uh, self.b_uh) * gate_r
         c = self.activation_fct(c_preact)
         h = (1 - gate_z) * last_h + gate_z * c
 

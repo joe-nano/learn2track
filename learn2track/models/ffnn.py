@@ -5,6 +5,8 @@ import numpy as np
 import smartlearner.initializers as initer
 import theano
 import theano.tensor as T
+from theano.sandbox.rng_mrg import MRG_RandomStreams
+
 from learn2track.models.layers import LayerDense, LayerDenseNormalized
 from smartlearner import utils as smartutils
 from smartlearner.interfaces import Model
@@ -18,7 +20,7 @@ class FFNN(Model):
     The output is simply the state of the last hidden layer.
     """
 
-    def __init__(self, input_size, hidden_sizes, activation='tanh', use_layer_normalization=False):
+    def __init__(self, input_size, hidden_sizes, activation='tanh', use_layer_normalization=False, dropout_prob=0., seed=1234):
         """
         Parameters
         ----------
@@ -30,6 +32,10 @@ class FFNN(Model):
             Name of the activation function to use in the hidden layers
         use_layer_normalization : bool
             Use LayerNormalization to normalize preactivations
+        dropout_prob : float
+            Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
+        seed : int
+            Random seed used for dropout normalization
         """
         self.graph_updates = OrderedDict()
         self._gen = None
@@ -38,6 +44,9 @@ class FFNN(Model):
         self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
         self.activation = activation
         self.use_layer_normalization = use_layer_normalization
+        self.dropout_prob = dropout_prob
+        self.seed = seed
+        self.srng = MRG_RandomStreams(self.seed)
 
         layer_class = LayerDense
         if self.use_layer_normalization:
@@ -48,6 +57,12 @@ class FFNN(Model):
         for i, hidden_size in enumerate(self.hidden_sizes):
             self.layers.append(layer_class(last_hidden_size, hidden_size, activation=activation, name="Dense{}".format(i)))
             last_hidden_size = hidden_size
+
+        self.dropout_vectors = {}
+        if self.dropout_prob:
+            p = 1 - self.dropout_prob
+            for layer in self.layers:
+                self.dropout_vectors[layer.name] = self.srng.binomial(size=(layer.W.shape[0],), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         for layer in self.layers:
@@ -63,7 +78,9 @@ class FFNN(Model):
                            'input_size': self.input_size,
                            'hidden_sizes': self.hidden_sizes,
                            'activation': self.activation,
-                           'use_layer_normalization': self.use_layer_normalization}
+                           'use_layer_normalization': self.use_layer_normalization,
+                           'dropout_prob': self.dropout_prob,
+                           'seed': self.seed}
 
         return hyperparameters
 
@@ -88,7 +105,8 @@ class FFNN(Model):
 
         next_input = Xi
         for i, layer in enumerate(self.layers):
-            layer_output = layer.fprop(next_input)
+            dropout_W = self.dropout_vectors[layer.name] if self.dropout_prob else None
+            layer_output = layer.fprop(next_input, dropout_W)
             layers_h.append(layer_output)
             next_input = layer_output
 
@@ -106,12 +124,23 @@ class FFNN(Model):
         assert len(self.parameters) == len(params)  # Implies names are all unique.
         np.savez(pjoin(savedir, "params.npz"), **params)
 
+        state = {
+            "version": 1,
+            "_srng_rstate": self.srng.rstate,
+            "_srng_state_updates": [state_update[0].get_value() for state_update in self.srng.state_updates]}
+        np.savez(pjoin(savedir, "state.npz"), **state)
+
     def load(self, path):
         loaddir = pjoin(path, type(self).__name__)
 
         parameters = np.load(pjoin(loaddir, "params.npz"))
         for param in self.parameters:
             param.set_value(parameters[param.name])
+
+        state = np.load(pjoin(loaddir, 'state.npz'))
+        self.srng.rstate[:] = state['_srng_rstate']
+        for state_update, saved_state in zip(self.srng.state_updates, state["_srng_state_updates"]):
+            state_update[0].set_value(saved_state)
 
     @classmethod
     def create(cls, path, **kwargs):

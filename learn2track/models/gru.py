@@ -1,16 +1,14 @@
-from os.path import join as pjoin
-
 import numpy as np
+import smartlearner.initializers as initer
 import theano
 import theano.tensor as T
 from collections import OrderedDict
-
-from smartlearner.interfaces import Model
+from os.path import join as pjoin
 from smartlearner import utils as smartutils
-from smartlearner.utils import sharedX
-import smartlearner.initializers as initer
+from smartlearner.interfaces import Model
+from theano.sandbox.rng_mrg import MRG_RandomStreams
 
-from learn2track.models.layers import LayerGRU, LayerRegression, LayerDense, LayerGruNormalized
+from learn2track.models.layers import LayerGRU, LayerGruNormalized
 
 floatX = theano.config.floatX
 
@@ -21,7 +19,7 @@ class GRU(Model):
 
     The output is simply the state of the last hidden layer.
     """
-    def __init__(self, input_size, hidden_sizes, use_layer_normalization=False):
+    def __init__(self, input_size, hidden_sizes, use_layer_normalization=False, dropout_prob=0., seed=1234):
         """
         Parameters
         ----------
@@ -31,6 +29,10 @@ class GRU(Model):
             Number of hidden units each GRU should have.
         use_layer_normalization : bool
             Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
+        dropout_prob : float
+            Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
+        seed : int
+            Random seed used for dropout normalization
         """
         self.graph_updates = OrderedDict()
         self._gen = None
@@ -38,6 +40,9 @@ class GRU(Model):
         self.input_size = input_size
         self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
         self.use_layer_normalization = use_layer_normalization
+        self.dropout_prob = dropout_prob
+        self.seed = seed
+        self.srng = MRG_RandomStreams(self.seed)
 
         layer_class = LayerGRU
         if self.use_layer_normalization:
@@ -48,6 +53,15 @@ class GRU(Model):
         for i, hidden_size in enumerate(self.hidden_sizes):
             self.layers.append(layer_class(last_hidden_size, hidden_size, name="GRU{}".format(i)))
             last_hidden_size = hidden_size
+
+        self.dropout_vectors = {}
+        if self.dropout_prob:
+            p = 1 - self.dropout_prob
+            for layer in self.layers:
+                self.dropout_vectors[layer.name] = {}
+                self.dropout_vectors[layer.name]['W'] = self.srng.binomial(size=(layer.W.shape[0],), n=1, p=p, dtype=floatX) / p
+                self.dropout_vectors[layer.name]['U'] = self.srng.binomial(size=(layer.U.shape[0],), n=1, p=p, dtype=floatX) / p
+                self.dropout_vectors[layer.name]['Uh'] = self.srng.binomial(size=(layer.Uh.shape[0],), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         for layer in self.layers:
@@ -62,7 +76,9 @@ class GRU(Model):
         hyperparameters = {'version': 1,
                            'input_size': self.input_size,
                            'hidden_sizes': self.hidden_sizes,
-                           'use_layer_normalization': self.use_layer_normalization}
+                           'use_layer_normalization': self.use_layer_normalization,
+                           'dropout_prob': self.dropout_prob,
+                           'seed': self.seed}
 
         return hyperparameters
 
@@ -87,14 +103,22 @@ class GRU(Model):
 
         input = Xi
         for i, layer in enumerate(self.layers):
+            dropout_W, dropout_U, dropout_Uh = None, None, None
+            if self.dropout_prob:
+                dropout_vectors = self.dropout_vectors[layer.name]
+                dropout_W = dropout_vectors['W']
+                dropout_U = dropout_vectors['U']
+                dropout_Uh = dropout_vectors['Uh']
+
             last_h = args[i]
-            h = layer.fprop(input, last_h)
+            h = layer.fprop(input, last_h, dropout_W, dropout_U, dropout_Uh)
             layers_h.append(h)
             input = h
 
         return tuple(layers_h)
 
     def get_output(self, X):
+
         outputs_info_h = []
         for hidden_size in self.hidden_sizes:
             outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
@@ -116,12 +140,23 @@ class GRU(Model):
         assert len(self.parameters) == len(params)  # Implies names are all unique.
         np.savez(pjoin(savedir, "params.npz"), **params)
 
+        state = {
+            "version": 1,
+            "_srng_rstate": self.srng.rstate,
+            "_srng_state_updates": [state_update[0].get_value() for state_update in self.srng.state_updates]}
+        np.savez(pjoin(savedir, "state.npz"), **state)
+
     def load(self, path):
         loaddir = pjoin(path, type(self).__name__)
 
         parameters = np.load(pjoin(loaddir, "params.npz"))
         for param in self.parameters:
             param.set_value(parameters[param.name])
+
+        state = np.load(pjoin(loaddir, 'state.npz'))
+        self.srng.rstate[:] = state['_srng_rstate']
+        for state_update, saved_state in zip(self.srng.state_updates, state["_srng_state_updates"]):
+            state_update[0].set_value(saved_state)
 
     @classmethod
     def create(cls, path, **kwargs):
