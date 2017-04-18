@@ -67,7 +67,8 @@ def main():
                                    'keep_step_size': False,
                                    'sort_streamlines': False,
                                    'use_layer_normalization': False,
-                                   'dropout_prob': 0.}
+                                   'drop_prob': 0.,
+                                   'use_zoneout': False}
     for new_hyperparams, default_value in retrocompatibility_defaults.items():
         if new_hyperparams not in hyperparams:
             hyperparams[new_hyperparams] = default_value
@@ -95,7 +96,7 @@ def main():
             model = FFNN_Regression.create(experiment_path, volume_manager=volume_manager)
         else:
             raise NameError("Unknown model: {}".format(hyperparams['model']))
-        model.dropout_prob = 0.  # Make sure dropout is not used when testing
+        model.drop_prob = 0.  # Make sure dropout/zoneout is not used when testing
 
     with Timer("Building evaluation function"):
         # Override K for gru_multistep

@@ -62,7 +62,7 @@ class FFNN(Model):
         if self.dropout_prob:
             p = 1 - self.dropout_prob
             for layer in self.layers:
-                self.dropout_vectors[layer.name] = self.srng.binomial(size=(layer.W.shape[0],), n=1, p=p, dtype=floatX) / p
+                self.dropout_vectors[layer.name] = self.srng.binomial(size=(layer.input_size,), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         for layer in self.layers:

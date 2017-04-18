@@ -16,7 +16,7 @@ class GRU_Mixture(GRU_Regression):
     """
 
     def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, use_previous_direction=False,
-                 use_layer_normalization=False, dropout_prob=0., seed=1234, **_):
+                 use_layer_normalization=False, drop_prob=0., use_zoneout=False, seed=1234, **_):
         """
         Parameters
         ----------
@@ -34,12 +34,14 @@ class GRU_Mixture(GRU_Regression):
             Use the previous direction as an additional input
         use_layer_normalization : bool
             Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
-        dropout_prob : float
-            Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
+        drop_prob : float
+            Dropout/Zoneout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf & https://arxiv.org/pdf/1606.01305.pdf
+        use_zoneout : bool
+            Use zoneout implementation instead of dropout
         seed : int
             Random seed used for dropout normalization
         """
-        super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization, dropout_prob, seed)
+        super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization, drop_prob, use_zoneout, seed)
         self.volume_manager = volume_manager
         self.n_gaussians = n_gaussians
 
@@ -55,10 +57,6 @@ class GRU_Mixture(GRU_Regression):
                                           n_gaussians * output_size,  # Means
                                           n_gaussians * output_size])  # Stds
         self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.layer_regression_size)
-
-        if self.dropout_prob:
-            p = 1 - self.dropout_prob
-            self.dropout_vectors[self.layer_regression.name] = self.srng.binomial(size=(self.layer_regression.W.shape[0],), n=1, p=p, dtype=floatX) / p
 
     @property
     def hyperparameters(self):

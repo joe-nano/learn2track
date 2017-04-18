@@ -19,7 +19,7 @@ class GRU(Model):
 
     The output is simply the state of the last hidden layer.
     """
-    def __init__(self, input_size, hidden_sizes, use_layer_normalization=False, dropout_prob=0., seed=1234):
+    def __init__(self, input_size, hidden_sizes, use_layer_normalization=False, drop_prob=0., use_zoneout=False, seed=1234):
         """
         Parameters
         ----------
@@ -29,8 +29,10 @@ class GRU(Model):
             Number of hidden units each GRU should have.
         use_layer_normalization : bool
             Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
-        dropout_prob : float
-            Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
+        drop_prob : float
+            Dropout/Zoneout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf & https://arxiv.org/pdf/1606.01305.pdf
+        use_zoneout : bool
+            Use zoneout implementation instead of dropout (a different zoneout mask will be use at each timestep)
         seed : int
             Random seed used for dropout normalization
         """
@@ -40,7 +42,8 @@ class GRU(Model):
         self.input_size = input_size
         self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
         self.use_layer_normalization = use_layer_normalization
-        self.dropout_prob = dropout_prob
+        self.drop_prob = drop_prob
+        self.use_zoneout = use_zoneout
         self.seed = seed
         self.srng = MRG_RandomStreams(self.seed)
 
@@ -55,13 +58,10 @@ class GRU(Model):
             last_hidden_size = hidden_size
 
         self.dropout_vectors = {}
-        if self.dropout_prob:
-            p = 1 - self.dropout_prob
+        if self.drop_prob and not self.use_zoneout:
+            p = 1 - self.drop_prob
             for layer in self.layers:
-                self.dropout_vectors[layer.name] = {}
-                self.dropout_vectors[layer.name]['W'] = self.srng.binomial(size=(layer.W.shape[0],), n=1, p=p, dtype=floatX) / p
-                self.dropout_vectors[layer.name]['U'] = self.srng.binomial(size=(layer.U.shape[0],), n=1, p=p, dtype=floatX) / p
-                self.dropout_vectors[layer.name]['Uh'] = self.srng.binomial(size=(layer.Uh.shape[0],), n=1, p=p, dtype=floatX) / p
+                self.dropout_vectors[layer.name] = self.srng.binomial(size=(layer.hidden_size,), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         for layer in self.layers:
@@ -73,11 +73,12 @@ class GRU(Model):
 
     @property
     def hyperparameters(self):
-        hyperparameters = {'version': 1,
+        hyperparameters = {'version': 2,
                            'input_size': self.input_size,
                            'hidden_sizes': self.hidden_sizes,
                            'use_layer_normalization': self.use_layer_normalization,
-                           'dropout_prob': self.dropout_prob,
+                           'drop_prob': self.drop_prob,
+                           'use_zoneout': self.use_zoneout,
                            'seed': self.seed}
 
         return hyperparameters
@@ -103,15 +104,16 @@ class GRU(Model):
 
         input = Xi
         for i, layer in enumerate(self.layers):
-            dropout_W, dropout_U, dropout_Uh = None, None, None
-            if self.dropout_prob:
-                dropout_vectors = self.dropout_vectors[layer.name]
-                dropout_W = dropout_vectors['W']
-                dropout_U = dropout_vectors['U']
-                dropout_Uh = dropout_vectors['Uh']
+            drop_states = None
+            drop_value = 1.
+            if self.drop_prob:
+                if self.use_zoneout:
+                    drop_states = self.srng.binomial((layer.hidden_size,), n=1, p=1 - self.drop_prob, dtype=floatX)
+                else:
+                    drop_states = self.dropout_vectors[layer.name]
 
             last_h = args[i]
-            h = layer.fprop(input, last_h, dropout_W, dropout_U, dropout_Uh)
+            h = layer.fprop(input, last_h, drop_states, drop_value)
             layers_h.append(h)
             input = h
 
@@ -163,6 +165,10 @@ class GRU(Model):
         loaddir = pjoin(path, cls.__name__)
         hyperparams = smartutils.load_dict_from_json_file(pjoin(loaddir, "hyperparams.json"))
         hyperparams.update(kwargs)
+
+        if hyperparams['version'] < 2:
+            hyperparams['drop_prob'] = hyperparams['dropout_prob']
+            del hyperparams['dropout_prob']
 
         model = cls(**hyperparams)
         model.load(path)

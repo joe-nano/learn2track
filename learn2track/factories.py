@@ -93,7 +93,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                               use_previous_direction=hyperparams['feed_previous_direction'],
                               predict_offset=hyperparams['predict_offset'],
                               use_layer_normalization=hyperparams['use_layer_normalization'],
-                              dropout_prob=hyperparams['dropout_prob'],
+                              drop_prob=hyperparams['drop_prob'],
+                              use_zoneout=hyperparams['use_zoneout'],
                               seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'gru_multistep':
@@ -107,7 +108,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                                       seed=hyperparams['seed'],
                                       use_previous_direction=hyperparams['feed_previous_direction'],
                                       use_layer_normalization=hyperparams['use_layer_normalization'],
-                                      dropout_prob=hyperparams['dropout_prob'])
+                                      drop_prob=hyperparams['drop_prob'],
+                                      use_zoneout=hyperparams['use_zoneout'])
 
     elif hyperparams['model'] == 'gru_mixture':
         from learn2track.models import GRU_Mixture
@@ -118,7 +120,8 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                            n_gaussians=hyperparams['n_gaussians'],
                            use_previous_direction=hyperparams['feed_previous_direction'],
                            use_layer_normalization=hyperparams['use_layer_normalization'],
-                           dropout_prob=hyperparams['dropout_prob'],
+                           drop_prob=hyperparams['drop_prob'],
+                           use_zoneout=hyperparams['use_zoneout'],
                            seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'ffnn_regression':
