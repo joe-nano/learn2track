@@ -55,7 +55,7 @@ class FFNN_Regression(FFNN):
 
         if self.dropout_prob:
             p = 1 - self.dropout_prob
-            self.dropout_vectors[self.layer_regression.name] = self.srng.binomial(size=(self.layer_regression.W.shape[0],), n=1, p=p, dtype=floatX) / p
+            self.dropout_vectors[self.layer_regression.name] = self.srng.binomial(size=(self.layer_regression.input_size,), n=1, p=p, dtype=floatX) / p
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)

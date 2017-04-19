@@ -21,7 +21,7 @@ class GRU_Multistep_Gaussian(GRU):
     """
 
     def __init__(self, volume_manager, input_size, hidden_sizes, target_dims, k, m, seed, use_previous_direction=False, use_layer_normalization=False,
-                 dropout_prob=0., **_):
+                 drop_prob=0., use_zoneout=False, **_):
         """
         Parameters
         ----------
@@ -43,13 +43,14 @@ class GRU_Multistep_Gaussian(GRU):
             Use the previous direction as an additional input
         use_layer_normalization : bool
             Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
-        dropout_prob : float
-            Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
+        drop_prob : float
+            Dropout/Zoneout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf & https://arxiv.org/pdf/1606.01305.pdf
+        use_zoneout : bool
+            Use zoneout implementation instead of dropout
         """
-        super().__init__(input_size, hidden_sizes, use_layer_normalization, dropout_prob, seed)
+        super().__init__(input_size, hidden_sizes, use_layer_normalization, drop_prob, use_zoneout, seed)
         self.target_dims = target_dims
         self.target_size = 2 * self.target_dims  # Output distribution parameters mu and sigma for each dimension
-        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.target_size, normed=False)
 
         self.volume_manager = volume_manager
 
@@ -61,9 +62,8 @@ class GRU_Multistep_Gaussian(GRU):
 
         self.srng = MRG_RandomStreams(self.seed)
 
-        if self.dropout_prob:
-            p = 1 - self.dropout_prob
-            self.dropout_vectors[self.layer_regression.name] = self.srng.binomial(size=(self.layer_regression.W.shape[0],), n=1, p=p, dtype=floatX) / p
+        # Do not use dropout/zoneout in last hidden layer
+        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.target_size, normed=False)
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -173,8 +173,7 @@ class GRU_Multistep_Gaussian(GRU):
     def _predict_distribution_params(self, hidden_state):
         # regression layer outputs an array [mean_x, mean_y, mean_z, log(std_x), log(std_y), log(std_z)]
         # regression_output.shape : (batch_size, target_size)
-        dropout_W = self.dropout_vectors[self.layer_regression.name] if self.dropout_prob else None
-        regression_output = self.layer_regression.fprop(hidden_state, dropout_W)
+        regression_output = self.layer_regression.fprop(hidden_state)
 
         # Use T.exp to retrieve a positive sigma
         distribution_params = T.set_subtensor(regression_output[..., 3:6], T.exp(regression_output[..., 3:6]))

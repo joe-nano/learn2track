@@ -219,16 +219,9 @@ class LayerLstmWithPeepholes(object):
         return [self.W, self.U, self.b,
                 self.Vi, self.Vo, self.Vf]
 
-    def fprop(self, Xi, last_h, last_m, dropout_W=None, dropout_U=None):
-        # dropout_W, dropout_U are row vectors of inputs to be dropped
-        W = self.W
-        if dropout_W:
-            W *= dropout_W[:, None]
-
-        U = self.U
-        if dropout_U:
-            U *= dropout_U[:, None]
-
+    def fprop(self, Xi, last_h, last_m, drop_states=None, drop_cells=None, drop_value=1.):
+        # drop_states should be a mask for zoned out or dropped values in the hidden states
+        # drop_cells should be a mask for zoned out or dropped values in the cells
         def slice_(x, no):
             if type(no) is str:
                 no = ['i', 'o', 'f', 'm'].index(no)
@@ -236,8 +229,8 @@ class LayerLstmWithPeepholes(object):
 
         # SPEEDUP: compute the first linear transformation outside the scan i.e. for all timestep at once.
         # EDIT: I try and didn't see much speedup!
-        Xi = (T.dot(Xi, W) + self.b)
-        preactivation = Xi + T.dot(last_h, U)
+        Xi = (T.dot(Xi, self.W) + self.b)
+        preactivation = Xi + T.dot(last_h, self.U)
 
         gate_i = T.nnet.sigmoid(slice_(preactivation, 'i') + last_m*self.Vi)
         mi = self.activation_fct(slice_(preactivation, 'm'))
@@ -245,8 +238,14 @@ class LayerLstmWithPeepholes(object):
         gate_f = T.nnet.sigmoid(slice_(preactivation, 'f') + last_m*self.Vf)
         m = gate_i*mi + gate_f*last_m
 
+        if drop_cells:
+            m = drop_cells * m + (1 - drop_cells) * drop_value * last_m
+
         gate_o = T.nnet.sigmoid(slice_(preactivation, 'o') + m*self.Vo)
         h = gate_o * self.activation_fct(m)
+
+        if drop_states:
+            h = drop_states * h + (1 - drop_states) * drop_value * last_h
 
         return h, m
 
@@ -292,20 +291,9 @@ class LayerGRU(object):
     def parameters(self):
         return [self.W, self.b, self.U, self.Uh]
 
-    def fprop(self, Xi, last_h, dropout_W=None, dropout_U=None, dropout_Uh=None):
-        # dropout_W, dropout_U, dropout_Uh are row vectors of inputs to be dropped
-        W = self.W
-        if dropout_W:
-            W *= dropout_W[:, None]
-
-        U = self.U
-        if dropout_U:
-            U *= dropout_U[:, None]
-
-        Uh = self.Uh
-        if dropout_Uh:
-            U *= dropout_Uh[:, None]
-
+    def fprop(self, Xi, last_h, drop_states=None, drop_value=1.):
+        # drop_states should be a mask for zoned out or dropped values in the hidden states
+        # drop_value should be 1 for zoneout and 0 for dropout
         def slice_(x, no):
             if type(no) is str:
                 if no == 'zr':
@@ -315,15 +303,18 @@ class LayerGRU(object):
 
             return x[:, no*self.hidden_size: (no+1)*self.hidden_size]
 
-        Xi = (T.dot(Xi, W) + self.b)
-        preactivation = slice_(Xi, 'zr') + T.dot(last_h, U)
+        Xi = (T.dot(Xi, self.W) + self.b)
+        preactivation = slice_(Xi, 'zr') + T.dot(last_h, self.U)
 
         gate_z = T.nnet.sigmoid(slice_(preactivation, 'z'))  # Update gate
         gate_r = T.nnet.sigmoid(slice_(preactivation, 'r'))  # Reset gate
 
         # Candidate activation
-        c = self.activation_fct(slice_(Xi, 'h') + T.dot(last_h*gate_r, Uh))
+        c = self.activation_fct(slice_(Xi, 'h') + T.dot(last_h * gate_r, self.Uh))
         h = (1-gate_z)*last_h + gate_z*c
+
+        if drop_states:
+            h = drop_states * h + (1 - drop_states) * drop_value * last_h
 
         return h
 
@@ -373,20 +364,9 @@ class LayerGruNormalized(object):
     def parameters(self):
         return [self.W, self.b_x, self.b_u, self.b_uh, self.U, self.Uh, self.g_x, self.g_u, self.g_uh]
 
-    def fprop(self, Xi, last_h, dropout_W=None, dropout_U=None, dropout_Uh=None):
-        # dropout_W, dropout_U, dropout_Uh are row vectors of inputs to be dropped
-        W = self.W
-        if dropout_W:
-            W *= dropout_W[:, None]
-
-        U = self.U
-        if dropout_U:
-            U *= dropout_U[:, None]
-
-        Uh = self.Uh
-        if dropout_Uh:
-            U *= dropout_Uh[:, None]
-
+    def fprop(self, Xi, last_h, drop_states=None, drop_value=1.):
+        # drop_states should be a mask for zoned out or dropped values in the hidden states
+        # drop_value should be 1 for zoneout and 0 for dropout
         def slice_(x, no):
             if type(no) is str:
                 if no == 'zr':
@@ -402,17 +382,20 @@ class LayerGruNormalized(object):
             x_normalized = (x - mean) / (std + self.eps)
             return g * x_normalized + b
 
-        Xi = layer_normalize(T.dot(Xi, W), self.g_x, self.b_x)
+        Xi = layer_normalize(T.dot(Xi, self.W), self.g_x, self.b_x)
         X_zr = slice_(Xi, 'zr')
-        preactivation = X_zr + layer_normalize(T.dot(last_h, U), self.g_u, self.b_u)
+        preactivation = X_zr + layer_normalize(T.dot(last_h, self.U), self.g_u, self.b_u)
 
         gate_z = T.nnet.sigmoid(slice_(preactivation, 'z'))  # Update gate
         gate_r = T.nnet.sigmoid(slice_(preactivation, 'r'))  # Reset gate
 
         # Candidate activation
         X_h = slice_(Xi, 'h')
-        c_preact = X_h + layer_normalize(T.dot(last_h, Uh), self.g_uh, self.b_uh) * gate_r
+        c_preact = X_h + layer_normalize(T.dot(last_h, self.Uh), self.g_uh, self.b_uh) * gate_r
         c = self.activation_fct(c_preact)
         h = (1 - gate_z) * last_h + gate_z * c
+
+        if drop_states:
+            h = drop_states * h + (1 - drop_states) * drop_value * last_h
 
         return h
