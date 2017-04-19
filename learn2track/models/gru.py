@@ -105,11 +105,13 @@ class GRU(Model):
         input = Xi
         for i, layer in enumerate(self.layers):
             drop_states = None
-            drop_value = 1.
+            drop_value = None
             if self.drop_prob:
                 if self.use_zoneout:
+                    drop_value = 1.
                     drop_states = self.srng.binomial((layer.hidden_size,), n=1, p=1 - self.drop_prob, dtype=floatX)
                 else:
+                    drop_value = 0.
                     drop_states = self.dropout_vectors[layer.name]
 
             last_h = args[i]
