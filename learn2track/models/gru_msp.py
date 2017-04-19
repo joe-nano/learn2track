@@ -51,7 +51,6 @@ class GRU_Multistep_Gaussian(GRU):
         super().__init__(input_size, hidden_sizes, use_layer_normalization, drop_prob, use_zoneout, seed)
         self.target_dims = target_dims
         self.target_size = 2 * self.target_dims  # Output distribution parameters mu and sigma for each dimension
-        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.target_size, normed=False)
 
         self.volume_manager = volume_manager
 
@@ -62,6 +61,9 @@ class GRU_Multistep_Gaussian(GRU):
         self.use_previous_direction = use_previous_direction
 
         self.srng = MRG_RandomStreams(self.seed)
+
+        # Do not use dropout/zoneout in last hidden layer
+        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.target_size, normed=False)
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
@@ -171,8 +173,7 @@ class GRU_Multistep_Gaussian(GRU):
     def _predict_distribution_params(self, hidden_state):
         # regression layer outputs an array [mean_x, mean_y, mean_z, log(std_x), log(std_y), log(std_z)]
         # regression_output.shape : (batch_size, target_size)
-        dropout_W = self.dropout_vectors[self.layer_regression.name] if self.drop_prob else None
-        regression_output = self.layer_regression.fprop(hidden_state, dropout_W)
+        regression_output = self.layer_regression.fprop(hidden_state)
 
         # Use T.exp to retrieve a positive sigma
         distribution_params = T.set_subtensor(regression_output[..., 3:6], T.exp(regression_output[..., 3:6]))

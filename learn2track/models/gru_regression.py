@@ -50,7 +50,7 @@ class GRU_Regression(GRU):
         if self.predict_offset:
             assert self.use_previous_direction  # Need previous direction to predict offset.
 
-        # Do not use dropout in output layer
+        # Do not use dropout/zoneout in last hidden layer
         layer_regression_activation = "tanh" if self.predict_offset else "identity"
         self.layer_regression = LayerDense(self.hidden_sizes[-1], self.output_size, activation=layer_regression_activation, name="GRU_Regression")
 

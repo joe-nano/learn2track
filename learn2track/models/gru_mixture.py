@@ -53,6 +53,7 @@ class GRU_Mixture(GRU_Regression):
         # GRU_Mixture does not predict a direction, so it cannot predict an offset
         self.predict_offset = False
 
+        # Do not use dropout/zoneout in last hidden layer
         self.layer_regression_size = sum([n_gaussians,  # Mixture weights
                                           n_gaussians * output_size,  # Means
                                           n_gaussians * output_size])  # Stds
