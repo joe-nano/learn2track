@@ -46,8 +46,8 @@ def build_train_gru_argparser(subparser):
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
-    model.add_argument('--initialization-seed', type=int, default=1234,
-                       help='seed used to generate random numbers. Default=1234')
+    model.add_argument('--initialization-seed', type=int, default=np.random.randint(0, 999999),
+                       help='seed used to generate random numbers. Default=random')
 
     model.add_argument('--learn-to-stop', action="store_true",
                        help='if specified, the model will be trained to learn when to stop tracking')
@@ -92,8 +92,8 @@ def build_train_gru_mixture_argparser(subparser):
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
-    model.add_argument('--initialization-seed', type=int, default=1234,
-                       help='seed used to generate random numbers. Default=1234')
+    model.add_argument('--initialization-seed', type=int, default=np.random.randint(0, 999999),
+                       help='seed used to generate random numbers. Default=random')
 
     model.add_argument('--normalize', action="store_true", help='if specified, model will be trained against unit length targets')
 
@@ -133,8 +133,8 @@ def build_train_gru_multistep_argparser(subparser):
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
-    model.add_argument('--initialization-seed', type=int, default=1234,
-                       help='seed used to generate random numbers. Default=1234')
+    model.add_argument('--initialization-seed', type=int, default=np.random.randint(0, 999999),
+                       help='seed used to generate random numbers. Default=random')
 
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
@@ -164,8 +164,8 @@ def build_train_ffnn_regression_argparser(subparser):
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
-    model.add_argument('--initialization-seed', type=int, default=1234,
-                       help='seed used to generate random numbers. Default=1234')
+    model.add_argument('--initialization-seed', type=int, default=np.random.randint(0, 999999),
+                       help='seed used to generate random numbers. Default=random')
 
     model.add_argument('--learn-to-stop', action="store_true",
                        help='if specified, the model will be trained to learn when to stop tracking')
@@ -217,14 +217,12 @@ def build_argparser():
     training = p.add_argument_group("Training options")
     training.add_argument('--batch-size', type=int,
                           help='size of the batch to use when training the model. Default: 100.', default=100)
-    # training.add_argument('--neighborhood-patch', type=int, metavar='N',
-    #                       help='if specified, patch (as a cube, i.e. NxNxN) around each streamlines coordinates will be concatenated to the input.')
     training.add_argument('--noisy-streamlines-sigma', type=float,
                           help='if specified, it is the standard deviation of the gaussian noise added independently to every point of every streamlines at each batch.')
     training.add_argument('--clip-gradient', type=float,
                           help='if provided, gradient norms will be clipped to this value (if it exceeds it).')
-    training.add_argument('--seed', type=int, default=1234,
-                          help='seed used to generate random numbers in the batch scheduler. Default=1234')
+    training.add_argument('--seed', type=int, default=np.random.randint(0, 999999),
+                          help='seed used to generate random numbers in the batch scheduler. Default=random')
     training.add_argument('--keep-step-size', action="store_true",
                           help='if specified, training streamlines will not be resampled between batches (streamlines will keep their original step size)')
     training.add_argument('--sort-streamlines', action="store_true",
@@ -255,48 +253,6 @@ def build_argparser():
     build_train_ffnn_regression_argparser(subparser)
 
     return p
-
-
-def tsne_view(trainset, volume_manager):
-
-    batch_scheduler = TractographyBatchScheduler(trainset,
-                                                 batch_size=20000,
-                                                 noisy_streamlines_sigma=False,
-                                                 seed=1234,
-                                                 normalize_target=True)
-    rng = np.random.RandomState(42)
-    rng.shuffle(batch_scheduler.indices)
-
-    bundle_name_pattern = "CST_Left"
-    # batch_inputs, batch_targets, batch_mask = batch_scheduler._prepare_batch(trainset.get_bundle(bundle_name_pattern, return_idx=True))
-    inputs, targets, mask = batch_scheduler._next_batch(3)
-    mask = mask.astype(bool)
-    idx = np.arange(mask.sum())
-    rng.shuffle(idx)
-
-    coords = T.matrix('coords')
-    eval_at_coords = theano.function([coords], volume_manager.eval_at_coords(coords))
-
-    M = 2000 * len(trainset.subjects)
-    coords = inputs[mask][idx[:M]]
-    X = eval_at_coords(coords)
-
-    from sklearn.manifold.t_sne import TSNE
-    tsne = TSNE(n_components=2, verbose=2, random_state=42)
-    Y = tsne.fit_transform(X)
-
-    import matplotlib.pyplot as plt
-    plt.figure()
-    ids = range(len(trainset.subjects))
-    markers = ['s', 'o', '^', 'v', '<', '>', 'h']
-    colors = ['cyan', 'darkorange', 'darkgreen', 'magenta', 'pink', 'k']
-    for i, marker, color in zip(ids, markers, colors):
-        idx = coords[:, -1] == i
-        print("Subject #{}: ".format(i), idx.sum())
-        plt.scatter(Y[idx, 0], Y[idx, 1], 20, color=color, marker=marker, label="Subject #{}".format(i))
-
-    plt.legend()
-    plt.show()
 
 
 def main():
@@ -330,10 +286,6 @@ def main():
         trainset = datasets.load_tractography_dataset(args.train_subjects, trainset_volume_manager, name="trainset", use_sh_coeffs=args.use_sh_coeffs)
         validset = datasets.load_tractography_dataset(args.valid_subjects, validset_volume_manager, name="validset", use_sh_coeffs=args.use_sh_coeffs)
         print("Dataset sizes:", len(trainset), " |", len(validset))
-
-        if args.view:
-            tsne_view(trainset, trainset_volume_manager)
-            sys.exit(0)
 
         batch_scheduler = batch_scheduler_factory(hyperparams, dataset=trainset, train_mode=True)
         print("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
