@@ -27,7 +27,6 @@ from learn2track.factories import model_factory
 from learn2track.factories import loss_factory
 
 from learn2track import datasets
-from learn2track.batch_schedulers import TractographyBatchScheduler
 from learn2track.neurotools import VolumeManager
 
 
@@ -283,8 +282,10 @@ def main():
     with Timer("Loading dataset", newline=True):
         trainset_volume_manager = VolumeManager()
         validset_volume_manager = VolumeManager()
-        trainset = datasets.load_tractography_dataset(args.train_subjects, trainset_volume_manager, name="trainset", use_sh_coeffs=args.use_sh_coeffs)
-        validset = datasets.load_tractography_dataset(args.valid_subjects, validset_volume_manager, name="validset", use_sh_coeffs=args.use_sh_coeffs)
+        trainset = datasets.load_tractography_dataset(args.train_subjects, trainset_volume_manager, name="trainset",
+                                                      use_sh_coeffs=args.use_sh_coeffs)
+        validset = datasets.load_tractography_dataset(args.valid_subjects, validset_volume_manager, name="validset",
+                                                      use_sh_coeffs=args.use_sh_coeffs)
         print("Dataset sizes:", len(trainset), " |", len(validset))
 
         batch_scheduler = batch_scheduler_factory(hyperparams, dataset=trainset, train_mode=True)
