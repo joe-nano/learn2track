@@ -37,23 +37,35 @@ def build_argparser():
         """)
     p = argparse.ArgumentParser(description=DESCRIPTION, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    p.add_argument('signal', help='Diffusion signal (.nii|.nii.gz).')
-    p.add_argument('bundles', metavar='bundle', type=str, nargs="+", help='list of streamlines bundle files.')
-    p.add_argument('--bvals', help='File containing diffusion gradient lengths (Default: guess it from `signal`).')
-    p.add_argument('--bvecs', help='File containing diffusion gradient directions (Default: guess it from `signal`).')
-    p.add_argument('--out', metavar='FILE', default="dataset.npz", help='output filename (.npz). Default: dataset.npz')
-    p.add_argument('--dtype', type=str, default="float32", help="'float16' or 'float32'. Default: 'float32'")
-
-    subparsers = p.add_subparsers(title="Subcommands", help="'subsample-streamlines' downsamples every bundle using QuickBundles")
-    subsampler = subparsers.add_parser('subsample-streamlines')
-
-    subsampler.add_argument('--min-distance', type=int, default=2,
-                            help="Minimal distance for 2 streamlines to be considered different (in mm). Default: 2")
-    subsampler.add_argument('--clustering-threshold', type=int, default=6, help="Clustering threshold for QB. Default: 6")
+    subsampling_parser = argparse.ArgumentParser(add_help=False)
+    subsampling_parser.add_argument('--subsample-streamlines', action='store_true',
+                                    help="Downsample every bundle using QuickBundles. "
+                                         "A clustering threshold of 6 and a removal distance of 2 are used by default, but can be changed. "
+                                         "NOTE: Changing the default values will have no effect if this flag is not given")
+    subsampling_parser.add_argument('--clustering_threshold', default=6, help="Threshold used to cluster streamlines before computing distance matrix")
+    subsampling_parser.add_argument('--removal_distance', default=2, help="Streamlines closer than this distance will be reduced to a single streamline")
 
     # General options (optional)
-    general = p.add_argument_group("General arguments")
-    general.add_argument('-v', '--verbose', action='store_true', help='enable verbose mode.')
+    general_parser = argparse.ArgumentParser(add_help=False)
+    general_parser.add_argument('--out', metavar='FILE', default="dataset.npz", help='output filename (.npz). Default: dataset.npz')
+    general_parser.add_argument('--dtype', type=str, default="float32", help="'float16' or 'float32'. Default: 'float32'")
+    general_parser.add_argument('-v', '--verbose', action='store_true', help='enable verbose mode.')
+
+    signal_subparsers = p.add_subparsers(title="Signal source", dest="signal_source")
+    signal_subparsers.required = True
+    raw_signal_parser = signal_subparsers.add_parser("raw_signal", parents=[subsampling_parser, general_parser],
+                                                     description="Use raw signal from a Nifti image")
+    signal_parser = raw_signal_parser.add_argument_group("Raw signal arguments")
+    signal_parser.add_argument('signal', help='Diffusion signal (.nii|.nii.gz).')
+    signal_parser.add_argument('bundles', metavar='bundle', type=str, nargs="+", help='list of streamlines bundle files.')
+    signal_parser.add_argument('--bvals', help='File containing diffusion gradient lengths (Default: guess it from `signal`).')
+    signal_parser.add_argument('--bvecs', help='File containing diffusion gradient directions (Default: guess it from `signal`).')
+
+    processed_signal_parser = signal_subparsers.add_parser("processed_signal", parents=[subsampling_parser, general_parser],
+                                                           description="Extract signal from a TractographyData (.npz) file, and ignore existing streamlines.")
+    signal_parser = processed_signal_parser.add_argument_group("Processed signal arguments")
+    signal_parser.add_argument('tracto_data', help="TractographyData file containing the processed signal along existing streamlines and other info. (.npz)")
+    signal_parser.add_argument('bundles', metavar='bundle', type=str, nargs="+", help='list of streamlines bundle files.')
 
     return p
 
