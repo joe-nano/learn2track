@@ -1,19 +1,18 @@
-import numpy as np
 from collections import OrderedDict
 
-from scipy.ndimage import map_coordinates
-
 import nibabel as nib
-from nibabel.streamlines import ArraySequence
-
-from dipy.data import get_sphere
-from dipy.core.sphere import Sphere, HemiSphere
-from dipy.reconst.shm import sph_harm_lookup, smooth_pinv
-
+import numpy as np
 import theano
 import theano.tensor as T
-
+from dipy.align.bundlemin import distance_matrix_mdf
+from dipy.core.sphere import Sphere, HemiSphere
+from dipy.data import get_sphere
+from dipy.reconst.shm import sph_harm_lookup, smooth_pinv
+from dipy.segment.quickbundles import QuickBundles
+from dipy.tracking.streamline import set_number_of_points
+from scipy.ndimage import map_coordinates
 from smartlearner.utils import sharedX
+
 from learn2track.interpolation import eval_volume_at_3d_coordinates_in_theano
 
 floatX = theano.config.floatX
@@ -467,3 +466,73 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, n
         data_resampled[idx] /= stds
 
     return data_resampled
+
+
+def remove_similar_streamlines(streamlines, removal_distance=2.):
+    """ Computes a distance matrix using all streamlines, then removes streamlines closer than `removal_distance`.
+
+    Parameters
+    -----------
+    streamlines : `ArraySequence` object or list of 3D arrays
+        Streamlines to downsample
+    removal_distance : float
+        Distance for which streamlines are considered 'similar' and should be removed
+
+    Returns
+    -------
+    `ArraySequence` object
+        Downsampled streamlines
+    """
+    # Simple trick to make it faster than using 40-60 points
+    sample_10_streamlines = set_number_of_points(streamlines, 10)
+    distance_matrix = distance_matrix_mdf(sample_10_streamlines, sample_10_streamlines)
+
+    current_id = 0
+    while True:
+        indices = np.where(distance_matrix[current_id] < removal_distance)[0]
+
+        it = 0
+        if len(indices) > 1:
+            for k in indices:
+                # Every streamlines similar to yourself (excluding yourself)
+                # should be deleted from the set of desired streamlines
+                if not current_id == k:
+                    streamlines.pop(k - it)
+                    distance_matrix = np.delete(distance_matrix, k - it, axis=0)
+                    distance_matrix = np.delete(distance_matrix, k - it, axis=1)
+                    it += 1
+
+        current_id += 1
+        # Once you reach the end of the remaining streamlines
+        if current_id >= len(streamlines):
+            break
+
+    return streamlines
+
+
+def subsample_streamlines(streamlines, clustering_threshold=6., removal_distance=2.):
+    """ Subsample a group of streamlines (should be used on streamlines from a single bundle or similar structure).
+    Streamlines are first clustered using `clustering_threshold`, then for each cluster, similar streamlines (closer than `removal_distance`) are removed.
+
+    Parameters
+    ----------
+    streamlines : `ArraySequence` object
+        Streamlines to subsample
+    clustering_threshold : float
+        distance threshold for clustering (in the space of the tracks)
+    removal_distance : float
+        distance threshold for removal (in the space of the tracks)
+    Returns
+    -------
+    `ArraySequence` object
+        Downsampled streamlines
+    """
+
+    output_streamlines = []
+
+    qb = QuickBundles(streamlines, dist_thr=clustering_threshold, pts=20)
+    for i in range(len(qb.centroids)):
+        temp_streamlines = qb.label2tracks(streamlines, i)
+        output_streamlines.extend(remove_similar_streamlines(temp_streamlines, removal_distance=removal_distance))
+
+    return output_streamlines
