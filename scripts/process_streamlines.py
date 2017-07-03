@@ -74,17 +74,23 @@ def main():
     parser = build_argparser()
     args = parser.parse_args()
 
-    signal = nib.load(args.signal)
-    signal.get_data()  # Forces loading volume in-memory.
-    basename = re.sub('(\.gz|\.nii.gz)$', '', args.signal)
-    bvals = basename + '.bvals' if args.bvals is None else args.bvals
-    bvecs = basename + '.bvecs' if args.bvecs is None else args.bvecs
+    tracto_data = None
 
-    gradients = gradient_table(bvals, bvecs)
-    tracto_data = TractographyData(signal, gradients)
+    if args.signal_source == "raw_signal":
+        signal = nib.load(args.signal)
+        signal.get_data()  # Forces loading volume in-memory.
+        basename = re.sub('(\.gz|\.nii.gz)$', '', args.signal)
+        bvals = basename + '.bvals' if args.bvals is None else args.bvals
+        bvecs = basename + '.bvecs' if args.bvecs is None else args.bvecs
+
+        gradients = gradient_table(bvals, bvecs)
+        tracto_data = TractographyData(signal, gradients)
+    elif args.signal_source == "processed_signal":
+        loaded_tracto_data = TractographyData.load(args.tracto_data)
+        tracto_data = TractographyData(loaded_tracto_data.signal, loaded_tracto_data.gradients)
 
     # Compute matrix that brings streamlines back to diffusion voxel space.
-    rasmm2vox_affine = np.linalg.inv(signal.affine)
+    rasmm2vox_affine = np.linalg.inv(tracto_data.signal.affine)
 
     # Retrieve data.
     with Timer("Retrieving data", newline=args.verbose):
@@ -98,7 +104,7 @@ def main():
             if args.subsample_streamlines:
                 original_streamlines = tractogram.streamlines
                 output_streamlines = subsample_streamlines(original_streamlines, args.clustering_threshold,
-                                                           args.min_distance)
+                                                           args.removal_distance)
 
                 print("Total difference: {} / {}".format(len(original_streamlines), len(output_streamlines)))
                 new_tractogram = nib.streamlines.Tractogram(output_streamlines,
