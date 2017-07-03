@@ -94,21 +94,22 @@ def main():
 
             # Load streamlines
             tfile = nib.streamlines.load(filename)
+            tractogram = tfile.tractogram
             if args.subsample_streamlines:
-                original_streamlines = tfile.streamlines
+                original_streamlines = tractogram.streamlines
                 output_streamlines = subsample_streamlines(original_streamlines, args.clustering_threshold,
                                                            args.min_distance)
 
                 print("Total difference: {} / {}".format(len(original_streamlines), len(output_streamlines)))
                 new_tractogram = nib.streamlines.Tractogram(output_streamlines,
-                                                            affine_to_rasmm=tfile.tractogram.affine_to_rasmm)
-                tfile.tractogram = new_tractogram
+                                                            affine_to_rasmm=tractogram.affine_to_rasmm)
+                tractogram = new_tractogram
 
-            tfile.tractogram.apply_affine(rasmm2vox_affine)
+            tractogram.apply_affine(rasmm2vox_affine)
 
             # Add streamlines to the TractogramData
             bundle_name = os.path.splitext(os.path.basename(filename))[0]
-            tracto_data.add(tfile.streamlines, bundle_name)
+            tracto_data.add(tractogram.streamlines, bundle_name)
 
     if args.verbose:
         diff = tracto_data.streamlines._data - tracto_data.streamlines._data.astype(args.dtype)
