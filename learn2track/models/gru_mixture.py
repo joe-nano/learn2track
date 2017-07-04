@@ -193,39 +193,26 @@ class MultivariateGaussianMixtureNLL(Loss):
         # regression_outputs.shape = (batch_size, seq_length, regression_layer_size)
         regression_outputs = model_output
 
+        # mixture_weights.shape : (batch_size, seq_len, n_gaussians)
+        # means.shape : (batch_size, seq_len, n_gaussians, 3)
+        # stds.shape : (batch_size, seq_len, n_gaussians, 3)
         mixture_weights, means, stds = self.model.get_mixture_parameters(regression_outputs, ndim=4)
 
-        # means.shape : (batch_size, seq_len, n_gaussians, 3)
+        # targets.shape : (batch_size, seq_len, 1, 3)
+        targets = self.dataset.symb_targets[:, :, None, :]
 
-        # mean_*.shape : (batch_size, seq_len, n_gaussians)
-        mean_x = means[:, :, :, 0]
-        mean_y = means[:, :, :, 1]
-        mean_z = means[:, :, :, 2]
-
-        # std_*.shape : (batch_size, seq_len, n_gaussians)
-        std_x = stds[:, :, :, 0]
-        std_y = stds[:, :, :, 1]
-        std_z = stds[:, :, :, 2]
-
-        # target_*.shape : (batch_size, seq_len, 1)
-        target_x = self.dataset.symb_targets[:, :, 0, None]
-        target_y = self.dataset.symb_targets[:, :, 1, None]
-        target_z = self.dataset.symb_targets[:, :, 2, None]
-
-        tg_x_c = (target_x - mean_x) / std_x
-        tg_y_c = (target_y - mean_y) / std_y
-        tg_z_c = (target_z - mean_z) / std_z
-
-        log_prefix = T.log(mixture_weights) - np.float32((self.d / 2.) * np.log(2 * np.pi)) - T.log(std_x) - T.log(std_y) - T.log(std_z)
-        square_mahalanobis_dist = -0.5 * (tg_x_c ** 2 + tg_y_c ** 2 + tg_z_c ** 2)
+        log_prefix = -2 * T.log(mixture_weights) + self.d * np.float32(np.log(2*np.pi)) + 2 * T.sum(T.log(stds), axis=-1)
+        square_mahalanobis_dist = T.sum(T.square((targets - means) / stds), axis=-1)
 
         # loss_per_timestep.shape : (batch_size, seq_len)
-        self.loss_per_time_step = - logsumexp(log_prefix + square_mahalanobis_dist, axis=2)
+        self.loss_per_time_step = -logsumexp(-0.5 * (log_prefix + square_mahalanobis_dist), axis=2)
 
         # loss_per_seq.shape : (batch_size,)
+        # loss_per_seq is the log probability for each sequence
         self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1)
 
         if not self.sum_over_timestep:
+            # loss_per_seq is the average log probability for each sequence
             self.loss_per_seq /= T.sum(mask, axis=1)
 
         return self.loss_per_seq
