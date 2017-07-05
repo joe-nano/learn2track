@@ -36,6 +36,21 @@ def make_activation_function(name):
         return T.nnet.softplus
     elif name == "tanh":
         return T.tanh
+    elif name == "selu":
+        def selu(x):
+            # See "Self-normalizing Neural Networks": https://arxiv.org/abs/1706.02515
+            alpha = 1.6732632423543772848170429916717
+            scale = 1.0507009873554804934193349852946
+            # Original implementation
+            # return scale * T.where(x >= 0.0, x, alpha * (T.exp(x) - 1))
+
+            # Alternative implementation, without T.where
+            x_pos = (T.abs_(x) + x) / 2
+            x_neg = x - x_pos
+            x_neg = alpha * T.exp(x_neg) - alpha
+            return scale * (x_neg + x_pos)
+
+        return selu
 
     raise NotImplementedError("Unknown: " + str(name))
 
