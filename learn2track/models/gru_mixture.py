@@ -15,7 +15,7 @@ class GRU_Mixture(GRU_Regression):
     """ A GRU_Regression model with the output size computed for a mixture of gaussians, using a diagonal covariance matrix
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, use_previous_direction=False,
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, activation='tanh', use_previous_direction=False,
                  use_layer_normalization=False, drop_prob=0., use_zoneout=False, seed=1234, **_):
         """
         Parameters
@@ -30,6 +30,8 @@ class GRU_Mixture(GRU_Regression):
             Number of units the regression layer should have.
         n_gaussians : int
             Number of gaussians in the mixture
+        activation : str
+            Activation function to apply on the "cell candidate"
         use_previous_direction : bool
             Use the previous direction as an additional input
         use_layer_normalization : bool
@@ -41,7 +43,8 @@ class GRU_Mixture(GRU_Regression):
         seed : int
             Random seed used for dropout normalization
         """
-        super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization, drop_prob, use_zoneout, seed)
+        super(GRU_Regression, self).__init__(input_size, hidden_sizes, activation=activation, use_layer_normalization=use_layer_normalization,
+                                             drop_prob=drop_prob, use_zoneout=use_zoneout, seed=seed)
         self.volume_manager = volume_manager
         self.n_gaussians = n_gaussians
 

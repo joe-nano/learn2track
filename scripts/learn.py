@@ -42,6 +42,8 @@ def build_train_gru_argparser(subparser):
 
     model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
                        help="Size of the hidden layers. Default: 500")
+    model.add_argument('-a', '--activation', type=str, default='tanh', choices=ACTIVATION_FUNCTIONS,
+                       help='which type of activation function to use for hidden layers.'.format(", ".join(ACTIVATION_FUNCTIONS)))
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
@@ -86,6 +88,8 @@ def build_train_gru_mixture_argparser(subparser):
 
     model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
                        help="Size of the hidden layers. Default: 500")
+    model.add_argument('-a', '--activation', type=str, default='tanh', choices=ACTIVATION_FUNCTIONS,
+                       help='which type of activation function to use for hidden layers.'.format(", ".join(ACTIVATION_FUNCTIONS)))
 
     model.add_argument('-n', '--n-gaussians', type=int, default=2, help='Number of gaussians in the mixture. Default: 2')
 
@@ -158,7 +162,7 @@ def build_train_ffnn_regression_argparser(subparser):
     model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
                        help="Size of the hidden layers. Default: 500")
 
-    model.add_argument('--activation', type=str, default='tanh', choices=ACTIVATION_FUNCTIONS,
+    model.add_argument('-a', '--activation', type=str, default='tanh', choices=ACTIVATION_FUNCTIONS,
                        help='which type of activation function to use for hidden layers.'.format(", ".join(ACTIVATION_FUNCTIONS)))
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
