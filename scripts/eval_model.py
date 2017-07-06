@@ -119,7 +119,7 @@ def main():
             tag = "_EV_L2_error"
         elif args.loss_type == 'maximum_component':
             tag = "_MC_L2_error"
-        elif hyperparams['model'] == 'gru_mixture' or hyperparams['model'] == 'gru_multistep':
+        elif hyperparams['model'] in ['gru_gaussian', 'gru_mixture', 'gru_multistep']:
             tag = "_NLL"
 
         entry = args.dataset_name + tag
