@@ -22,7 +22,7 @@ def weigths_initializer_factory(name, seed=1234):
     raise NotImplementedError("Unknown: " + str(name))
 
 
-ACTIVATION_FUNCTIONS = ["sigmoid", "hinge", "softplus", "tanh"]
+ACTIVATION_FUNCTIONS = ["sigmoid", "hinge", "softplus", "tanh", "selu"]
 
 
 def make_activation_function(name):
