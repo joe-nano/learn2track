@@ -749,6 +749,9 @@ def main():
         if hyperparams["model"] == "gru_regression":
             from learn2track.models import GRU_Regression
             model_class = GRU_Regression
+        elif hyperparams['model'] == 'gru_gaussian':
+            from learn2track.models import GRU_Gaussian
+            model_class = GRU_Gaussian
         elif hyperparams['model'] == 'gru_mixture':
             from learn2track.models import GRU_Mixture
             model_class = GRU_Mixture

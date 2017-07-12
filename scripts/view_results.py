@@ -120,8 +120,12 @@ def extract_result_from_experiment(e):
     entry["Max Epoch"] = e.status.get("current_epoch", "")
 
     # Results
-    entry["Train EV L2 error"] = extract_L2_error(e.results, "trainset_EV_L2_error", "mean")
-    entry["Valid EV L2 error"] = extract_L2_error(e.results, "validset_EV_L2_error", "mean")
+    error_type = "EV_L2_error"
+    if e.hyperparams["model"] in ['gru_gaussian', 'gru_mixture', 'gru_multistep']:
+        error_type = "NLL"
+
+    entry["Train error"] = extract_L2_error(e.results, "trainset_{}".format(error_type), "mean")
+    entry["Valid error"] = extract_L2_error(e.results, "validset_{}".format(error_type), "mean")
 
     # Tractometer results
     entry["VC"] = str(e.tractometer_scores.get("VC", "0"))
@@ -180,10 +184,10 @@ def extract_result_from_experiment(e):
     entry['UF_right'] = str(streamlines_per_bundle.get("UF_right", "0"))
 
     # Other results
-    entry["Test EV L2 error"] = extract_L2_error(e.results, "testset_EV_L2_error", "mean")
-    entry["Std. Train EV L2 error"] = extract_L2_error(e.results, "trainset_EV_L2_error", "stderror")
-    entry["Std. Valid EV L2 error"] = extract_L2_error(e.results, "validset_EV_L2_error", "stderror")
-    entry["Std. Test EV L2 error"] = extract_L2_error(e.results, "testset_EV_L2_error", "stderror")
+    entry["Test error"] = extract_L2_error(e.results, "testset_{}".format(error_type), "mean")
+    entry["Std. Train error"] = extract_L2_error(e.results, "trainset_{}".format(error_type), "stderror")
+    entry["Std. Valid error"] = extract_L2_error(e.results, "validset_{}".format(error_type), "stderror")
+    entry["Std. Test error"] = extract_L2_error(e.results, "testset_{}".format(error_type), "stderror")
     entry["Std. Overlap"] = str(np.std(list(map(float, overlap_per_bundle.values()))))
     entry["Std. Overreach"] = str(np.std(list(map(float, overreach_per_bundle.values()))))
 

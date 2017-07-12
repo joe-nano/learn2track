@@ -141,6 +141,18 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                            use_zoneout=hyperparams['use_zoneout'],
                            seed=hyperparams['seed'])
 
+    elif hyperparams['model'] == 'gru_gaussian':
+        from learn2track.models import GRU_Gaussian
+        return GRU_Gaussian(volume_manager=volume_manager,
+                            input_size=input_size,
+                            hidden_sizes=hyperparams['hidden_sizes'],
+                            output_size=output_size,
+                            use_previous_direction=hyperparams['feed_previous_direction'],
+                            use_layer_normalization=hyperparams['use_layer_normalization'],
+                            drop_prob=hyperparams['drop_prob'],
+                            use_zoneout=hyperparams['use_zoneout'],
+                            seed=hyperparams['seed'])
+
     elif hyperparams['model'] == 'ffnn_regression':
         from learn2track.models import FFNN_Regression
         return FFNN_Regression(volume_manager=volume_manager,
@@ -181,6 +193,19 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         elif loss_type is None:
             from learn2track.models.gru_msp import MultistepMultivariateGaussianNLL
             return MultistepMultivariateGaussianNLL(model, dataset)
+        else:
+            raise ValueError("Unrecognized loss_type: {}".format(loss_type))
+
+    elif hyperparams['model'] == 'gru_gaussian':
+        if loss_type == 'expected_value' or loss_type == 'maximum_component':
+            from learn2track.models.gru_gaussian import GaussianExpectedValueL2Distance
+            return GaussianExpectedValueL2Distance(model, dataset)
+        elif loss_type == "nll_sum":
+            from learn2track.models.gru_gaussian import GaussianNLL
+            return GaussianNLL(model, dataset, sum_over_timestep=True)
+        elif loss_type is None:
+            from learn2track.models.gru_gaussian import GaussianNLL
+            return GaussianNLL(model, dataset)
         else:
             raise ValueError("Unrecognized loss_type: {}".format(loss_type))
 
@@ -231,7 +256,7 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
     """
     batch_size = hyperparams['batch_size'] if batch_size_override is None else batch_size_override
 
-    if hyperparams['model'] == 'gru_regression' or hyperparams['model'] == 'gru_mixture':
+    if hyperparams['model'] in ['gru_regression', 'gru_mixture', 'gru_gaussian']:
         from learn2track.batch_schedulers import TractographyBatchScheduler
         return TractographyBatchScheduler(dataset,
                                           batch_size=batch_size,

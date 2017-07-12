@@ -35,8 +35,6 @@ def build_train_gru_argparser(subparser):
 
     p = subparser.add_parser("gru_regression", description=DESCRIPTION, help=DESCRIPTION)
 
-    # p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
-
     # Model options (GRU)
     model = p.add_argument_group("GRU arguments")
 
@@ -81,8 +79,6 @@ def build_train_gru_mixture_argparser(subparser):
 
     p = subparser.add_parser("gru_mixture", description=DESCRIPTION, help=DESCRIPTION)
 
-    # p.add_argument('dataset', type=str, help='folder containing training data (.npz files).')
-
     # Model options (GRU)
     model = p.add_argument_group("GRU arguments")
 
@@ -92,6 +88,39 @@ def build_train_gru_mixture_argparser(subparser):
                        help='which type of activation function to use for hidden layers.'.format(", ".join(ACTIVATION_FUNCTIONS)))
 
     model.add_argument('-n', '--n-gaussians', type=int, default=2, help='Number of gaussians in the mixture. Default: 2')
+
+    model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
+                       help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
+    model.add_argument('--initialization-seed', type=int, default=np.random.randint(0, 999999),
+                       help='seed used to generate random numbers. Default=random')
+
+    model.add_argument('--normalize', action="store_true", help='if specified, model will be trained against unit length targets')
+
+    model.add_argument('--feed-previous-direction', action="store_true",
+                       help='if specified, the model will be given the previous direction as an additional input')
+
+    model.add_argument('--use-layer-normalization', action="store_true",
+                       help='if specified, the model will be use LayerNormalization in the hidden layers')
+
+    model.add_argument('-d', '--drop-prob', type=float, default=0., help='Dropout/Zoneout probability. Default: 0')
+    model.add_argument('--use-zoneout', action="store_true", help='if specified, the model will be use Zoneout instead of Dropout')
+
+    # General parameters (optional)
+    general = p.add_argument_group("General arguments")
+    general.add_argument('-f', '--force', action='store_true', help='restart training from scratch instead of resuming.')
+    general.add_argument('--view', action='store_true', help='display learning curves.')
+
+
+def build_train_gru_gaussian_argparser(subparser):
+    DESCRIPTION = "Train a gaussian GRU."
+
+    p = subparser.add_parser("gru_gaussian", description=DESCRIPTION, help=DESCRIPTION)
+
+    # Model options (GRU)
+    model = p.add_argument_group("GRU arguments")
+
+    model.add_argument('--hidden-sizes', type=int, nargs='+', default=500,
+                       help="Size of the hidden layers. Default: 500")
 
     model.add_argument('--weights-initialization', type=str, default='orthogonal', choices=WEIGHTS_INITIALIZERS,
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
@@ -251,6 +280,7 @@ def build_argparser():
     subparser = p.add_subparsers(title="Models", dest="model")
     subparser.required = True   # force 'required' testing
     build_train_gru_argparser(subparser)
+    build_train_gru_gaussian_argparser(subparser)
     build_train_gru_mixture_argparser(subparser)
     build_train_gru_multistep_argparser(subparser)
     build_train_ffnn_regression_argparser(subparser)
