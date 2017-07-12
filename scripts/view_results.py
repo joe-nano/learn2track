@@ -151,7 +151,7 @@ def extract_result_from_experiment(e):
     if len(e.tractometer_scores) > 0:
         try:
             entry["VCCR"] = str(float(entry["VC"]) / (float(entry["VC"]) + float(entry["IC"])))
-        except ZeroDivisionError as e:
+        except ZeroDivisionError:
             print("A ZeroDivisionError happened when computing VCCR: VC={}; IC={}".format(entry["VC"], entry["IC"]))
 
     # Other hyperparameters
