@@ -93,6 +93,12 @@ def get_optimizer(e):
 
     return ""
 
+def get_model(e):
+    model = e.hyperparams.get("model")
+    if model == "gru_mixture":
+        model += "_{}".format(e.hyperparams.get("n_gaussians"))
+    return model
+
 
 def extract_L2_error(results, dataset, metric):
     if dataset not in results:
@@ -104,6 +110,7 @@ def extract_L2_error(results, dataset, metric):
 def extract_result_from_experiment(e):
     """e: `Experiment` object"""
     entry = OrderedDict()
+    entry["Model"] = get_model(e)
     entry["Experiment"] = e.experiment_name[:6]
     entry["Tractogram"] = e.tractogram_name
     entry["Seed"] = e.hyperparams.get("seed", "")
