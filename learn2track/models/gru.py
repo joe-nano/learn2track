@@ -19,7 +19,7 @@ class GRU(Model):
 
     The output is simply the state of the last hidden layer.
     """
-    def __init__(self, input_size, hidden_sizes, use_layer_normalization=False, drop_prob=0., use_zoneout=False, seed=1234):
+    def __init__(self, input_size, hidden_sizes, activation='tanh', use_layer_normalization=False, drop_prob=0., use_zoneout=False, seed=1234):
         """
         Parameters
         ----------
@@ -27,6 +27,8 @@ class GRU(Model):
             Number of units each element Xi in the input sequence X has.
         hidden_sizes : int, list of int
             Number of hidden units each GRU should have.
+        activation : str
+            Activation function to apply on the "cell candidate"
         use_layer_normalization : bool
             Use LayerNormalization to normalize preactivations and stabilize hidden layer evolution
         drop_prob : float
@@ -41,6 +43,7 @@ class GRU(Model):
 
         self.input_size = input_size
         self.hidden_sizes = [hidden_sizes] if type(hidden_sizes) is int else hidden_sizes
+        self.activation = activation
         self.use_layer_normalization = use_layer_normalization
         self.drop_prob = drop_prob
         self.use_zoneout = use_zoneout
@@ -54,7 +57,7 @@ class GRU(Model):
         self.layers = []
         last_hidden_size = self.input_size
         for i, hidden_size in enumerate(self.hidden_sizes):
-            self.layers.append(layer_class(last_hidden_size, hidden_size, name="GRU{}".format(i)))
+            self.layers.append(layer_class(last_hidden_size, hidden_size, activation=activation, name="GRU{}".format(i)))
             last_hidden_size = hidden_size
 
         self.dropout_vectors = {}
@@ -76,6 +79,7 @@ class GRU(Model):
         hyperparameters = {'version': 2,
                            'input_size': self.input_size,
                            'hidden_sizes': self.hidden_sizes,
+                           'activation': self.activation,
                            'use_layer_normalization': self.use_layer_normalization,
                            'drop_prob': self.drop_prob,
                            'use_zoneout': self.use_zoneout,

@@ -22,7 +22,7 @@ def weigths_initializer_factory(name, seed=1234):
     raise NotImplementedError("Unknown: " + str(name))
 
 
-ACTIVATION_FUNCTIONS = ["sigmoid", "hinge", "softplus", "tanh"]
+ACTIVATION_FUNCTIONS = ["sigmoid", "hinge", "softplus", "tanh", "selu"]
 
 
 def make_activation_function(name):
@@ -36,6 +36,21 @@ def make_activation_function(name):
         return T.nnet.softplus
     elif name == "tanh":
         return T.tanh
+    elif name == "selu":
+        def selu(x):
+            # See "Self-normalizing Neural Networks": https://arxiv.org/abs/1706.02515
+            alpha = 1.6732632423543772848170429916717
+            scale = 1.0507009873554804934193349852946
+            # Original implementation
+            # return scale * T.where(x >= 0.0, x, alpha * (T.exp(x) - 1))
+
+            # Alternative implementation, without T.where
+            x_pos = (T.abs_(x) + x) / 2
+            x_neg = x - x_pos
+            x_neg = alpha * T.exp(x_neg) - alpha
+            return scale * (x_neg + x_pos)
+
+        return selu
 
     raise NotImplementedError("Unknown: " + str(name))
 
@@ -90,6 +105,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                               input_size=input_size,
                               hidden_sizes=hyperparams['hidden_sizes'],
                               output_size=output_size,
+                              activation=hyperparams['activation'],
                               use_previous_direction=hyperparams['feed_previous_direction'],
                               predict_offset=hyperparams['predict_offset'],
                               use_layer_normalization=hyperparams['use_layer_normalization'],
@@ -118,6 +134,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                            hidden_sizes=hyperparams['hidden_sizes'],
                            output_size=output_size,
                            n_gaussians=hyperparams['n_gaussians'],
+                           activation=hyperparams['activation'],
                            use_previous_direction=hyperparams['feed_previous_direction'],
                            use_layer_normalization=hyperparams['use_layer_normalization'],
                            drop_prob=hyperparams['drop_prob'],

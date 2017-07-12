@@ -15,7 +15,7 @@ class GRU_Regression(GRU):
     """ A standard GRU model with a regression layer stacked on top of it.
     """
 
-    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, predict_offset=False,
+    def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation='tanh', use_previous_direction=False, predict_offset=False,
                  use_layer_normalization=False, drop_prob=0., use_zoneout=False, seed=1234, **_):
         """
         Parameters
@@ -28,6 +28,8 @@ class GRU_Regression(GRU):
             Number of hidden units each GRU should have.
         output_size : int
             Number of units the regression layer should have.
+        activation : str
+            Activation function to apply on the "cell candidate"
         use_previous_direction : bool
             Use the previous direction as an additional input
         predict_offset : bool
@@ -41,7 +43,8 @@ class GRU_Regression(GRU):
         seed : int
             Random seed used for dropout normalization
         """
-        super().__init__(input_size, hidden_sizes, use_layer_normalization, drop_prob, use_zoneout, seed)
+        super().__init__(input_size, hidden_sizes, activation=activation, use_layer_normalization=use_layer_normalization, drop_prob=drop_prob,
+                         use_zoneout=use_zoneout, seed=seed)
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction
