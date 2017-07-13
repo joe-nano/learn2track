@@ -64,6 +64,10 @@ def build_train_gru_argparser(subparser):
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
 
+    model.add_argument('--skip-connections', action="store_true",
+                       help='if specified, the model will use skip connections from the input to all hidden layers in the network, '
+                            'and from all hidden layers to the output layer')
+
     model.add_argument('-d', '--drop-prob', type=float, default=0., help='Dropout/Zoneout probability. Default: 0')
     model.add_argument('--use-zoneout', action="store_true", help='if specified, the model will be use Zoneout instead of Dropout')
 
@@ -102,6 +106,10 @@ def build_train_gru_mixture_argparser(subparser):
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
 
+    model.add_argument('--skip-connections', action="store_true",
+                       help='if specified, the model will use skip connections from the input to all hidden layers in the network, '
+                            'and from all hidden layers to the output layer')
+
     model.add_argument('-d', '--drop-prob', type=float, default=0., help='Dropout/Zoneout probability. Default: 0')
     model.add_argument('--use-zoneout', action="store_true", help='if specified, the model will be use Zoneout instead of Dropout')
 
@@ -134,6 +142,10 @@ def build_train_gru_gaussian_argparser(subparser):
 
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
+
+    model.add_argument('--skip-connections', action="store_true",
+                       help='if specified, the model will use skip connections from the input to all hidden layers in the network, '
+                            'and from all hidden layers to the output layer')
 
     model.add_argument('-d', '--drop-prob', type=float, default=0., help='Dropout/Zoneout probability. Default: 0')
     model.add_argument('--use-zoneout', action="store_true", help='if specified, the model will be use Zoneout instead of Dropout')
@@ -214,6 +226,10 @@ def build_train_ffnn_regression_argparser(subparser):
 
     model.add_argument('--use-layer-normalization', action="store_true",
                        help='if specified, the model will be use LayerNormalization in the hidden layers')
+
+    model.add_argument('--skip-connections', action="store_true",
+                       help='if specified, the model will use skip connections from the input to all hidden layers in the network, '
+                            'and from all hidden layers to the output layer')
 
     model.add_argument('-d', '--drop-prob', type=float, default=0., help='Dropout probability. Default: 0')
 
@@ -303,7 +319,8 @@ def main():
                                    'keep_step_size': False,
                                    'use_layer_normalization': False,
                                    'drop_prob': 0.,
-                                   'use_zoneout': False}
+                                   'use_zoneout': False,
+                                   'skip_connections': False}
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
                                                                                   retrocompatibility_defaults=retrocompatibility_defaults)
 
