@@ -16,7 +16,7 @@ class GRU_Mixture(GRU_Regression):
     """
 
     def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, activation='tanh', use_previous_direction=False,
-                 use_layer_normalization=False, drop_prob=0., use_zoneout=False, seed=1234, **_):
+                 use_layer_normalization=False, drop_prob=0., use_zoneout=False, use_skip_connections=False, seed=1234, **_):
         """
         Parameters
         ----------
@@ -40,11 +40,13 @@ class GRU_Mixture(GRU_Regression):
             Dropout/Zoneout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf & https://arxiv.org/pdf/1606.01305.pdf
         use_zoneout : bool
             Use zoneout implementation instead of dropout
+        use_skip_connections : bool
+            Use skip connections from the input to all hidden layers in the network, and from all hidden layers to the output layer
         seed : int
             Random seed used for dropout normalization
         """
         super(GRU_Regression, self).__init__(input_size, hidden_sizes, activation=activation, use_layer_normalization=use_layer_normalization,
-                                             drop_prob=drop_prob, use_zoneout=use_zoneout, seed=seed)
+                                             drop_prob=drop_prob, use_zoneout=use_zoneout, use_skip_connections=use_skip_connections, seed=seed)
         self.volume_manager = volume_manager
         self.n_gaussians = n_gaussians
 
@@ -60,7 +62,8 @@ class GRU_Mixture(GRU_Regression):
         self.layer_regression_size = sum([n_gaussians,  # Mixture weights
                                           n_gaussians * output_size,  # Means
                                           n_gaussians * output_size])  # Stds
-        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.layer_regression_size)
+        output_layer_input_size = sum(self.hidden_sizes) if self.use_skip_connections else self.hidden_sizes[-1]
+        self.layer_regression = LayerRegression(output_layer_input_size, self.layer_regression_size)
 
     @property
     def hyperparameters(self):

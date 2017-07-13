@@ -16,7 +16,7 @@ class GRU_Gaussian(GRU_Regression):
     """
 
     def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, use_layer_normalization=False, drop_prob=0.,
-                 use_zoneout=False, seed=1234, **_):
+                 use_zoneout=False, use_skip_connections=False, seed=1234, **_):
         """
         Parameters
         ----------
@@ -36,10 +36,13 @@ class GRU_Gaussian(GRU_Regression):
             Dropout/Zoneout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf & https://arxiv.org/pdf/1606.01305.pdf
         use_zoneout : bool
             Use zoneout implementation instead of dropout
+        use_skip_connections : bool
+            Use skip connections from the input to all hidden layers in the network, and from all hidden layers to the output layer
         seed : int
             Random seed used for dropout normalization
         """
-        super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization, drop_prob, use_zoneout, seed)
+        super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization=use_layer_normalization, drop_prob=drop_prob,
+                                             use_zoneout=use_zoneout, use_skip_connections=use_skip_connections, seed=seed)
         self.volume_manager = volume_manager
 
         assert output_size == 3  # Only 3-dimensional target is supported for now
@@ -53,7 +56,8 @@ class GRU_Gaussian(GRU_Regression):
         # Do not use dropout/zoneout in last hidden layer
         self.layer_regression_size = sum([output_size,  # Means
                                           output_size])  # Stds
-        self.layer_regression = LayerRegression(self.hidden_sizes[-1], self.layer_regression_size)
+        output_layer_input_size = sum(self.hidden_sizes) if self.use_skip_connections else self.hidden_sizes[-1]
+        self.layer_regression = LayerRegression(output_layer_input_size, self.layer_regression_size)
 
     @property
     def hyperparameters(self):
