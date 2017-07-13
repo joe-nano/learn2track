@@ -228,23 +228,31 @@ def main():
 
     for experiment_path in args.names:
         tractometer_folder_path = pjoin(experiment_path, "tractometer")
-        for tractometer_evaluation_name in os.listdir(tractometer_folder_path):
-            tractometer_evaluation_path = pjoin(tractometer_folder_path, tractometer_evaluation_name)
-            scores_dir = pjoin(tractometer_evaluation_path, "scores")
+        try:
+            for tractometer_evaluation_name in os.listdir(tractometer_folder_path):
+                tractometer_evaluation_path = pjoin(tractometer_folder_path, tractometer_evaluation_name)
+                scores_dir = pjoin(tractometer_evaluation_path, "scores")
 
-            if not os.path.isdir(scores_dir):
-                continue
+                if not os.path.isdir(scores_dir):
+                    continue
 
+                try:
+                    experiment = Experiment(tractometer_evaluation_path)
+                    experiments_results.append(extract_result_from_experiment(experiment))
+                    if args.verbose:
+                        print("Fetched results for {}".format(tractometer_evaluation_name))
+                except IOError as e:
+                    if args.verbose:
+                        print(str(e))
+
+                    print("Skipping: '{}' for {}".format(experiment_path, tractometer_evaluation_name))
+        except FileNotFoundError:
             try:
-                experiment = Experiment(tractometer_evaluation_path)
+                print("No tractometer results found, loading evaluation scores...")
+                experiment = Experiment(experiment_path)
                 experiments_results.append(extract_result_from_experiment(experiment))
-                if args.verbose:
-                    print("Fetched results for {}".format(tractometer_evaluation_name))
-            except IOError as e:
-                if args.verbose:
-                    print(str(e))
-
-                print("Skipping: '{}' for {}".format(experiment_path, tractometer_evaluation_name))
+            except FileNotFoundError:
+                print("Could not load experiment results...")
 
     list_of_dict_to_csv_file(args.out, experiments_results)
 
