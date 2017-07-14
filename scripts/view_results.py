@@ -123,6 +123,7 @@ def extract_result_from_experiment(e):
     entry["Noise sigma"] = e.hyperparams.get("noisy_streamlines_sigma", "")
     entry["Drop prob"] = e.hyperparams.get("drop_prob", "")
     entry["Zoneout"] = e.hyperparams.get("use_zoneout", "")
+    entry["Skip connections"] = e.hyperparams.get("skip_connections", "")
     entry["Best Epoch"] = e.early_stopping.get("best_epoch", "")
     entry["Max Epoch"] = e.status.get("current_epoch", "")
 
@@ -252,7 +253,7 @@ def main():
                 experiment = Experiment(experiment_path)
                 experiments_results.append(extract_result_from_experiment(experiment))
             except FileNotFoundError:
-                print("Could not load experiment results...")
+                print("Could not load experiment results from {}".format(experiment_path))
 
     list_of_dict_to_csv_file(args.out, experiments_results)
 
