@@ -947,7 +947,7 @@ def main():
                               # "pftRetry-{}_",
                               # "pftHist-{}_",
                               # "trackLikePeter-{}_",
-                              # "useMaxComponent-{}"
+                              "useMaxComponent-{}"
                               ]
             filename = ('_'.join(filename_items) + ".tck").format(
                 prefix,
@@ -955,14 +955,14 @@ def main():
                 # mask_type,
                 args.step_size,
                 args.nb_seeds_per_voxel,
-                np.rad2deg(theta)
+                np.rad2deg(theta),
                 # not args.discard_stopped_by_curvature,
                 # args.filter_threshold,
                 # args.min_length,
                 # args.pft_nb_retry,
                 # args.pft_nb_backtrack_steps,
                 # args.track_like_peter,
-                # args.use_max_component
+                args.use_max_component
                 )
 
         save_path = pjoin(experiment_path, filename)
