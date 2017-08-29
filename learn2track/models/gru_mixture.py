@@ -61,7 +61,7 @@ class GRU_Mixture(GRU_Regression):
         # Do not use dropout/zoneout in last hidden layer
         self.layer_regression_size = sum([n_gaussians,  # Mixture weights
                                           n_gaussians * output_size,  # Means
-                                          n_gaussians * output_size])  # Stds
+                                          n_gaussians])  # Single std for each multivariate gaussian
         output_layer_input_size = sum(self.hidden_sizes) if self.use_skip_connections else self.hidden_sizes[-1]
         self.layer_regression = LayerRegression(output_layer_input_size, self.layer_regression_size)
 
@@ -77,7 +77,7 @@ class GRU_Mixture(GRU_Regression):
         shape_split_by_gaussian = T.concatenate([regression_output.shape[:-1], [self.n_gaussians, 3]])
         mixture_weights = softmax(regression_output[..., :self.n_gaussians], axis=-1)
         means = T.reshape(regression_output[..., self.n_gaussians:self.n_gaussians * 4], shape_split_by_gaussian, ndim=ndim)
-        stds = T.reshape(T.exp(regression_output[..., self.n_gaussians * 4:self.n_gaussians * 7]), shape_split_by_gaussian, ndim=ndim)
+        stds = T.exp(regression_output[..., self.n_gaussians * 4:self.n_gaussians * 5])
 
         return mixture_weights, means, stds
 
@@ -92,11 +92,11 @@ class GRU_Mixture(GRU_Regression):
         # mu.shape : (batch_size, 3)
         mu = means[xs, choices]
 
-        # sigma.shape : (batch_size, 3)
+        # sigma.shape : (batch_size,)
         sigma = stds[xs, choices]
 
         noise = srng.normal((batch_size, 3))
-        samples = mu + sigma * noise
+        samples = mu + sigma[:, None] * noise
 
         return samples
 
@@ -201,17 +201,17 @@ class MultivariateGaussianMixtureNLL(Loss):
 
         # mixture_weights.shape : (batch_size, seq_len, n_gaussians)
         # means.shape : (batch_size, seq_len, n_gaussians, 3)
-        # stds.shape : (batch_size, seq_len, n_gaussians, 3)
+        # stds.shape : (batch_size, seq_len, n_gaussians)
         mixture_weights, means, stds = self.model.get_mixture_parameters(regression_outputs, ndim=4)
 
         # targets.shape : (batch_size, seq_len, 1, 3)
         targets = self.dataset.symb_targets[:, :, None, :]
 
-        log_prefix = -2 * T.log(mixture_weights) + self.d * np.float32(np.log(2*np.pi)) + 2 * T.sum(T.log(stds), axis=-1)
-        square_mahalanobis_dist = T.sum(T.square((targets - means) / stds), axis=-1)
+        log_prefix = T.log(mixture_weights) - (self.d / 2) * np.float32(np.log(2*np.pi)) - 3 * T.log(stds)
+        square_mahalanobis_dist = 0.5 * (T.sum(T.square((targets - means)), axis=-1) / stds**2)
 
         # loss_per_timestep.shape : (batch_size, seq_len)
-        self.loss_per_time_step = -logsumexp(-0.5 * (log_prefix + square_mahalanobis_dist), axis=2)
+        self.loss_per_time_step = -logsumexp(log_prefix - square_mahalanobis_dist, axis=2)
 
         # loss_per_seq.shape : (batch_size,)
         # loss_per_seq is the log probability for each sequence
