@@ -935,18 +935,18 @@ def main():
             if args.dilate_mask:
                 mask_type += "D"
 
-            filename_items = ["{}_",
-                              # "seed-{}_",
-                              # "mask-{}_",
-                              "step-{:.2f}mm_",
-                              "nbSeeds-{}_",
-                              "maxAngleDeg-{:.1f}_"
-                              # "keepCurv-{}_",
-                              # "filtered-{}_",
-                              # "minLen-{}_",
-                              # "pftRetry-{}_",
-                              # "pftHist-{}_",
-                              # "trackLikePeter-{}_",
+            filename_items = ["{}",
+                              # "seed-{}",
+                              # "mask-{}",
+                              "step-{:.2f}mm",
+                              "nbSeeds-{}",
+                              "maxAngleDeg-{:.1f}"
+                              # "keepCurv-{}",
+                              # "filtered-{}",
+                              # "minLen-{}",
+                              # "pftRetry-{}",
+                              # "pftHist-{}",
+                              # "trackLikePeter-{}",
                               "useMaxComponent-{}"
                               ]
             filename = ('_'.join(filename_items) + ".tck").format(
