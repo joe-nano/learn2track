@@ -82,10 +82,43 @@ class GRU_Mixture(GRU_Regression):
         return mixture_weights, means, stds
 
     def _get_stochastic_samples(self, srng, mixture_weights, means, stds):
+        # batch_size = mixture_weights.shape[0]
+        # xs = T.arange(0, batch_size)
+        #
+        # choices = T.argmax(srng.multinomial(n=1, pvals=mixture_weights), axis=1)
+        #
+        # # means[0] : [[mean_x1, mean_y1, mean_z1], ..., [mean_xn, mean_yn, mean_zn]]
+        #
+        # # mu.shape : (batch_size, 3)
+        # mu = means[xs, choices]
+        #
+        # # sigma.shape : (batch_size, 3)
+        # sigma = stds[xs, choices]
+        #
+        # noise = srng.normal((batch_size, 3))
+        # samples = mu + sigma * noise
+
+        # Sampling has too much variance and hurts performance
+        # Sample from the gaussian with the maximum component instead
+
+        return self._get_max_component_stochastic_samples(srng, mixture_weights, means, stds)
+
+    def _get_max_component_samples(self, mixture_weights, means, stds):
+        # Return the mean of the gaussian with the maximum component
         batch_size = mixture_weights.shape[0]
         xs = T.arange(0, batch_size)
 
-        choices = T.argmax(srng.multinomial(n=1, pvals=mixture_weights), axis=1)
+        choices = T.argmax(mixture_weights, axis=1)
+        samples = means[xs, choices]
+
+        return samples
+
+    def _get_max_component_stochastic_samples(self, srng, mixture_weights, means, stds):
+        # Sample from the gaussian with the maximum component
+        batch_size = mixture_weights.shape[0]
+        xs = T.arange(0, batch_size)
+
+        choices = T.argmax(mixture_weights, axis=1)
 
         # means[0] : [[mean_x1, mean_y1, mean_z1], ..., [mean_xn, mean_yn, mean_zn]]
 
@@ -97,15 +130,6 @@ class GRU_Mixture(GRU_Regression):
 
         noise = srng.normal((batch_size, 3))
         samples = mu + sigma * noise
-
-        return samples
-
-    def _get_max_component_samples(self, mixture_weights, means, stds):
-        batch_size = mixture_weights.shape[0]
-        xs = T.arange(0, batch_size)
-
-        choices = T.argmax(mixture_weights, axis=1)
-        samples = means[xs, choices]
 
         return samples
 
