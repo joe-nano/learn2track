@@ -3,17 +3,18 @@
 from __future__ import division
 
 import argparse
+import json
+import logging
 import os
 import pickle
-import logging
-import json
 
+import numpy as np
 import tractometer.pipeline_helper as helper
 from tractometer.pipeline_helper import mkdir
-import learn2track_metrics as metrics
-from tractometer.utils.attribute_computer import get_attribs_for_file,\
-                                                 load_attribs
+from tractometer.utils.attribute_computer import get_attribs_for_file, \
+    load_attribs
 
+from . import learn2track_metrics as metrics
 
 ###############
 # Script part #
@@ -28,30 +29,30 @@ def buildArgsParser():
     p.add_argument('tractogram', action='store',
                    metavar='TRACTS', type=str, help='Tractogram file')
 
-    p.add_argument('base_dir',   action='store',
-                   metavar='BASE_DIR',  type=str,
+    p.add_argument('base_dir', action='store',
+                   metavar='BASE_DIR', type=str,
                    help='base directory for scoring data')
 
     p.add_argument('metadata_file', action='store',
                    metavar='SUBMISSIONS_ATTRIBUTES', type=str,
-                   help='attributes file of the submissions. ' +\
-                        'Needs to contain the orientation.\n' +\
-                        'Normally, use metadata/ismrm_challenge_2015/' +\
-                        'anon_submissions_attributes.json.\n' +\
-                        'Can be computed with ' +\
+                   help='attributes file of the submissions. ' +
+                        'Needs to contain the orientation.\n' +
+                        'Normally, use metadata/ismrm_challenge_2015/' +
+                        'anon_submissions_attributes.json.\n' +
+                        'Can be computed with ' +
                         'ismrm_compute_submissions_attributes.py.')
 
     p.add_argument('basic_bundles_attribs', action='store',
                    metavar='GT_ATTRIBUTES', type=str,
-                   help='attributes of the basic bundles. ' +\
+                   help='attributes of the basic bundles. ' +
                         'Same format as SUBMISSIONS_ATTRIBUTES')
 
-    p.add_argument('out_dir',    action='store',
-                   metavar='OUT_DIR',  type=str,
+    p.add_argument('out_dir', action='store',
+                   metavar='OUT_DIR', type=str,
                    help='directory where to send score files')
 
     p.add_argument('version', action='store',
-                   metavar='ALGO_VERSION', choices=range(1,6),
+                   metavar='ALGO_VERSION', choices=range(1, 6),
                    type=int,
                    help='version of the algorithm to use.\n' +
                         'choices:\n  1: VC: auto_extract -> VCWP candidates ' +
@@ -71,7 +72,7 @@ def buildArgsParser():
     p.add_argument('--save_vcwp', action='store_true',
                    help='save VCWP independently.')
 
-    #Other
+    # Other
     p.add_argument('-f', dest='is_forcing', action='store_true',
                    required=False, help='overwrite output files')
     p.add_argument('-v', dest='is_verbose', action='store_true',
@@ -125,7 +126,7 @@ def main():
     if out_dir is not None:
         out_dir = mkdir(out_dir + "/").replace("//", "/")
 
-    #Launch main
+    # Launch main
     masks_dir = base_dir + "/masks/"
     bundles_dir = os.path.join(base_dir, "bundles")
     scores_dir = mkdir(out_dir + "/scores/")
@@ -135,7 +136,7 @@ def main():
         if isForcing:
             os.remove(scores_filename)
         else:
-            print "Skipping... {0}".format(scores_filename)
+            print("Skipping... {0}".format(scores_filename))
             return
 
     if not args.save_tracts and (args.save_ib or args.save_vb or args.save_vcwp):
@@ -165,6 +166,7 @@ def main():
 
     if isVerbose:
         print(scores)
+
 
 if __name__ == "__main__":
     main()
