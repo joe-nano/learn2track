@@ -3,27 +3,19 @@
 
 from __future__ import division
 
-from collections import Counter
-from itertools import chain
 import logging
 import os
 import random
-from time import time
 
 import nibabel as nib
 import numpy as np
-
-from dipy.tracking.streamline import set_number_of_points
-from dipy.segment.clustering import QuickBundles, QuickBundlesX, ClusterMapCentroid
+from dipy.segment.clustering import QuickBundles, QuickBundlesX
 from dipy.segment.metric import AveragePointwiseEuclideanMetric
-from dipy.tracking.distances import bundles_distances_mdf
 from dipy.tracking.metrics import length as slength
+from dipy.tracking.streamline import set_number_of_points
 from tractometer.io.streamlines import get_tracts_voxel_space_for_dipy
-from tractconverter.formats.tck import TCK
-
 from tractometer.metrics.invalid_connections import get_closest_roi_pairs_for_all_streamlines
 from tractometer.utils.filenames import get_root_image_name
-
 
 REF_BUNDLES_THRESHOLD = 5
 NB_POINTS_RESAMPLE = 12
@@ -31,7 +23,6 @@ NB_POINTS_RESAMPLE = 12
 
 def _save_extracted_VBs(extracted_vb_info, streamlines,
                         segmented_out_dir, basename, ref_anat_fname):
-
     for bundle_name, bundle_info in extracted_vb_info.iteritems():
         if bundle_info['nb_streamlines'] > 0:
             out_fname = os.path.join(segmented_out_dir, basename +
@@ -51,7 +42,6 @@ def auto_extract(model_cluster_map, rstreamlines,
                  clean_thr=7.,
                  disp=False, verbose=False,
                  ordering=None):
-
     if ordering is None:
         ordering = np.arange(len(rstreamlines))
 
@@ -120,7 +110,7 @@ def _auto_extract_VCs(streamlines, ref_bundles):
 
     # nb_bundles = len(ref_bundles)
     # bundles_found = [False] * nb_bundles
-    #bundles_potential_VCWP = [set()] * nb_bundles
+    # bundles_potential_VCWP = [set()] * nb_bundles
 
     logging.debug("Starting scoring VCs")
 
@@ -200,7 +190,7 @@ def _auto_extract_VCs(streamlines, ref_bundles):
 
                 # Shift indices to match the real number of streamlines
                 global_select_strl_indices = set([v + chunk_it * chunk_size
-                                                 for v in selected_streamlines_indices])
+                                                  for v in selected_streamlines_indices])
                 vb_info = found_vbs_info.get(ref_bundle['name'])
                 vb_info['nb_streamlines'] += nb_selected_streamlines
                 vb_info['streamlines_indices'] |= global_select_strl_indices
@@ -266,7 +256,7 @@ def score_auto_extract_auto_IBs(streamlines, bundles_masks, ref_bundles, ROIs, w
 
     # New algorithm
     # Step 1: remove streamlines shorter than threshold (currently 35)
-    # Step 2: apply Quickbundle with a distance threshold of 20
+    # Step 2: apply Quickbundle with a hierarchical clustering based on the mean threshold + std of the reference bundles
     # Step 3: remove singletons
     # Step 4: assign to closest ROIs pair
     logging.debug("Starting IC, IB scoring")
@@ -298,12 +288,17 @@ def score_auto_extract_auto_IBs(streamlines, bundles_masks, ref_bundles, ROIs, w
         random.seed(0.2)
         random.shuffle(candidate_ic_streamlines)
 
+        # Compute mean/std of bundles thresholds. Useful if using tractometer on different
+        # environments like fibercup/ismrm/hcp
+        thresholds_mean = np.mean([bundle['threshold'] for bundle in ref_bundles])
+        thresholds_std = np.std([bundle['threshold'] for bundle in ref_bundles])
+        thresholds = [thresholds_mean + 2 * thresholds_std, thresholds_mean, thresholds_mean - 2 * thresholds_std]
 
-        # TODO threshold on distance as arg
-        qb = QuickBundlesX([30, 25, 20, 15])
+        logging.debug("Thresholds: {}".format(thresholds))
+
+        qb = QuickBundlesX(thresholds)
         clusters_obj = qb.cluster(candidate_ic_streamlines)
         clusters = clusters_obj.get_clusters(-1)  # Retrieves clusters obtained with the smallest threshold.
-        # clusters = qb.cluster(candidate_ic_streamlines)
 
         logging.debug("Found {} potential IB clusters".format(len(clusters)))
 
@@ -312,6 +307,8 @@ def score_auto_extract_auto_IBs(streamlines, bundles_masks, ref_bundles, ROIs, w
         for roi in ROIs:
             rois_info.append((get_root_image_name(os.path.basename(roi.get_filename())),
                               np.array(np.where(roi.get_data())).T))
+
+        # TODO: Handle the case when streamlines are assigned to head and tail of the same bundle, i.e. a VC...
 
         centroids = nib.streamlines.Tractogram(clusters.centroids)
         centroids.apply_affine(np.linalg.inv(ROIs[0].affine))
@@ -326,53 +323,19 @@ def score_auto_extract_auto_IBs(streamlines, bundles_masks, ref_bundles, ROIs, w
             ic_counts += len(c)
             ib_pairs[closest_for_cluster].extend(c.indices)
 
-        # all_ics_closest_pairs = get_closest_roi_pairs_for_all_streamlines(candidate_ic_streamlines, rois_info)
-
-        # for c_idx, c in enumerate(clusters):
-        #     closest_for_cluster = [all_ics_closest_pairs[i] for i in clusters[c]['indices']]
-
-        #     if len(clusters[c]['indices']) > 1:
-        #         ic_counts += len(clusters[c]['indices'])
-        #         occurences = Counter(closest_for_cluster)
-
-        #         # TODO handle either an equality or maybe a range
-        #         most_frequent = occurences.most_common(1)[0][0]
-
-        #         val = ib_pairs.get(most_frequent)
-        #         if val is None:
-        #             # Check if flipped pair exists
-        #             val1 = ib_pairs.get((most_frequent[1], most_frequent[0]))
-        #             if val1 is not None:
-        #                 val1.append(c_idx)
-        #             else:
-        #                 ib_pairs[most_frequent] = [c_idx]
-        #         else:
-        #             val.append(c_idx)
-        #     else:
-        #         rejected_streamlines.append(candidate_ic_streamlines[clusters[c]['indices'][0]])
-
         if save_segmented and save_IBs:
             for k, v in ib_pairs.iteritems():
-                out_strl = []
-                # for c_idx in v:
-                #     out_strl.extend([s for s in np.array(candidate_ic_streamlines)[clusters[c_idx]['indices']]])
                 out_strl = np.array(candidate_ic_streamlines)[v]
                 out_fname = os.path.join(out_segmented_strl_dir,
                                          base_out_segmented_strl + \
                                          '_IB_{0}_{1}.tck'.format(k[0], k[1]))
 
                 nib.streamlines.save(nib.streamlines.Tractogram(out_strl, affine_to_rasmm=np.eye(4)), out_fname)
-                # ib_f = TCK.create(out_fname)
-                # save_tracts_tck_from_dipy_voxel_space(ib_f, ref_anat_fname,
-                                                      # out_strl)
 
     if len(rejected_streamlines) > 0 and save_segmented:
         out_nc_fname = os.path.join(out_segmented_strl_dir,
                                     '{}_NC.tck'.format(base_out_segmented_strl))
         nib.streamlines.save(nib.streamlines.Tractogram(rejected_streamlines, affine_to_rasmm=np.eye(4)), out_nc_fname)
-        # out_file = TCK.create(out_nc_fname)
-        # save_tracts_tck_from_dipy_voxel_space(out_file, ref_anat_fname,
-                                              # rejected_streamlines)
 
     # TODO readd classifed_steamlines_indices to validate
     if ic_counts != len(candidate_ic_strl_indices) - len(rejected_streamlines):
@@ -470,7 +433,6 @@ def score_from_files(filename, masks_dir, bundles_dir,
     # Ref bundles will contain {'name': 'name_of_the_bundle', 'threshold': thres_value,
     #                           'streamlines': list_of_streamlines}
     dummy_attribs = {'orientation': 'LPS'}
-    qb = QuickBundles(threshold=REF_BUNDLES_THRESHOLD, metric=AveragePointwiseEuclideanMetric())
 
     out_centroids_dir = os.path.join(segmented_out_dir, os.path.pardir, "centroids")
     if not os.path.isdir(out_centroids_dir):
@@ -483,13 +445,13 @@ def score_from_files(filename, masks_dir, bundles_dir,
         if bundle_attribs is None:
             raise ValueError("Missing basic bundle attribs for {0}".format(bundle_f))
 
-        # # Already resample to avoid doing it for each iteration of chunking
-        # orig_strl = [s for s in get_tracts_voxel_space_for_dipy(
-        #                         os.path.join(bundles_dir, bundle_f),
-        #                         wm_file, dummy_attribs)]
+        # Do not use a hardcoded threshold value for all bundles; instead, use a fraction of
+        # the reference threshold for VC clustering
+        # TODO: Implement a better way to do this; could be automatically computed based on number of streamlines + mean distance
+        qb = QuickBundles(threshold=bundle_attribs['cluster_threshold'] / 2, metric=AveragePointwiseEuclideanMetric())
+
         orig_strl = load_streamlines(os.path.join(bundles_dir, bundle_f), wm_file, dummy_attribs)
         resamp_bundle = set_number_of_points(orig_strl, NB_POINTS_RESAMPLE)
-        # resamp_bundle = [s.astype('f4') for s in resamp_bundle]
 
         indices = np.arange(len(resamp_bundle))
         rng.shuffle(indices)
@@ -507,9 +469,12 @@ def score_from_files(filename, masks_dir, bundles_dir,
                             'mask_inv': bundle_mask_inv})
 
         logging.debug("{}: {} centroids".format(ref_bundles[-1]['name'], len(bundle_cluster_map)))
-        nib.streamlines.save(nib.streamlines.Tractogram(bundle_cluster_map.centroids, affine_to_rasmm=np.eye(4)),
-                             os.path.join(out_centroids_dir, ref_bundles[-1]['name'] + ".tck"))
+        if verbose:
+            print("Saving {} bundle centroids for {}".format(len(bundle_cluster_map.centroids), ref_bundles[-1]['name']))
+            nib.streamlines.save(nib.streamlines.Tractogram(bundle_cluster_map.centroids, affine_to_rasmm=np.eye(4)),
+                                 os.path.join(out_centroids_dir, ref_bundles[-1]['name'] + ".tck"))
 
+    # Algorithm 5 is the only supported algorithm for now
     score_func = score_auto_extract_auto_IBs
 
     return score_func(streamlines, bundles_masks, ref_bundles, ROIs, wm,

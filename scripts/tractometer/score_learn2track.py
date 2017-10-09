@@ -8,13 +8,12 @@ import logging
 import os
 import pickle
 
+import learn2track_metrics as metrics
 import numpy as np
 import tractometer.pipeline_helper as helper
 from tractometer.pipeline_helper import mkdir
 from tractometer.utils.attribute_computer import get_attribs_for_file, \
     load_attribs
-
-from . import learn2track_metrics as metrics
 
 ###############
 # Script part #
@@ -50,6 +49,8 @@ def buildArgsParser():
     p.add_argument('out_dir', action='store',
                    metavar='OUT_DIR', type=str,
                    help='directory where to send score files')
+
+    # Only version 5 is supported for now
 
     p.add_argument('version', action='store',
                    metavar='ALGO_VERSION', choices=range(1, 6),
@@ -142,8 +143,8 @@ def main():
     if not args.save_tracts and (args.save_ib or args.save_vb or args.save_vcwp):
         parser.error("Cannot save IBs, VBs, or VCWP if save_tracts is not set.")
 
-    if args.version == 2:
-        parser.error("Algorithm version 2 is not currently implemented.")
+    if args.version != 5:
+        parser.error("Algorithm version {} is not currently implemented.".format(args.version))
 
     tracts_attribs = get_attribs_for_file(attribs_file, os.path.basename(tractogram))
     basic_bundles_attribs = load_attribs(args.basic_bundles_attribs)
