@@ -46,7 +46,8 @@ def main():
             lengths = length(streamlines)
             nb_points = np.ceil(lengths / args.step_size).astype(int)
 
-            new_streamlines = (set_number_of_points(s, n) for s, n in zip(streamlines, nb_points))
+            # Filter out streamlines shorter than the given step size
+            new_streamlines = (set_number_of_points(s, n) for s, n in zip(streamlines, nb_points) if n > 1)
 
             t = nib.streamlines.Tractogram(new_streamlines)
             t.apply_affine(np.linalg.inv(tractography_data.signal.affine))
