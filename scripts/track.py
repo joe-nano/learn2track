@@ -107,6 +107,10 @@ def build_argparser():
     p.add_argument('--flip-z', action="store_true",
                    help="if specified, prediction direction will be flip in Z")
 
+    # Other options
+    p.add_argument('--save-rejected', action="store_true",
+                   help="if specified, save rejected streamlines in a separate file")
+
     deprecated = p.add_argument_group("Deprecated")
     deprecated.add_argument('--append-previous-direction', action="store_true",
                             help="(Deprecated) if specified, the target direction of the last timestep will be concatenated to the input of the current timestep. (0,0,0) will be used for the first timestep.")
@@ -868,15 +872,26 @@ def main():
         tractogram.to_world()  # Performed in-place.
 
     nb_streamlines = len(tractogram)
+
+    if args.save_rejected:
+        rejected_tractogram = Tractogram()
+
     print("Generated {:,} (compressed) streamlines".format(nb_streamlines))
     with Timer("Cleaning streamlines", newline=True):
-        # Flush streamlines that has no points.
+        # Flush streamlines that have no points.
+        if args.save_rejected:
+            rejected_tractogram += tractogram[np.array(list(map(len, tractogram))) <= 0]
+
         tractogram = tractogram[np.array(list(map(len, tractogram))) > 0]
         print("Removed {:,} empty streamlines".format(nb_streamlines - len(tractogram)))
 
         # Remove small streamlines
         nb_streamlines = len(tractogram)
         lengths = dipy.tracking.streamline.length(tractogram.streamlines)
+
+        if args.save_rejected:
+            rejected_tractogram += tractogram[lengths < args.min_length]
+
         tractogram = tractogram[lengths >= args.min_length]
         lengths = lengths[lengths >= args.min_length]
         if len(lengths) > 0:
@@ -887,6 +902,10 @@ def main():
         if args.discard_stopped_by_curvature:
             nb_streamlines = len(tractogram)
             stopping_curvature_flag_is_set = is_flag_set(tractogram.data_per_streamline['stopping_flags'][:, 0], STOPPING_CURVATURE)
+
+            if args.save_rejected:
+                rejected_tractogram += tractogram[stopping_curvature_flag_is_set]
+
             tractogram = tractogram[np.logical_not(stopping_curvature_flag_is_set)]
             print("Removed {:,} streamlines stopped for having a curvature higher than {:.2f} degree".format(nb_streamlines - len(tractogram),
                                                                                                              np.rad2deg(theta)))
@@ -896,6 +915,10 @@ def main():
             nb_streamlines = len(tractogram)
             losses = compute_loss_errors(tractogram.streamlines, model, hyperparams)
             print("Mean loss: {:.4f} ± {:.4f}".format(np.mean(losses), np.std(losses, ddof=1) / np.sqrt(len(losses))))
+
+            if args.save_rejected:
+                rejected_tractogram += tractogram[losses > args.filter_threshold]
+
             tractogram = tractogram[losses <= args.filter_threshold]
             print("Removed {:,} streamlines producing a loss lower than {:.2f} mm".format(nb_streamlines - len(tractogram),
                                                                                           args.filter_threshold))
@@ -936,17 +959,17 @@ def main():
                 mask_type += "D"
 
             filename_items = ["{}_",
-                              # "seed-{}_",
-                              # "mask-{}_",
-                              "step-{:.2f}mm_",
-                              "nbSeeds-{}_",
-                              "maxAngleDeg-{:.1f}_"
-                              # "keepCurv-{}_",
-                              # "filtered-{}_",
-                              # "minLen-{}_",
-                              # "pftRetry-{}_",
-                              # "pftHist-{}_",
-                              # "trackLikePeter-{}_",
+                              # "seed-{}",
+                              # "mask-{}",
+                              "step-{:.2f}mm",
+                              "nbSeeds-{}",
+                              "maxAngleDeg-{:.1f}"
+                              # "keepCurv-{}",
+                              # "filtered-{}",
+                              # "minLen-{}",
+                              # "pftRetry-{}",
+                              # "pftHist-{}",
+                              # "trackLikePeter-{}",
                               # "useMaxComponent-{}"
                               ]
             filename = ('_'.join(filename_items) + ".tck").format(
@@ -973,6 +996,35 @@ def main():
 
         print("Saving to {}".format(save_path))
         nib.streamlines.save(tractogram, save_path)
+
+    if args.save_rejected:
+        with Timer("Saving {:,} (compressed) rejected streamlines".format(len(rejected_tractogram))):
+            rejected_filename_items = filename_items.copy()
+            rejected_filename_items.insert(1, "rejected")
+            rejected_filename = ('_'.join(rejected_filename_items) + ".tck").format(
+                prefix,
+                # seed_mask_type,
+                # mask_type,
+                args.step_size,
+                args.nb_seeds_per_voxel,
+                np.rad2deg(theta)
+                # not args.discard_stopped_by_curvature,
+                # args.filter_threshold,
+                # args.min_length,
+                # args.pft_nb_retry,
+                # args.pft_nb_backtrack_steps,
+                # args.track_like_peter,
+                # args.use_max_component
+            )
+
+        rejected_save_path = pjoin(experiment_path, rejected_filename)
+        try:  # Create dirs, if needed.
+            os.makedirs(os.path.dirname(rejected_save_path))
+        except:
+            pass
+
+        print("Saving rejected streamlines to {}".format(rejected_save_path))
+        nib.streamlines.save(rejected_tractogram, rejected_save_path)
 
 if __name__ == "__main__":
     main()
