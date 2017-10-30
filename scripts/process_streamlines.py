@@ -9,6 +9,7 @@ import textwrap
 import nibabel as nib
 import numpy as np
 from dipy.core.gradients import gradient_table
+from dipy.tracking.streamline import length
 
 from learn2track.neurotools import TractographyData, subsample_streamlines
 from learn2track.utils import Timer
@@ -49,6 +50,7 @@ def build_argparser():
     general_parser = argparse.ArgumentParser(add_help=False)
     general_parser.add_argument('--out', metavar='FILE', default="dataset.npz", help='output filename (.npz). Default: dataset.npz')
     general_parser.add_argument('--dtype', type=str, default="float32", help="'float16' or 'float32'. Default: 'float32'")
+    general_parser.add_argument('--min-length', type=float, default="10", help="Minimum length (in mm)")
     general_parser.add_argument('-v', '--verbose', action='store_true', help='enable verbose mode.')
 
     signal_subparsers = p.add_subparsers(title="Signal source", dest="signal_source")
@@ -102,11 +104,14 @@ def main():
             tfile = nib.streamlines.load(filename)
             tractogram = tfile.tractogram
 
+            original_streamlines = tractogram.streamlines
+            lengths = length(original_streamlines)
+            streamlines = [s for (s, l) in zip(original_streamlines, lengths) if l >= args.min_length]
+
             # Make sure file is not empty
-            if len(tractogram) > 0:
+            if len(streamlines) > 0:
                 if args.subsample_streamlines:
-                    original_streamlines = tractogram.streamlines
-                    output_streamlines = subsample_streamlines(original_streamlines, args.clustering_threshold,
+                    output_streamlines = subsample_streamlines(streamlines, args.clustering_threshold,
                                                                args.removal_distance)
 
                     print("Total difference: {} / {}".format(len(original_streamlines), len(output_streamlines)))
