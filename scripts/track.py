@@ -875,6 +875,7 @@ def main():
 
     if args.save_rejected:
         rejected_tractogram = Tractogram()
+        rejected_tractogram.affine_to_rasmm = tractogram._affine_to_rasmm
 
     print("Generated {:,} (compressed) streamlines".format(nb_streamlines))
     with Timer("Cleaning streamlines", newline=True):
