@@ -232,10 +232,10 @@ def main():
         try:
             for tractometer_evaluation_name in os.listdir(tractometer_folder_path):
                 tractometer_evaluation_path = pjoin(tractometer_folder_path, tractometer_evaluation_name)
-                scores_dir = pjoin(tractometer_evaluation_path, "scores")
+                # scores_dir = pjoin(tractometer_evaluation_path, "scores")
 
-                if not os.path.isdir(scores_dir):
-                    continue
+                # if not os.path.isdir(scores_dir):
+                #     continue
 
                 try:
                     experiment = Experiment(tractometer_evaluation_path)
@@ -250,7 +250,7 @@ def main():
         except FileNotFoundError:
             try:
                 print("No tractometer results found, loading evaluation scores...")
-                experiment = Experiment(experiment_path)
+                experiment = Experiment(pjoin(experiment_path, 'dummy', 'dummy'))
                 experiments_results.append(extract_result_from_experiment(experiment))
             except FileNotFoundError:
                 print("Could not load experiment results from {}".format(experiment_path))
