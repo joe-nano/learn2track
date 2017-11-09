@@ -532,3 +532,25 @@ def subsample_streamlines(streamlines, clustering_threshold=6., removal_distance
         output_streamlines.extend(remove_similar_streamlines(temp_streamlines, removal_distance=removal_distance))
 
     return output_streamlines
+
+
+def get_neighborhood_directions(radius):
+    """ Returns predefined neighborhood directions at exactly `radius` length
+        For now: Use the 6 main axes as neighbors directions, plus (0,0,0) to keep current position
+
+    Parameters
+    ----------
+    radius : float
+        Distance to neighbors
+
+    Returns
+    -------
+    directions : ndarray with shape (n_directions, 3)
+
+    Notes
+    -----
+    Coordinates are in voxel-space
+    """
+    axes = np.identity(3)
+    directions = np.concatenate(([[0, 0, 0]], axes, -axes)) * radius
+    return directions

@@ -6,6 +6,7 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 from learn2track.models.gru_regression import GRU_Regression
 from learn2track.models.layers import LayerRegression
+from learn2track.neurotools import get_neighborhood_directions
 from learn2track.utils import logsumexp, softmax, l2distance
 
 floatX = theano.config.floatX
@@ -16,7 +17,7 @@ class GRU_Gaussian(GRU_Regression):
     """
 
     def __init__(self, volume_manager, input_size, hidden_sizes, output_size, use_previous_direction=False, use_layer_normalization=False, drop_prob=0.,
-                 use_zoneout=False, use_skip_connections=False, seed=1234, **_):
+                 use_zoneout=False, use_skip_connections=False, neighborhood_radius=False, seed=1234, **_):
         """
         Parameters
         ----------
@@ -38,9 +39,17 @@ class GRU_Gaussian(GRU_Regression):
             Use zoneout implementation instead of dropout
         use_skip_connections : bool
             Use skip connections from the input to all hidden layers in the network, and from all hidden layers to the output layer
+        neighborhood_radius : float
+            Add signal in positions around the current streamline coordinate to the input (with given length in voxel space); None = no neighborhood
         seed : int
             Random seed used for dropout normalization
         """
+        self.neighborhood_radius = neighborhood_radius
+        if self.neighborhood_radius:
+            self.neighborhood_directions = get_neighborhood_directions(self.neighborhood_radius)
+            # Update new input_size
+            input_size = input_size * self.neighborhood_directions.shape[0]
+
         super(GRU_Regression, self).__init__(input_size, hidden_sizes, use_layer_normalization=use_layer_normalization, drop_prob=drop_prob,
                                              use_zoneout=use_zoneout, use_skip_connections=use_skip_connections, seed=seed)
         self.volume_manager = volume_manager
@@ -62,8 +71,6 @@ class GRU_Gaussian(GRU_Regression):
     @property
     def hyperparameters(self):
         hyperparameters = super().hyperparameters
-        hyperparameters['layer_regression_size'] = self.layer_regression_size
-        hyperparameters['use_previous_direction'] = self.use_previous_direction
         return hyperparameters
 
     @staticmethod
