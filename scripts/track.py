@@ -959,7 +959,7 @@ def main():
             if args.dilate_mask:
                 mask_type += "D"
 
-            filename_items = ["{}_",
+            filename_items = ["{}",
                               # "seed-{}",
                               # "mask-{}",
                               "step-{:.2f}mm",
