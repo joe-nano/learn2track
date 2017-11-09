@@ -20,7 +20,7 @@ from smartlearner.direction_modifiers import DirectionClipping
 
 
 from learn2track import utils
-from learn2track.utils import Timer
+from learn2track.utils import Timer, get_model_architecture
 from learn2track.factories import WEIGHTS_INITIALIZERS, weigths_initializer_factory, batch_scheduler_factory, ACTIVATION_FUNCTIONS
 from learn2track.factories import optimizer_factory
 from learn2track.factories import model_factory
@@ -341,7 +341,9 @@ def main():
 
         batch_scheduler = batch_scheduler_factory(hyperparams, dataset=trainset, train_mode=True)
         print("An epoch will be composed of {} updates.".format(batch_scheduler.nb_updates_per_epoch))
-        print(trainset_volume_manager.data_dimension, args.hidden_sizes, batch_scheduler.target_size)
+
+        print("Volume data dimensions: {}".format(trainset_volume_manager.data_dimension))
+        print("Target dimensions: {}".format(batch_scheduler.target_size))
 
     with Timer("Creating model"):
         input_size = trainset_volume_manager.data_dimension
@@ -354,6 +356,8 @@ def main():
                               volume_manager=trainset_volume_manager)
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
+
+        print("Network architecture: ", *get_model_architecture(model))
 
     with Timer("Building optimizer"):
         loss = loss_factory(hyperparams, model, trainset)
