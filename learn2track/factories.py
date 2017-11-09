@@ -183,10 +183,10 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
     elif hyperparams['model'] == 'gru_regression':
         if loss_type == "l2_mean" or loss_type is None:
             from learn2track.models.gru_regression import L2DistanceForSequences
-            return L2DistanceForSequences(model, dataset)
+            return L2DistanceForSequences(model, dataset, normalize_output=hyperparams['normalize'])
         elif loss_type == "l2_sum":
             from learn2track.models.gru_regression import L2DistanceForSequences
-            return L2DistanceForSequences(model, dataset, sum_over_timestep=True)
+            return L2DistanceForSequences(model, dataset, sum_over_timestep=True, normalize_output=hyperparams['normalize'])
         else:
             raise ValueError("loss_type not available for gru_regression: {}".format(loss_type))
 
