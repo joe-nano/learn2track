@@ -162,3 +162,14 @@ def maybe_create_experiment_folder(args, exclude=[], retrocompatibility_defaults
         smartutils.save_dict_to_json_file(pjoin(experiment_path, "hyperparams.json"), hyperparams)
 
     return experiment_path, hyperparams, resuming
+
+
+def get_model_architecture(model):
+    input_size = model.input_size
+    hidden_sizes = model.hidden_sizes
+    output_size = model.output_size
+
+    if hasattr(model, "layer_regression_size"):
+        output_size = model.layer_regression_size
+
+    return input_size, hidden_sizes, output_size
