@@ -49,13 +49,17 @@ class GRU_Mixture(GRU_Regression):
             Random seed used for dropout normalization
         """
         self.neighborhood_radius = neighborhood_radius
+        self.model_input_size = input_size
         if self.neighborhood_radius:
             self.neighborhood_directions = get_neighborhood_directions(self.neighborhood_radius)
-            # Update new input_size
-            input_size = input_size * self.neighborhood_directions.shape[0]
+            # Model input size is increased when using neighborhood
+            self.model_input_size = input_size * self.neighborhood_directions.shape[0]
 
-        super(GRU_Regression, self).__init__(input_size, hidden_sizes, activation=activation, use_layer_normalization=use_layer_normalization,
+        super(GRU_Regression, self).__init__(self.model_input_size, hidden_sizes, activation=activation, use_layer_normalization=use_layer_normalization,
                                              drop_prob=drop_prob, use_zoneout=use_zoneout, use_skip_connections=use_skip_connections, seed=seed)
+        # Restore input size
+        self.input_size = input_size
+
         self.volume_manager = volume_manager
         self.n_gaussians = n_gaussians
 
