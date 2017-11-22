@@ -112,6 +112,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                               drop_prob=hyperparams['drop_prob'],
                               use_zoneout=hyperparams['use_zoneout'],
                               use_skip_connections=hyperparams['skip_connections'],
+                              neighborhood_radius=hyperparams['neighborhood_radius'],
                               seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'gru_multistep':
@@ -141,6 +142,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                            drop_prob=hyperparams['drop_prob'],
                            use_zoneout=hyperparams['use_zoneout'],
                            use_skip_connections=hyperparams['skip_connections'],
+                           neighborhood_radius=hyperparams['neighborhood_radius'],
                            seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'gru_gaussian':
@@ -154,6 +156,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                             drop_prob=hyperparams['drop_prob'],
                             use_zoneout=hyperparams['use_zoneout'],
                             use_skip_connections=hyperparams['skip_connections'],
+                            neighborhood_radius=hyperparams['neighborhood_radius'],
                             seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'ffnn_regression':
@@ -168,6 +171,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                                use_layer_normalization=hyperparams['use_layer_normalization'],
                                dropout_prob=hyperparams['dropout_prob'],
                                use_skip_connections=hyperparams['skip_connections'],
+                               neighborhood_radius=hyperparams['neighborhood_radius'],
                                seed=hyperparams['seed'])
 
     else:

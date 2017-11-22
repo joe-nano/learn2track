@@ -6,6 +6,7 @@ from smartlearner.interfaces.loss import Loss
 
 from learn2track.models import FFNN
 from learn2track.models.layers import LayerDense
+from learn2track.neurotools import get_neighborhood_directions
 from learn2track.utils import l2distance
 
 floatX = theano.config.floatX
@@ -16,7 +17,7 @@ class FFNN_Regression(FFNN):
     """
 
     def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation, use_previous_direction=False, predict_offset=False,
-                 use_layer_normalization=False, dropout_prob=0., seed=1234, **_):
+                 use_layer_normalization=False, dropout_prob=0., neighborhood_radius=False, seed=1234, **_):
         """
         Parameters
         ----------
@@ -38,10 +39,23 @@ class FFNN_Regression(FFNN):
             Use LayerNormalization to normalize preactivations
         dropout_prob : float
             Dropout probability for recurrent networks. See: https://arxiv.org/pdf/1512.05287.pdf
+        neighborhood_radius : float
+            Add signal in positions around the current streamline coordinate to the input (with given length in voxel space); None = no neighborhood
         seed : int
             Random seed used for dropout normalization
         """
-        super().__init__(input_size, hidden_sizes, activation, use_layer_normalization, dropout_prob, seed)
+        self.neighborhood_radius = neighborhood_radius
+        self.model_input_size = input_size
+        if self.neighborhood_radius:
+            self.neighborhood_directions = get_neighborhood_directions(self.neighborhood_radius)
+            # Model input size is increased when using neighborhood
+            self.model_input_size = input_size * self.neighborhood_directions.shape[0]
+
+        super().__init__(self.model_input_size, hidden_sizes, activation=activation, use_layer_normalization=use_layer_normalization, dropout_prob=dropout_prob,
+                         seed=seed)
+        # Restore input size
+        self.input_size = input_size
+
         self.volume_manager = volume_manager
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction
@@ -67,6 +81,7 @@ class FFNN_Regression(FFNN):
         hyperparameters['output_size'] = self.output_size
         hyperparameters['use_previous_direction'] = self.use_previous_direction
         hyperparameters['predict_offset'] = self.predict_offset
+        hyperparameters['neighborhood_radius'] = self.neighborhood_radius
         return hyperparameters
 
     @property
@@ -80,11 +95,22 @@ class FFNN_Regression(FFNN):
         # coords : streamlines 3D coordinates.
         # coords.shape : (batch_size, 4) where the last column is a dwi ID.
         # args.shape : n_layers * (batch_size, layer_size)
+        batch_size = Xi.shape[0]
         coords = Xi[:, :4]
+
+        # Repeat coords and apply the neighborhood transformations
+        if self.neighborhood_radius:
+            # coords.shape : (batch_size*len(neighbors_positions), 4)
+            coords = T.repeat(coords, self.neighborhood_directions.shape[0], axis=0)
+            coords = T.set_subtensor(coords[:, :3], coords[:, :3] + T.tile(self.neighborhood_directions, (batch_size, 1)))
 
         # Get diffusion data.
         # data_at_coords.shape : (batch_size, input_size)
         data_at_coords = self.volume_manager.eval_at_coords(coords)
+
+        # Concatenate back the neighborhood data into a single input vector
+        if self.neighborhood_radius:
+            data_at_coords = T.reshape(data_at_coords, (batch_size, self.model_input_size))
 
         if self.use_previous_direction:
             # previous_direction.shape : (batch_size, 3)
