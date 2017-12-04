@@ -167,7 +167,7 @@ def make_is_outside_mask(mask, affine, threshold=0):
     -------
     function
     """
-    def _is_outside_mask(streamlines):
+    def _is_outside_mask(streamlines, *args):
         """
         Parameters
         ----------
@@ -203,7 +203,7 @@ def make_is_too_long(max_length):
     That's what she said!
     """
 
-    def _is_too_long(streamlines):
+    def _is_too_long(streamlines, *args):
         """
         Parameters
         ----------
@@ -239,7 +239,7 @@ def make_is_too_curvy(max_theta):
     """
     max_theta = np.deg2rad(max_theta)  # Internally use radian.
 
-    def _is_too_curvy(streamlines):
+    def _is_too_curvy(streamlines, *args):
         """
         Parameters
         ----------
@@ -269,6 +269,38 @@ def make_is_too_curvy(max_theta):
     return _is_too_curvy
 
 
+def make_is_unlikely(likelihood_threshold):
+    """ Makes a function that checks which streamlines have a likelihood above the given threshold.
+
+    Parameters
+    ----------
+    likelihood_threshold : float
+        Minimum likelihood that streamlines must have
+
+    Returns
+    -------
+    function
+    """
+
+    def _is_unlikely(streamlines, growing_likelihood):
+        """
+        Parameters
+        ----------
+        streamlines : 3D array of shape (n_streamlines, n_points, 3)
+            Streamlines information.
+        growing_likelihood : 2D array of shape (n_streamlines, 1)
+            Likelihood for all streamlines
+
+        Returns
+        -------
+        unlikely : 1D array of shape (n_streamlines,)
+            Array telling wheter a streamline is unlikely or not.
+        """
+        return growing_likelihood[:, 0] < likelihood_threshold
+
+    return _is_unlikely
+
+
 def make_is_stopping(stopping_criteria):
     """ Makes a function that checks which streamlines should we stop tracking.
 
@@ -281,12 +313,14 @@ def make_is_stopping(stopping_criteria):
         which streamlines should be stopped..
     """
 
-    def _is_stopping(streamlines, to_check=None):
+    def _is_stopping(streamlines, stopping_likelihood, to_check=None):
         """
         Parameters
         ----------
         streamlines : 3D array of shape (n_streamlines, n_points, 3)
             Streamlines coordinates.
+        stopping_likelihood : 2D array of shape (n_streamlines, 1)
+            Stopping likelihood for all streamlines
         to_check : 1D array, optional
             Only check specific streamlines.
             If array of bool, check only streamlines marked as True.
@@ -314,7 +348,7 @@ def make_is_stopping(stopping_criteria):
         undone = np.ones(len(idx), dtype=bool)
         flags = np.zeros(len(idx), dtype=np.uint8)
         for flag, stopping_criterion in stopping_criteria.items():
-            done = stopping_criterion(streamlines[idx])
+            done = stopping_criterion(streamlines[idx], stopping_likelihood[idx])
             undone[done] = False
             flags[done] |= flag
 
@@ -336,6 +370,7 @@ def rotate(directions, axis, degree=180):
 class Tracker(object):
     def __init__(self, model, is_stopping, keep_last_n_states=1, use_max_component=False, flip_x=False, flip_y=False, flip_z=False, compress_streamlines=False):
         self.model = model
+        self.learn_to_stop = model.learn_to_stop
         self._is_stopping = is_stopping
         self.grower = model.make_sequence_generator(use_max_component=use_max_component)
         self.keep_last_n_states = max(keep_last_n_states, 1)
@@ -358,15 +393,15 @@ class Tracker(object):
 
         self._states = values.copy()
 
-    def is_stopping(self, sprouts):
-        undone, done, stopping_flags = self._is_stopping(sprouts)
+    def is_stopping(self, sprouts, sprouts_stop):
+        undone, done, stopping_flags = self._is_stopping(sprouts, sprouts_stop)
         return undone, done, stopping_flags
 
     def is_ripe(self):
         return len(self.sprouts) == 0
 
     def get(self, flag):
-        _, done, stopping_flags = self.is_stopping(self.sprouts)
+        _, done, stopping_flags = self.is_stopping(self.sprouts, self.sprouts_stop)
         return done[(stopping_flags & flag) != 0]
 
     def plant(self, seeds):
@@ -374,6 +409,7 @@ class Tracker(object):
             seeds = seeds[:, None, :]
 
         self.sprouts = seeds.copy()
+        self.sprouts_stop = np.ones((self.sprouts.shape[0], 1))
         self._states = self.model.get_init_states(batch_size=len(seeds))
 
     def _grow_step(self, sprouts, states, step_size):
@@ -387,7 +423,14 @@ class Tracker(object):
         previous_direction = previous_direction / np.sqrt(np.sum(previous_direction ** 2, axis=1, keepdims=True) + 1e-6)
 
         # Get next unnormalized directions
-        directions, new_states = self.grower(x_t=sprouts[:, -1, :], states=states, previous_direction=previous_direction)
+        outputs, new_states = self.grower(x_t=sprouts[:, -1, :], states=states, previous_direction=previous_direction)
+
+        if self.learn_to_stop:
+            directions, stopping = outputs
+        else:
+            directions = outputs
+            stopping = np.ones((directions.shape[0], 1))
+
         if self.flip_x:
             directions[:, 0] *= -1
         if self.flip_y:
@@ -402,14 +445,15 @@ class Tracker(object):
 
         # Take a step i.e. it's growing!
         new_sprouts = np.concatenate([sprouts, sprouts[:, [-1], :] + directions[:, None, :]], axis=1)
-        return new_sprouts, new_states
+        return new_sprouts, stopping, new_states
 
     def grow(self, step_size):
-        self.sprouts, self.states = self._grow_step(self.sprouts, self.states, step_size)
+        self.sprouts, self.sprouts_stop, self.states = self._grow_step(self.sprouts, self.states, step_size)
 
     def _keep(self, idx):
         # Update remaining sprouts and their states.
         self.sprouts = self.sprouts[idx]
+        self.sprouts_stop = self.sprouts_stop[idx]
         self._states = [s[idx] for s in self._states]
 
         # Rewrite history
@@ -417,7 +461,7 @@ class Tracker(object):
             self._history[i] = [s[idx] for s in state]
 
     def harvest(self):
-        undone, done, stopping_flags = self.is_stopping(self.sprouts)
+        undone, done, stopping_flags = self.is_stopping(self.sprouts, self.sprouts_stop)
 
         # Do not keep last point since it almost surely raised the stopping flag.
         streamlines = list(self.sprouts[done, :-1])
@@ -439,6 +483,7 @@ class Tracker(object):
 
         # Get sprouts that needs regrowing.
         sprouts = self.sprouts[idx, :-backtrack_n_steps]
+        stopping = np.ones((sprouts.shape[0], 1))
         states = [s[idx] for s in self._history[-backtrack_n_steps]]
         idx_to_keep = np.arange(len(sprouts))
 
@@ -449,10 +494,11 @@ class Tracker(object):
                 return 0
 
             local_history += [states]
-            sprouts, states = self._grow_step(sprouts, states, step_size)
+            sprouts, stopping, states = self._grow_step(sprouts, states, step_size)
 
-            undone, _, _ = self.is_stopping(sprouts)
+            undone, _, _ = self.is_stopping(sprouts, stopping)
             sprouts = sprouts[undone]
+            stopping = stopping[undone]
             states = [s[undone] for s in states]
             idx_to_keep = idx_to_keep[undone]
 
@@ -462,6 +508,7 @@ class Tracker(object):
 
         # Update original sprouts and their states.
         self.sprouts[idx[idx_to_keep]] = sprouts
+        self.sprouts_stop[idx[idx_to_keep]] = stopping
         for i, state in enumerate(self._states):
             self._states[i][idx[idx_to_keep]] = states[i]
 
@@ -498,17 +545,20 @@ class PeterTracker(Tracker):
         directions = rotate(predicted_directions, axis=previous_directions, degree=180)
 
         sprouts = np.concatenate([sprouts, sprouts[:, [-1], :] + directions[:, None, :]], axis=1)
+        stopping = np.ones((sprouts.shape[0], 1))
         # TODO: need to update the state of RNN-like models.
         states = self.states
         # sprouts, states = self._grow_step(sprouts, states, step_size)
 
-        undone, _, _ = self.is_stopping(sprouts)
+        undone, _, _ = self.is_stopping(sprouts, stopping)
         sprouts = sprouts[undone]
+        stopping = stopping[undone]
         states = [s[undone] for s in states]
         idx_to_keep = idx_to_keep[undone]
 
         # Update original sprouts and their states.
         self.sprouts[idx[idx_to_keep]] = sprouts
+        self.sprouts_stop[idx[idx_to_keep]] = stopping
         for i, state in enumerate(self._states):
             self._states[i][idx[idx_to_keep]] = states[i]
 
@@ -522,8 +572,8 @@ class BackwardTracker(Tracker):
         self.sprouts = np.asarray([s[0] for s in seeds])[:, None, :]
         self._states = self.model.get_init_states(batch_size=len(seeds))
 
-    def is_stopping(self, sprouts):
-        undone, done, stopping_flags = self._is_stopping(sprouts)
+    def is_stopping(self, sprouts, sprouts_stop):
+        undone, done, stopping_flags = self._is_stopping(sprouts, sprouts_stop)
 
         # Ignore sprouts that haven't finished initializing.
         init_undone = self.nb_init_steps >= self.sprouts.shape[1]
@@ -538,15 +588,17 @@ class BackwardTracker(Tracker):
         return undone, done, stopping_flags
 
     def grow(self, step_size):
-        new_sprouts, self.states = self._grow_step(self.sprouts, self.states, step_size)
+        new_sprouts, stopping, self.states = self._grow_step(self.sprouts, self.states, step_size)
 
         # Only update sprouts once they are done initializing.
         # However always update their states.
         init_undone = self.nb_init_steps >= new_sprouts.shape[1]
         if np.any(init_undone):
             new_sprouts[init_undone, -1] = [s[new_sprouts.shape[1]-1] for s, undone in zip(self.seeds, init_undone) if undone]
+            stopping[init_undone, -1] = 1.
 
         self.sprouts = new_sprouts
+        self.sprouts_stop = stopping
 
     def regrow(self, idx, step_size, backtrack_n_steps):
         init_done = self.nb_init_steps < self.sprouts.shape[1]
@@ -648,9 +700,11 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
                                          nb_retry=nb_retry, nb_backtrack_steps=nb_backtrack_steps, verbose=args.verbose)
 
                 stopping_flags = batch_tractogram.data_per_streamline['stopping_flags'].astype(np.uint8)
-                print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
-                                                                                                        count_flags(stopping_flags, STOPPING_CURVATURE),
-                                                                                                        count_flags(stopping_flags, STOPPING_LENGTH)))
+                print("Forward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}\t likelihood: {:,}".format(
+                    count_flags(stopping_flags, STOPPING_MASK),
+                    count_flags(stopping_flags, STOPPING_CURVATURE),
+                    count_flags(stopping_flags, STOPPING_LENGTH),
+                    count_flags(stopping_flags, STOPPING_LIKELIHOOD)))
 
                 # Backward tracking
                 tracker = BackwardTrackerCls(model, is_stopping, args.pft_nb_backtrack_steps, args.use_max_component,
@@ -660,9 +714,11 @@ def batch_track(model, dwi, seeds, step_size, batch_size, is_stopping, args):
                                          nb_retry=nb_retry, nb_backtrack_steps=nb_backtrack_steps, verbose=args.verbose)
 
                 stopping_flags = batch_tractogram.data_per_streamline['stopping_flags'].astype(np.uint8)
-                print("Backward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}".format(count_flags(stopping_flags, STOPPING_MASK),
-                                                                                                         count_flags(stopping_flags, STOPPING_CURVATURE),
-                                                                                                         count_flags(stopping_flags, STOPPING_LENGTH)))
+                print("Backward pass stopped because of - mask: {:,}\t curv: {:,}\t length: {:,}\t likelihood: {:,}".format(
+                    count_flags(stopping_flags, STOPPING_MASK),
+                    count_flags(stopping_flags, STOPPING_CURVATURE),
+                    count_flags(stopping_flags, STOPPING_LENGTH),
+                    count_flags(stopping_flags, STOPPING_LIKELIHOOD)))
 
                 if tractogram is None:
                     tractogram = batch_tractogram
@@ -854,9 +910,11 @@ def main():
         is_outside_mask = make_is_outside_mask(mask, affine_maskvox2dwivox, threshold=args.mask_threshold)
         is_too_long = make_is_too_long(max_nb_points)
         is_too_curvy = make_is_too_curvy(np.rad2deg(theta))
+        is_unlikely = make_is_unlikely(0.5)
         is_stopping = make_is_stopping({STOPPING_MASK: is_outside_mask,
                                         STOPPING_LENGTH: is_too_long,
-                                        STOPPING_CURVATURE: is_too_curvy})
+                                        STOPPING_CURVATURE: is_too_curvy,
+                                        STOPPING_LIKELIHOOD: is_unlikely})
 
         is_stopping.max_nb_points = max_nb_points  # Small hack
 

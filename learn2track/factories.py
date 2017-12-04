@@ -92,14 +92,8 @@ def optimizer_factory(hyperparams, loss):
 
 
 def model_factory(hyperparams, input_size, output_size, volume_manager):
-    if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
-        raise NotImplementedError()
-        # from learn2track.models import GRU_RegressionAndBinaryClassification
-        # return GRU_RegressionAndBinaryClassification(batch_scheduler.input_size,
-        #                                              hyperparams['hidden_sizes'],
-        #                                              batch_scheduler.target_size)
 
-    elif hyperparams['model'] == 'gru_regression':
+    if hyperparams['model'] == 'gru_regression':
         from learn2track.models import GRU_Regression
         return GRU_Regression(volume_manager=volume_manager,
                               input_size=input_size,
@@ -113,6 +107,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                               use_zoneout=hyperparams['use_zoneout'],
                               use_skip_connections=hyperparams['skip_connections'],
                               neighborhood_radius=hyperparams['neighborhood_radius'],
+                              learn_to_stop=hyperparams['learn_to_stop'],
                               seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'gru_multistep':
@@ -179,18 +174,18 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
 
 
 def loss_factory(hyperparams, model, dataset, loss_type=None):
-    if hyperparams['model'] == 'gru_regression' and hyperparams['learn_to_stop']:
-        raise NotImplementedError()
-        # from learn2track.models.gru_regression_and_binary_classification import L2DistancePlusBinaryCrossEntropy
-        # return L2DistancePlusBinaryCrossEntropy(model, dataset, normalize_output=hyperparams["normalize"])
+    if hyperparams['model'] == 'gru_regression':
+        if hyperparams['learn_to_stop']:
+            from learn2track.models.gru_regression import L2DistanceAndStoppingCriteriaForSequences
+            loss_class = L2DistanceAndStoppingCriteriaForSequences
+        else:
+            from learn2track.models.gru_regression import L2DistanceForSequences
+            loss_class = L2DistanceForSequences
 
-    elif hyperparams['model'] == 'gru_regression':
         if loss_type == "l2_mean" or loss_type is None:
-            from learn2track.models.gru_regression import L2DistanceForSequences
-            return L2DistanceForSequences(model, dataset, normalize_output=hyperparams['normalize'])
+            return loss_class(model, dataset, normalize_output=hyperparams['normalize'])
         elif loss_type == "l2_sum":
-            from learn2track.models.gru_regression import L2DistanceForSequences
-            return L2DistanceForSequences(model, dataset, sum_over_timestep=True, normalize_output=hyperparams['normalize'])
+            return loss_class(model, dataset, sum_over_timestep=True, normalize_output=hyperparams['normalize'])
         else:
             raise ValueError("loss_type not available for gru_regression: {}".format(loss_type))
 
@@ -275,7 +270,8 @@ def batch_scheduler_factory(hyperparams, dataset, train_mode=True, batch_size_ov
                                           shuffle_streamlines=train_mode,
                                           resample_streamlines=(not hyperparams['keep_step_size']) and train_mode,
                                           feed_previous_direction=hyperparams['feed_previous_direction'],
-                                          sort_streamlines_by_length=hyperparams['sort_streamlines'] and train_mode)
+                                          sort_streamlines_by_length=hyperparams['sort_streamlines'] and train_mode,
+                                          learn_to_stop=hyperparams['learn_to_stop'])
 
     elif hyperparams['model'] == 'gru_multistep':
         from learn2track.batch_schedulers import MultistepSequenceBatchScheduler
