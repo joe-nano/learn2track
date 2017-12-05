@@ -361,7 +361,7 @@ def main():
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
 
-        print("Network architecture: ", *get_model_architecture(model))
+        print("Network architecture: ", get_model_architecture(model))
 
     with Timer("Building optimizer"):
         loss = loss_factory(hyperparams, model, trainset)

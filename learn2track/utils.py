@@ -165,11 +165,19 @@ def maybe_create_experiment_folder(args, exclude=[], retrocompatibility_defaults
 
 
 def get_model_architecture(model):
-    input_size = model.input_size
-    hidden_sizes = model.hidden_sizes
-    output_size = model.output_size
 
-    if hasattr(model, "layer_regression_size"):
-        output_size = model.layer_regression_size
+    model_architecture = []
+    for layer in model.layers:
+        model_architecture.append(get_layer_architecture(layer))
 
-    return input_size, hidden_sizes, output_size
+    if hasattr(model, "layer_regression"):
+        model_architecture.append(["layer_regression"] + get_layer_architecture(model.layer_regression))
+
+    if hasattr(model, "layer_stopping"):
+        model_architecture.append(["layer stopping"] + get_layer_architecture(model.layer_stopping))
+
+    return model_architecture
+
+
+def get_layer_architecture(layer):
+    return [layer.__class__.__name__, layer.input_size, layer.hidden_size, layer.activation]
