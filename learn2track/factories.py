@@ -138,6 +138,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                            use_zoneout=hyperparams['use_zoneout'],
                            use_skip_connections=hyperparams['skip_connections'],
                            neighborhood_radius=hyperparams['neighborhood_radius'],
+                           learn_to_stop=hyperparams['learn_to_stop'],
                            seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'gru_gaussian':
@@ -152,6 +153,7 @@ def model_factory(hyperparams, input_size, output_size, volume_manager):
                             use_zoneout=hyperparams['use_zoneout'],
                             use_skip_connections=hyperparams['skip_connections'],
                             neighborhood_radius=hyperparams['neighborhood_radius'],
+                            learn_to_stop=hyperparams['learn_to_stop'],
                             seed=hyperparams['seed'])
 
     elif hyperparams['model'] == 'ffnn_regression':
@@ -203,14 +205,20 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         if loss_type == 'expected_value' or loss_type == 'maximum_component':
             from learn2track.models.gru_gaussian import GaussianExpectedValueL2Distance
             return GaussianExpectedValueL2Distance(model, dataset)
-        elif loss_type == "nll_sum":
-            from learn2track.models.gru_gaussian import GaussianNLL
-            return GaussianNLL(model, dataset, sum_over_timestep=True)
-        elif loss_type is None:
-            from learn2track.models.gru_gaussian import GaussianNLL
-            return GaussianNLL(model, dataset)
         else:
-            raise ValueError("Unrecognized loss_type: {}".format(loss_type))
+            if hyperparams['learn_to_stop']:
+                from learn2track.models.gru_gaussian import GaussianNLLAndStoppingCriteria
+                loss_class = GaussianNLLAndStoppingCriteria
+            else:
+                from learn2track.models.gru_gaussian import GaussianNLL
+                loss_class = GaussianNLL
+
+            if loss_type == "nll_sum":
+                return loss_class(model, dataset, sum_over_timestep=True)
+            elif loss_type is None:
+                return loss_class(model, dataset)
+            else:
+                raise ValueError("Unrecognized loss_type: {}".format(loss_type))
 
     elif hyperparams['model'] == 'gru_mixture':
         if loss_type == 'expected_value':
@@ -219,14 +227,20 @@ def loss_factory(hyperparams, model, dataset, loss_type=None):
         elif loss_type == 'maximum_component':
             from learn2track.models.gru_mixture import MultivariateGaussianMixtureMaxComponentL2Distance
             return MultivariateGaussianMixtureMaxComponentL2Distance(model, dataset)
-        elif loss_type is None or loss_type == "nll_mean":
-            from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
-            return MultivariateGaussianMixtureNLL(model, dataset)
-        elif loss_type == "nll_sum":
-            from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
-            return MultivariateGaussianMixtureNLL(model, dataset, sum_over_timestep=True)
         else:
-            raise ValueError("Unrecognized loss_type: {}".format(loss_type))
+            if hyperparams['learn_to_stop']:
+                from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLLAndStoppingCriteria
+                loss_class = MultivariateGaussianMixtureNLLAndStoppingCriteria
+            else:
+                from learn2track.models.gru_mixture import MultivariateGaussianMixtureNLL
+                loss_class = MultivariateGaussianMixtureNLL
+
+            if loss_type is None or loss_type == "nll_mean":
+                return loss_class(model, dataset)
+            elif loss_type == "nll_sum":
+                return loss_class(model, dataset, sum_over_timestep=True)
+            else:
+                raise ValueError("Unrecognized loss_type: {}".format(loss_type))
 
     elif hyperparams['model'] == 'ffnn_regression':
         if loss_type == 'expected_value':

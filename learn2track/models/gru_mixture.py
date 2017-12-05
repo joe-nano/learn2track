@@ -5,7 +5,7 @@ from smartlearner.interfaces import Loss
 from theano.sandbox.rng_mrg import MRG_RandomStreams
 
 from learn2track.models.gru_regression import GRU_Regression
-from learn2track.models.layers import LayerRegression
+from learn2track.models.layers import LayerRegression, LayerDense
 from learn2track.neurotools import get_neighborhood_directions
 from learn2track.utils import logsumexp, softmax, l2distance
 
@@ -17,7 +17,8 @@ class GRU_Mixture(GRU_Regression):
     """
 
     def __init__(self, volume_manager, input_size, hidden_sizes, output_size, n_gaussians, activation='tanh', use_previous_direction=False,
-                 use_layer_normalization=False, drop_prob=0., use_zoneout=False, use_skip_connections=False, neighborhood_radius=None, seed=1234, **_):
+                 use_layer_normalization=False, drop_prob=0., use_zoneout=False, use_skip_connections=False, neighborhood_radius=None, learn_to_stop=False,
+                 seed=1234, **_):
         """
         Parameters
         ----------
@@ -45,6 +46,8 @@ class GRU_Mixture(GRU_Regression):
             Use skip connections from the input to all hidden layers in the network, and from all hidden layers to the output layer
         neighborhood_radius : float
             Add signal in positions around the current streamline coordinate to the input (with given length in voxel space); None = no neighborhood
+        learn_to_stop : bool
+            Predict whether the streamline being generated should stop or not
         seed : int
             Random seed used for dropout normalization
         """
@@ -70,6 +73,7 @@ class GRU_Mixture(GRU_Regression):
 
         # GRU_Mixture does not predict a direction, so it cannot predict an offset
         self.predict_offset = False
+        self.learn_to_stop = learn_to_stop
 
         # Do not use dropout/zoneout in last hidden layer
         self.layer_regression_size = sum([n_gaussians,  # Mixture weights
@@ -77,6 +81,9 @@ class GRU_Mixture(GRU_Regression):
                                           n_gaussians * output_size])  # Stds
         output_layer_input_size = sum(self.hidden_sizes) if self.use_skip_connections else self.hidden_sizes[-1]
         self.layer_regression = LayerRegression(output_layer_input_size, self.layer_regression_size)
+        if self.learn_to_stop:
+            # Predict whether a streamline should stop or keep growing
+            self.layer_stopping = LayerDense(output_layer_input_size, 1, activation='sigmoid', name="GRU_Mixture_stopping")
 
     @property
     def hyperparameters(self):
@@ -146,13 +153,19 @@ class GRU_Mixture(GRU_Regression):
         mixture_params = self.get_mixture_parameters(regression_output, ndim=3)
 
         if use_max_component:
-            predictions = self._get_max_component_samples(*mixture_params)
+            samples = self._get_max_component_samples(*mixture_params)
         else:
             srng = MRG_RandomStreams(1234)
-            predictions = self._get_stochastic_samples(srng, *mixture_params)
+            samples = self._get_stochastic_samples(srng, *mixture_params)
+
+        if self.learn_to_stop:
+            stopping = new_states[-2]
+            predictions = [stopping, samples]
+        else:
+            predictions = [samples]
 
         f = theano.function(inputs=[symb_x_t] + states_h,
-                            outputs=[predictions] + list(new_states_h))
+                            outputs=list(predictions) + list(new_states_h))
 
         def _gen(x_t, states, previous_direction=None):
             """ Returns the prediction for x_{t+1} for every
@@ -184,9 +197,17 @@ class GRU_Mixture(GRU_Regression):
                 x_t = np.c_[x_t, subject_ids, previous_direction]
 
             results = f(x_t, *states)
-            next_x_t = results[0]
-            new_states = results[1:]
-            return next_x_t, new_states
+            if self.learn_to_stop:
+                stopping = results[0]
+                next_x_t = results[1]
+                new_states = results[2:]
+                output = (next_x_t, stopping)
+            else:
+                next_x_t = results[0]
+                new_states = results[1:]
+                output = next_x_t
+
+            return output, new_states
 
         return _gen
 
@@ -223,6 +244,61 @@ class MultivariateGaussianMixtureNLL(Loss):
 
         # loss_per_timestep.shape : (batch_size, seq_len)
         self.loss_per_time_step = -logsumexp(-0.5 * (log_prefix + square_mahalanobis_dist), axis=2)
+
+        # loss_per_seq.shape : (batch_size,)
+        # loss_per_seq is the log probability for each sequence
+        self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1)
+
+        if not self.sum_over_timestep:
+            # loss_per_seq is the average log probability for each sequence
+            self.loss_per_seq /= T.sum(mask, axis=1)
+
+        return self.loss_per_seq
+
+
+class MultivariateGaussianMixtureNLLAndStoppingCriteria(Loss):
+    """ Computes the likelihood of a multivariate gaussian mixture + stopping criteria cross-entropy
+    """
+
+    def __init__(self, model, dataset, sum_over_timestep=False, gamma=1.0):
+        super().__init__(model, dataset)
+        self.n = model.n_gaussians
+        self.d = model.output_size
+        self.sum_over_timestep = sum_over_timestep
+        self.gamma = gamma
+
+    def _get_updates(self):
+        return {}  # There is no updates for L2Distance.
+
+    def _compute_losses(self, model_output):
+        mask = self.dataset.symb_mask
+
+        # stopping_criteria_outputs.shape : (batch_size, seq_len)
+        stopping_criteria_outputs = model_output[0][:, :, 0]
+
+        # regression_outputs.shape : (batch_size, seq_len, regression_layer_size)
+        regression_outputs = model_output[1]
+
+        # mixture_weights.shape : (batch_size, seq_len, n_gaussians)
+        # means.shape : (batch_size, seq_len, n_gaussians, 3)
+        # stds.shape : (batch_size, seq_len, n_gaussians, 3)
+        mixture_weights, means, stds = self.model.get_mixture_parameters(regression_outputs, ndim=4)
+
+        # targets.shape : (batch_size, seq_len, 1, 3)
+        targets = self.dataset.symb_targets[:, :, None, :3]
+
+        # stopping_criteria_targets.shape : (batch_size, seq_len)
+        stopping_criteria_targets = self.dataset.symb_targets[:, :, 3]
+
+        log_prefix = -2 * T.log(mixture_weights) + self.d * np.float32(np.log(2*np.pi)) + 2 * T.sum(T.log(stds), axis=-1)
+        square_mahalanobis_dist = T.sum(T.square((targets - means) / stds), axis=-1)
+        gaussian_mixture_nll_per_time_step = -logsumexp(-0.5 * (log_prefix + square_mahalanobis_dist), axis=2)
+
+        stopping_cross_entropy_per_time_step = T.nnet.binary_crossentropy(stopping_criteria_outputs, stopping_criteria_targets)
+
+        # loss_per_timestep.shape : (batch_size, seq_len)
+        # self.gamma should be used to balance the two loss terms. Consider tweaking this hyperparameter if training goes wrong.
+        self.loss_per_time_step = gaussian_mixture_nll_per_time_step + self.gamma * stopping_cross_entropy_per_time_step
 
         # loss_per_seq.shape : (batch_size,)
         # loss_per_seq is the log probability for each sequence
