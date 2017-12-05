@@ -120,6 +120,8 @@ def extract_result_from_experiment(e):
     entry["Predict offset"] = e.hyperparams.get("predict_offset", "")
     entry["Use layer normalization"] = e.hyperparams.get("use_layer_normalization", "")
     entry["Use sh coeffs"] = e.hyperparams.get("use_sh_coeffs", "")
+    entry["Learn to stop"] = e.hyperparams.get("learn_to_stop", "")
+    entry["Neighborhood radius"] = e.hyperparams.get("neighborhood_radius", "")
     entry["Noise sigma"] = e.hyperparams.get("noisy_streamlines_sigma", "")
     entry["Drop prob"] = e.hyperparams.get("drop_prob", "")
     entry["Zoneout"] = e.hyperparams.get("use_zoneout", "")
