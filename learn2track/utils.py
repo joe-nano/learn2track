@@ -180,4 +180,13 @@ def get_model_architecture(model):
 
 
 def get_layer_architecture(layer):
-    return [layer.__class__.__name__, layer.input_size, layer.hidden_size, layer.activation]
+
+    layer_name = layer.__class__.__name__
+    in_size = layer.input_size
+    try:
+        out_size = layer.hidden_size
+    except AttributeError:
+        out_size = layer.output_size
+
+    act_name = layer.activation
+    return [layer_name, in_size, out_size, act_name]
