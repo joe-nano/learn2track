@@ -183,10 +183,16 @@ def get_layer_architecture(layer):
 
     layer_name = layer.__class__.__name__
     in_size = layer.input_size
+
+    # TODO: Add an uniform interface to all layers instead of hacking through attributes
     try:
         out_size = layer.hidden_size
     except AttributeError:
         out_size = layer.output_size
 
-    act_name = layer.activation
+    try:
+        act_name = layer.activation
+    except AttributeError:
+        act_name = "identity"
+
     return [layer_name, in_size, out_size, act_name]
