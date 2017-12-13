@@ -1018,6 +1018,7 @@ def main():
                 mask_type += "D"
 
             filename_items = ["{}",
+                              "useMaxComponent-{}",
                               # "seed-{}",
                               # "mask-{}",
                               "step-{:.2f}mm",
@@ -1029,10 +1030,10 @@ def main():
                               # "pftRetry-{}",
                               # "pftHist-{}",
                               # "trackLikePeter-{}",
-                              # "useMaxComponent-{}"
                               ]
             filename = ('_'.join(filename_items) + ".tck").format(
                 prefix,
+                args.use_max_component,
                 # seed_mask_type,
                 # mask_type,
                 args.step_size,
@@ -1043,8 +1044,7 @@ def main():
                 # args.min_length,
                 # args.pft_nb_retry,
                 # args.pft_nb_backtrack_steps,
-                # args.track_like_peter,
-                # args.use_max_component
+                # args.track_like_peter
                 )
 
         save_path = pjoin(experiment_path, filename)
@@ -1062,6 +1062,7 @@ def main():
             rejected_filename_items.insert(1, "rejected")
             rejected_filename = ('_'.join(rejected_filename_items) + ".tck").format(
                 prefix,
+                args.use_max_component,
                 # seed_mask_type,
                 # mask_type,
                 args.step_size,
@@ -1072,8 +1073,7 @@ def main():
                 # args.min_length,
                 # args.pft_nb_retry,
                 # args.pft_nb_backtrack_steps,
-                # args.track_like_peter,
-                # args.use_max_component
+                # args.track_like_peter
             )
 
         rejected_save_path = pjoin(experiment_path, rejected_filename)
