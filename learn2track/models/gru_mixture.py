@@ -114,7 +114,8 @@ class GRU_Mixture(GRU_Regression):
         sigma = stds[xs, choices]
 
         noise = srng.normal((batch_size, 3))
-        samples = mu + sigma * noise
+        # samples = mu + sigma * noise
+        samples = mu
 
         return samples
 
