@@ -16,7 +16,8 @@ class TractographyBatchScheduler(BatchScheduler):
     """ Batch scheduler for streamlines coming from multiple subjects. """
 
     def __init__(self, dataset, batch_size, noisy_streamlines_sigma=None, seed=1234, use_data_augment=True, normalize_target=False,
-                 shuffle_streamlines=True, resample_streamlines=True, feed_previous_direction=False, sort_streamlines_by_length=False):
+                 shuffle_streamlines=True, resample_streamlines=True, feed_previous_direction=False, sort_streamlines_by_length=False,
+                 learn_to_stop=False):
         """
         Parameters
         ----------
@@ -39,6 +40,8 @@ class TractographyBatchScheduler(BatchScheduler):
             Should the previous direction be appended to the input when making a prediction?
         sort_streamlines_by_length : bool
             Streamlines will be approximatively regrouped according to their length.
+        learn_to_stop : bool
+            Predict whether the streamline being generated should stop or not
         """
         self.dataset = dataset
         self.batch_size = batch_size
@@ -55,6 +58,7 @@ class TractographyBatchScheduler(BatchScheduler):
         self.resample_streamlines = resample_streamlines
         self.sort_streamlines_by_length = sort_streamlines_by_length
         self.feed_previous_direction = feed_previous_direction
+        self.learn_to_stop = learn_to_stop
 
         # Sort streamlines according to their length by default.
         # This should speed up validation.
@@ -134,19 +138,24 @@ class TractographyBatchScheduler(BatchScheduler):
         batch_masks = np.zeros((batch_size, max_streamline_length-1), dtype=floatX)
         batch_inputs = np.zeros((batch_size, max_streamline_length-1, inputs.shape[1]), dtype=floatX)
         batch_targets = np.zeros((batch_size, max_streamline_length-1, 3), dtype=floatX)
-        # batch_volume_ids = np.zeros((batch_size, max_streamline_length-1, 1), dtype=floatX)
+        if self.learn_to_stop:
+            batch_stopping = np.zeros((batch_size, max_streamline_length-1))
 
         for i, (offset, length, volume_id) in enumerate(zip(streamlines._offsets, streamlines._lengths, volume_ids)):
             batch_masks[i, :length-1] = 1
             batch_inputs[i, :length-1] = inputs[offset:offset+length-1]  # [0, 1, 2, 3, 4] => [0, 1, 2, 3]
             batch_targets[i, :length-1] = targets[offset:offset+length-1]  # [1-0, 2-1, 3-2, 4-3] => [1-0, 2-1, 3-2, 4-3]
-            # batch_volume_ids[i, :length-1] = volume_id
 
             if self.use_augment_by_flipping:
                 batch_masks[i+len(streamlines), :length-1] = 1
                 batch_inputs[i+len(streamlines), :length-1] = inputs[offset+1:offset+length][::-1]  # [0, 1, 2, 3, 4] => [4, 3, 2, 1]
                 batch_targets[i+len(streamlines), :length-1] = -targets[offset:offset+length-1][::-1]  # [1-0, 2-1, 3-2, 4-3] => [4-3, 3-2, 2-1, 1-0]
-                # batch_volume_ids[i+len(streamlines), :length-1] = volume_id
+
+            if self.learn_to_stop:
+                # Model predicts the likelihood that a streamline should keep growing. Targets start at 1.0 and decrease linearly to 0.5
+                # (confidence < 0.5 => stop streamline)
+                batch_stopping[i, :length-1] = np.linspace(1., 0.5, num=length-1)
+                batch_stopping[i+len(streamlines), :length - 1] = np.linspace(1., 0.5, num=length - 1)
 
         batch_volume_ids = np.tile(volume_ids[:, None, None], (1 + self.use_augment_by_flipping, max_streamline_length-1, 1))
         batch_inputs = np.concatenate([batch_inputs, batch_volume_ids], axis=2)  # Streamlines coords + dwi ID
@@ -155,6 +164,9 @@ class TractographyBatchScheduler(BatchScheduler):
             previous_directions = np.concatenate([np.zeros((batch_size, 1, 3), dtype=floatX), batch_targets[:, :-1]], axis=1)
             previous_directions = previous_directions / np.sqrt(np.sum(previous_directions ** 2, axis=2, keepdims=True) + 1e-6)  # Normalized directions
             batch_inputs = np.concatenate([batch_inputs, previous_directions], axis=2)  # Streamlines coords + dwi ID + previous direction
+
+        if self.learn_to_stop:
+            batch_targets = np.concatenate([batch_targets, batch_stopping[:, :, None]], axis=2)
 
         return batch_inputs, batch_targets, batch_masks
 
@@ -193,7 +205,7 @@ class TractographyBatchScheduler(BatchScheduler):
         return {}  # No updates
 
     def get_state(self):
-        state = {"version": 5,
+        state = {"version": 6,
                  "batch_size": self.batch_size,
                  "noisy_streamlines_sigma": self.noisy_streamlines_sigma,
                  "use_augment_by_flipping": self.use_augment_by_flipping,
@@ -205,7 +217,8 @@ class TractographyBatchScheduler(BatchScheduler):
                  "rng": pickle.dumps(self.rng),
                  "rng_noise": pickle.dumps(self.rng_noise),
                  "indices": self.indices,
-                 "sort_streamlines_by_length": self.sort_streamlines_by_length
+                 "sort_streamlines_by_length": self.sort_streamlines_by_length,
+                 "learn_to_stop": self.learn_to_stop
                  }
         return state
 
@@ -234,6 +247,9 @@ class TractographyBatchScheduler(BatchScheduler):
             self.sort_streamlines_by_length = False
         else:
             self.sort_streamlines_by_length = state["sort_streamlines_by_length"]
+
+        if state["version"] >= 6:
+            self.learn_to_stop = state["learn_to_stop"]
 
     def save(self, savedir):
         state = self.get_state()

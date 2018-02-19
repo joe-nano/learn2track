@@ -17,7 +17,8 @@ class GRU_Regression(GRU):
     """
 
     def __init__(self, volume_manager, input_size, hidden_sizes, output_size, activation='tanh', use_previous_direction=False, predict_offset=False,
-                 use_layer_normalization=False, drop_prob=0., use_zoneout=False, use_skip_connections=False, neighborhood_radius=None, seed=1234, **_):
+                 use_layer_normalization=False, drop_prob=0., use_zoneout=False, use_skip_connections=False, neighborhood_radius=None,
+                 learn_to_stop=False, seed=1234, **_):
         """
         Parameters
         ----------
@@ -45,6 +46,8 @@ class GRU_Regression(GRU):
             Use skip connections from the input to all hidden layers in the network, and from all hidden layers to the output layer
         neighborhood_radius : float
             Add signal in positions around the current streamline coordinate to the input (with given length in voxel space); None = no neighborhood
+        learn_to_stop : bool
+            Predict whether the streamline being generated should stop or not
         seed : int
             Random seed used for dropout normalization
         """
@@ -64,6 +67,7 @@ class GRU_Regression(GRU):
         self.output_size = output_size
         self.use_previous_direction = use_previous_direction
         self.predict_offset = predict_offset
+        self.learn_to_stop = learn_to_stop
 
         if self.predict_offset:
             assert self.use_previous_direction  # Need previous direction to predict offset.
@@ -72,10 +76,15 @@ class GRU_Regression(GRU):
         layer_regression_activation = "tanh" if self.predict_offset else "identity"
         output_layer_input_size = sum(self.hidden_sizes) if self.use_skip_connections else self.hidden_sizes[-1]
         self.layer_regression = LayerDense(output_layer_input_size, self.output_size, activation=layer_regression_activation, name="GRU_Regression")
+        if self.learn_to_stop:
+            # Predict whether a streamline should stop or keep growing
+            self.layer_stopping = LayerDense(output_layer_input_size, 1, activation='sigmoid', name="GRU_Regression_stopping")
 
     def initialize(self, weights_initializer=initer.UniformInitializer(1234)):
         super().initialize(weights_initializer)
         self.layer_regression.initialize(weights_initializer)
+        if self.learn_to_stop:
+            self.layer_stopping.initialize(weights_initializer)
 
     @property
     def hyperparameters(self):
@@ -84,11 +93,16 @@ class GRU_Regression(GRU):
         hyperparameters['use_previous_direction'] = self.use_previous_direction
         hyperparameters['predict_offset'] = self.predict_offset
         hyperparameters['neighborhood_radius'] = self.neighborhood_radius
+        hyperparameters['learn_to_stop'] = self.learn_to_stop
         return hyperparameters
 
     @property
     def parameters(self):
-        return super().parameters + self.layer_regression.parameters
+        all_params = super().parameters + self.layer_regression.parameters
+        if self.learn_to_stop:
+            all_params += self.layer_stopping.parameters
+
+        return all_params
 
     def _fprop_step(self, Xi, *args):
         # Xi.shape : (batch_size, 4)    *if self.use_previous_direction, Xi.shape : (batch_size,7)
@@ -126,14 +140,19 @@ class GRU_Regression(GRU):
         next_hidden_state = super()._fprop(fprop_input, *args)
 
         # Compute the direction to follow for step (t)
-
         output_layer_input = T.concatenate(next_hidden_state, axis=-1) if self.use_skip_connections else next_hidden_state[-1]
         regression_out = self.layer_regression.fprop(output_layer_input)
 
         if self.predict_offset:
             regression_out += previous_direction  # Skip-connection from the previous direction.
 
-        return next_hidden_state + (regression_out,)
+        outputs = (regression_out,)
+
+        if self.learn_to_stop:
+            stopping_out = self.layer_stopping.fprop(output_layer_input)
+            outputs = (stopping_out, regression_out)
+
+        return next_hidden_state + outputs
 
     def get_output(self, X):
         # X.shape : (batch_size, seq_len, n_features=[4|7])
@@ -143,10 +162,14 @@ class GRU_Regression(GRU):
         for hidden_size in self.hidden_sizes:
             outputs_info_h.append(T.zeros((X.shape[0], hidden_size)))
 
+        outputs_info = outputs_info_h + [None]
+        if self.learn_to_stop:
+            outputs_info += [None]
+
         results, updates = theano.scan(fn=self._fprop_step,
                                        # We want to scan over sequence elements, not the examples.
                                        sequences=[T.transpose(X, axes=(1, 0, 2))],
-                                       outputs_info=outputs_info_h + [None],
+                                       outputs_info=outputs_info,
                                        non_sequences=self.parameters + self.volume_manager.volumes,
                                        strict=True)
 
@@ -154,7 +177,13 @@ class GRU_Regression(GRU):
         # Put back the examples so they are in the first dimension.
         # regression_out.shape : (batch_size, seq_len, target_size=3)
         self.regression_out = T.transpose(results[-1], axes=(1, 0, 2))
-        return self.regression_out
+        model_output = self.regression_out
+
+        if self.learn_to_stop:
+            self.stopping_out = T.transpose(results[-2], axes=(1, 0, 2))
+            model_output = (self.stopping_out, self.regression_out)
+
+        return model_output
 
     def make_sequence_generator(self, subject_id=0, **_):
         """ Makes functions that return the prediction for x_{t+1} for every
@@ -178,10 +207,12 @@ class GRU_Regression(GRU):
         new_states_h = new_states[:len(self.hidden_sizes)]
 
         # predictions.shape : (batch_size, target_size)
-        predictions = new_states[-1]
+        predictions = [new_states[-1]]
+        if self.learn_to_stop:
+            predictions = new_states[-2:]
 
         f = theano.function(inputs=[symb_x_t] + states_h,
-                            outputs=[predictions] + list(new_states_h))
+                            outputs=list(predictions) + list(new_states_h))
 
         def _gen(x_t, states, previous_direction=None):
             """ Returns the prediction for x_{t+1} for every
@@ -213,9 +244,17 @@ class GRU_Regression(GRU):
                 x_t = np.c_[x_t, subject_ids, previous_direction]
 
             results = f(x_t, *states)
-            next_x_t = results[0]
-            new_states = results[1:]
-            return next_x_t, new_states
+            if self.learn_to_stop:
+                stopping = results[0]
+                next_x_t = results[1]
+                new_states = results[2:]
+                output = (next_x_t, stopping)
+            else:
+                next_x_t = results[0]
+                new_states = results[1:]
+                output = next_x_t
+
+            return output, new_states
 
         return _gen
 
@@ -248,6 +287,51 @@ class L2DistanceForSequences(Loss):
 
         # loss_per_time_step.shape = (batch_size, seq_len)
         self.loss_per_time_step = l2distance(self.samples, self.dataset.symb_targets, eps=self.eps)
+        # loss_per_seq.shape = (batch_size,)
+        self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1)
+
+        if not self.sum_over_timestep:
+            self.loss_per_seq /= T.sum(mask, axis=1)
+
+        return self.loss_per_seq
+
+
+class L2DistanceAndStoppingCriteriaForSequences(Loss):
+    """ Computes the L2 error and stopping criteria cross-entropy of the output.
+
+    Notes
+    -----
+    This loss assumes the regression target at every time step is a vector.
+    """
+    def __init__(self, model, dataset, normalize_output=False, eps=1e-6, sum_over_timestep=False):
+        super().__init__(model, dataset)
+        self.normalize_output = normalize_output
+        self.eps = eps
+        self.sum_over_timestep = sum_over_timestep
+
+    def _get_updates(self):
+        return {}  # There is no updates for L2Distance.
+
+    def _compute_losses(self, model_output):
+        mask = self.dataset.symb_mask
+
+        # regression_outputs.shape = (batch_size, seq_length, out_dim)
+        stopping_criteria_outputs = model_output[0][:, :, 0]
+        regression_outputs = model_output[1]
+
+        regression_targets = self.dataset.symb_targets[:, :, :3]
+        stopping_criteria_targets = self.dataset.symb_targets[:, :, 3]
+
+        if self.normalize_output:
+            regression_outputs /= l2distance(regression_outputs, keepdims=True, eps=self.eps)
+
+        self.samples = regression_outputs
+
+        l2_loss_per_time_step = l2distance(self.samples, regression_targets, eps=self.eps)
+        stopping_cross_entropy_per_time_step = T.nnet.binary_crossentropy(stopping_criteria_outputs, stopping_criteria_targets)
+
+        # loss_per_time_step.shape = (batch_size, seq_len)
+        self.loss_per_time_step = l2_loss_per_time_step + stopping_cross_entropy_per_time_step
         # loss_per_seq.shape = (batch_size,)
         self.loss_per_seq = T.sum(self.loss_per_time_step * mask, axis=1)
 

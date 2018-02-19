@@ -98,6 +98,9 @@ def build_train_gru_mixture_argparser(subparser):
     model.add_argument('--initialization-seed', type=int, default=np.random.randint(0, 999999),
                        help='seed used to generate random numbers. Default=random')
 
+    model.add_argument('--learn-to-stop', action="store_true",
+                       help='if specified, the model will be trained to learn when to stop tracking')
+
     model.add_argument('--normalize', action="store_true", help='if specified, model will be trained against unit length targets')
 
     model.add_argument('--feed-previous-direction', action="store_true",
@@ -134,6 +137,9 @@ def build_train_gru_gaussian_argparser(subparser):
                        help='which type of initialization to use when creating weights [{0}].'.format(", ".join(WEIGHTS_INITIALIZERS)))
     model.add_argument('--initialization-seed', type=int, default=np.random.randint(0, 999999),
                        help='seed used to generate random numbers. Default=random')
+
+    model.add_argument('--learn-to-stop', action="store_true",
+                       help='if specified, the model will be trained to learn when to stop tracking')
 
     model.add_argument('--normalize', action="store_true", help='if specified, model will be trained against unit length targets')
 
@@ -324,7 +330,8 @@ def main():
                                    'drop_prob': 0.,
                                    'use_zoneout': False,
                                    'skip_connections': False,
-                                   'neighborhood_radius': False}
+                                   'neighborhood_radius': False,
+                                   'learn_to_stop': False}
     experiment_path, hyperparams, resuming = utils.maybe_create_experiment_folder(args, exclude=hyperparams_to_exclude,
                                                                                   retrocompatibility_defaults=retrocompatibility_defaults)
 
@@ -361,7 +368,7 @@ def main():
         model.initialize(weigths_initializer_factory(args.weights_initialization,
                                                      seed=args.initialization_seed))
 
-        print("Network architecture: ", *get_model_architecture(model))
+        print("Network architecture: ", get_model_architecture(model))
 
     with Timer("Building optimizer"):
         loss = loss_factory(hyperparams, model, trainset)
