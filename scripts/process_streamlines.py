@@ -82,10 +82,20 @@ def main():
         signal = nib.load(args.signal)
         signal.get_data()  # Forces loading volume in-memory.
         basename = re.sub('(\.gz|\.nii.gz)$', '', args.signal)
-        bvals = basename + '.bvals' if args.bvals is None else args.bvals
-        bvecs = basename + '.bvecs' if args.bvecs is None else args.bvecs
 
-        gradients = gradient_table(bvals, bvecs)
+        try:
+            bvals = basename + '.bvals' if args.bvals is None else args.bvals
+            bvecs = basename + '.bvecs' if args.bvecs is None else args.bvecs
+            gradients = gradient_table(bvals, bvecs)
+        except FileNotFoundError:
+            try:
+                bvals = basename + '.bval' if args.bvals is None else args.bvals
+                bvecs = basename + '.bvec' if args.bvecs is None else args.bvecs
+                gradients = gradient_table(bvals, bvecs)
+            except FileNotFoundError as e:
+                print("Could not find .bvals/.bvecs or .bval/.bvec files...")
+                raise e
+
         tracto_data = TractographyData(signal, gradients)
     elif args.signal_source == "processed_signal":
         loaded_tracto_data = TractographyData.load(args.tracto_data)

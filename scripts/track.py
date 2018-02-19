@@ -791,9 +791,19 @@ def main():
             dwi_name = dwi_name[:-3]
         if dwi_name.endswith(".nii"):
             dwi_name = dwi_name[:-4]
-        bvals_filename = dwi_name + ".bvals"
-        bvecs_filename = dwi_name + ".bvecs"
-        bvals, bvecs = dipy.io.gradients.read_bvals_bvecs(bvals_filename, bvecs_filename)
+
+        try:
+            bvals_filename = dwi_name + ".bvals"
+            bvecs_filename = dwi_name + ".bvecs"
+            bvals, bvecs = dipy.io.gradients.read_bvals_bvecs(bvals_filename, bvecs_filename)
+        except FileNotFoundError:
+            try:
+                bvals_filename = dwi_name + ".bval"
+                bvecs_filename = dwi_name + ".bvec"
+                bvals, bvecs = dipy.io.gradients.read_bvals_bvecs(bvals_filename, bvecs_filename)
+            except FileNotFoundError as e:
+                print("Could not find .bvals/.bvecs or .bval/.bvec files...")
+                raise e
 
         dwi = nib.load(args.dwi)
         if hyperparams["use_sh_coeffs"]:
