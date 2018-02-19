@@ -359,7 +359,7 @@ def normalize_dwi(weights, b0):
     return weights_normed
 
 
-def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0.006, first=False, mean_centering=True):
+def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0.006, data_normalization=True):
     """ Compute coefficients of the spherical harmonics basis.
 
     Parameters
@@ -375,8 +375,8 @@ def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0
         SH order. Default: 8
     smooth : float, optional
         Lambda-regularization in the SH fit. Default: 0.006.
-    mean_centering : bool
-        If True, signal will have zero mean in each direction for all nonzero voxels
+    data_normalization : bool
+        If True, signal will have zero mean and unit variance in each direction for all nonzero voxels
 
     Returns
     -------
@@ -407,16 +407,18 @@ def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0
     invB = smooth_pinv(Ba, np.sqrt(smooth) * L)
     data_sh = np.dot(weights, invB.T)
 
-    if mean_centering:
-        # Normalization in each direction (zero mean)
+    if data_normalization:
+        # Normalization in each direction (zero mean and unit variance)
         idx = data_sh.sum(axis=-1).nonzero()
         means = data_sh[idx].mean(axis=0)
+        stds = data_sh[idx].std(axis=0)
         data_sh[idx] -= means
+        data_sh[idx] /= stds
 
     return data_sh
 
 
-def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, mean_centering=True):
+def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, data_normalization=True):
     """ Resamples a diffusion signal according to a set of directions using spherical harmonics.
 
     Parameters
@@ -436,15 +438,15 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, m
         SH order. Default: 8
     smooth : float, optional
         Lambda-regularization in the SH fit. Default: 0.006.
-    mean_centering : bool
-        If True, signal will have zero mean in each direction for all nonzero voxels
+    data_normalization : bool
+        If True, signal will have zero mean and unit variance in each direction for all nonzero voxels
 
     Returns
     -------
     ndarray
         Diffusion weights resampled according to `sphere`.
     """
-    data_sh = get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=sh_order, smooth=smooth, mean_centering=False)
+    data_sh = get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=sh_order, smooth=smooth, data_normalization=False)
 
     sphere = get_sphere('repulsion100')
     # sphere = get_sphere('repulsion724')
@@ -455,11 +457,13 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, m
     Ba, m, n = sph_harm_basis(sh_order, sphere.theta, sphere.phi)
     data_resampled = np.dot(data_sh, Ba.T)
 
-    if mean_centering:
-        # Normalization in each direction (zero mean)
+    if data_normalization:
+        # Normalization in each direction (zero mean and unit variance)
         idx = data_resampled.sum(axis=-1).nonzero()
         means = data_resampled[idx].mean(axis=0)
+        stds = data_resampled[idx].std(axis=0)
         data_resampled[idx] -= means
+        data_resampled[idx] /= stds
 
     return data_resampled
 
