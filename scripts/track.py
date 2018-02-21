@@ -69,6 +69,9 @@ def build_argparser():
                    help="if provided, streamlines will stop if going outside this mask (.nii|.nii.gz).")
     p.add_argument('--mask-threshold', type=float, default=0.05,
                    help="streamlines will be terminating if they pass through a voxel with a value from the mask lower than this value. Default: 0.05")
+    p.add_argument('--wm-mask', type=str,
+                   help="if provided, normalization will be done with voxels inside this mask. Otherwise, tracking mask will be used. "
+                        "If no tracking mask is provided, non-zero voxels will be used.")
 
     p.add_argument('--filter-threshold', type=float,
                    help="If specified, only streamlines with a loss value lower than the specified value will be kept.")
@@ -784,6 +787,12 @@ def main():
     except FileNotFoundError:
         hyperparams = smartutils.load_dict_from_json_file(pjoin(experiment_path, "..", "hyperparams.json"))
 
+    mask = None
+    if args.mask is not None:
+        with Timer("Loading mask"):
+            mask_nii = nib.load(args.mask)
+            mask = mask_nii.get_data()
+
     with Timer("Loading DWIs"):
         # Load gradients table
         dwi_name = args.dwi
@@ -844,18 +853,13 @@ def main():
         model.drop_prob = 0.
         print(str(model))
 
-    mask = None
-    if args.mask is not None:
-        with Timer("Loading mask"):
-            mask_nii = nib.load(args.mask)
-            mask = mask_nii.get_data()
-            # Compute the affine allowing to evaluate the mask at some coordinates correctly.
-
-            # affine_maskvox2dwivox = mask_vox => rasmm space => dwi_vox
-            affine_maskvox2dwivox = np.dot(affine_rasmm2dwivox, mask_nii.affine)
-            if args.dilate_mask:
-                import scipy
-                mask = scipy.ndimage.morphology.binary_dilation(mask).astype(mask.dtype)
+    if mask is not None:
+        # Compute the affine allowing to evaluate the mask at some coordinates correctly.
+        # affine_maskvox2dwivox = mask_vox => rasmm space => dwi_vox
+        affine_maskvox2dwivox = np.dot(affine_rasmm2dwivox, mask_nii.affine)
+        if args.dilate_mask:
+            import scipy
+            mask = scipy.ndimage.morphology.binary_dilation(mask).astype(mask.dtype)
 
     with Timer("Generating seeds"):
         seeds = []

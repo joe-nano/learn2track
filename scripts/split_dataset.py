@@ -63,9 +63,9 @@ def main():
         with Timer("Splitting {} using a leave-one-out strategy".format(args.dataset), newline=True):
             for bundle in args.leave_one_out:
                 rng = np.random.RandomState(args.seed)
-                train_data = TractographyData(data.signal, data.gradients, data.name2id)
-                valid_data = TractographyData(data.signal, data.gradients, data.name2id)
-                test_data = TractographyData(data.signal, data.gradients, data.name2id)
+                train_data = TractographyData(data.signal, data.gradients, data.name2id, wm_mask=data.wm_mask)
+                valid_data = TractographyData(data.signal, data.gradients, data.name2id, wm_mask=data.wm_mask)
+                test_data = TractographyData(data.signal, data.gradients, data.name2id, wm_mask=data.wm_mask)
 
                 bundle_ids_to_exclude = list(map(int, bundle.split(',')))
                 missing_bundles_name = [data.bundle_names[i] for i in bundle_ids_to_exclude]
@@ -100,9 +100,9 @@ def main():
 
     else:
         rng = np.random.RandomState(args.seed)
-        train_data = TractographyData(data.signal, data.gradients, data.name2id)
-        valid_data = TractographyData(data.signal, data.gradients, data.name2id)
-        test_data = TractographyData(data.signal, data.gradients, data.name2id)
+        train_data = TractographyData(data.signal, data.gradients, data.name2id, wm_mask=data.wm_mask)
+        valid_data = TractographyData(data.signal, data.gradients, data.name2id, wm_mask=data.wm_mask)
+        test_data = TractographyData(data.signal, data.gradients, data.name2id, wm_mask=data.wm_mask)
 
         with Timer("Splitting {} as follow {} using {}".format(args.dataset, args.split, args.split_type), newline=args.verbose):
             for bundle_name in data.bundle_names:

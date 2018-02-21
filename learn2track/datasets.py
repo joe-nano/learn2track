@@ -209,12 +209,16 @@ def load_tractography_dataset(subject_files, volume_manager, name="HCP", use_sh_
             dwi = tracto_data.signal
             bvals = tracto_data.gradients.bvals
             bvecs = tracto_data.gradients.bvecs
+            wm_mask = tracto_data.wm_mask
+            if wm_mask is None:
+                print("Warning! No WM mask is available for normalization...")
             if use_sh_coeffs:
                 # Use 45 spherical harmonic coefficients to represent the diffusion signal.
-                volume = neurotools.get_spherical_harmonics_coefficients(dwi, bvals, bvecs, data_normalization=data_normalization).astype(np.float32)
+                volume = neurotools.get_spherical_harmonics_coefficients(dwi, bvals, bvecs, data_normalization=data_normalization,
+                                                                         normalization_mask_nii=wm_mask).astype(np.float32)
             else:
                 # Resample the diffusion signal to have 100 directions.
-                volume = neurotools.resample_dwi(dwi, bvals, bvecs, data_normalization=data_normalization).astype(np.float32)
+                volume = neurotools.resample_dwi(dwi, bvals, bvecs, data_normalization=data_normalization, normalization_mask_nii=wm_mask).astype(np.float32)
 
             tracto_data.signal.uncache()  # Free some memory as we don't need the original signal.
             subject_id = volume_manager.register(volume)

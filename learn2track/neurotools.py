@@ -1,3 +1,4 @@
+import os
 from collections import OrderedDict
 
 import nibabel as nib
@@ -10,6 +11,13 @@ from dipy.data import get_sphere
 from dipy.reconst.shm import sph_harm_lookup, smooth_pinv
 from dipy.segment.quickbundles import QuickBundles
 from dipy.tracking.streamline import set_number_of_points
+
+try:
+    from dipy.align.reslice import reslice
+except ImportError:
+    # For Dipy before 0.10, was called resample
+    from dipy.align.aniso2iso import resample as reslice
+
 from scipy.ndimage import map_coordinates
 from smartlearner.utils import sharedX
 
@@ -19,7 +27,7 @@ floatX = theano.config.floatX
 
 
 class TractographyData(object):
-    def __init__(self, signal, gradients, name2id=None):
+    def __init__(self, signal, gradients, name2id=None, wm_mask=None):
         """
         Parameters
         ----------
@@ -33,6 +41,7 @@ class TractographyData(object):
         self.name2id = OrderedDict() if name2id is None else name2id
         self.signal = signal
         self.gradients = gradients
+        self.wm_mask = wm_mask
         self.subject_id = None
         self.filename = None
 
@@ -89,12 +98,18 @@ class TractographyData(object):
         streamlines_data.streamlines._lengths = data['lengths']
         streamlines_data.bundle_ids = data['bundle_ids']
         streamlines_data.name2id = OrderedDict([(str(k), int(v)) for k, v in data['name2id']])
+        try:
+            # New property might be missing from older files
+            streamlines_data.wm_mask = data['wm_mask'].item()
+        except IndexError:
+            pass
         return streamlines_data
 
     def save(self, filename):
         np.savez(filename,
                  signal=self.signal,
                  gradients=self.gradients,
+                 wm_mask=self.wm_mask,
                  coords=self.streamlines._data.astype(np.float32),
                  offsets=self.streamlines._offsets,
                  lengths=self.streamlines._lengths.astype(np.int16),
@@ -125,19 +140,20 @@ class TractographyData(object):
 
         name_max_length = max(map(len, self.name2id.keys()))
         bundles_infos = "\n".join([(name.ljust(name_max_length) +
-                                    "{}".format((self.bundle_ids==bundle_id).sum()).rjust(12))
+                                    "{}".format((self.bundle_ids == bundle_id).sum()).rjust(12))
                                    for name, bundle_id in self.name2id.items()])
 
         t = nib.streamlines.Tractogram(self.streamlines.copy())
         t.apply_affine(self.signal.affine)  # Bring streamlines to RAS+mm
-        step_sizes = np.sqrt(np.sum(np.diff(t.streamlines._data, axis=0)**2, axis=1))
-        step_sizes = np.concatenate([step_sizes[o:o+l-1] for o, l in zip(t.streamlines._offsets, t.streamlines._lengths)])
+        step_sizes = np.sqrt(np.sum(np.diff(t.streamlines._data, axis=0) ** 2, axis=1))
+        step_sizes = np.concatenate([step_sizes[o:o + l - 1] for o, l in zip(t.streamlines._offsets, t.streamlines._lengths)])
 
         msg = msg.format(dataset_name=self.filename,
                          nb_streamlines=len(self.streamlines),
                          nb_bundles=len(self.name2id),
                          step_sizes="[{:.3f}, {:.3f}] (avg. {:.3f})".format(step_sizes.min(), step_sizes.max(), step_sizes.mean()),
-                         fiber_lengths="[{}, {}] (avg. {:.1f})".format(self.streamlines._lengths.min(), self.streamlines._lengths.max(), self.streamlines._lengths.mean()),
+                         fiber_lengths="[{}, {}] (avg. {:.1f})".format(self.streamlines._lengths.min(), self.streamlines._lengths.max(),
+                                                                       self.streamlines._lengths.mean()),
                          dimension=self.signal.shape,
                          voxel_size=tuple(self.signal.header.get_zooms()),
                          nb_b0s=self.gradients.b0s_mask.sum(),
@@ -349,7 +365,7 @@ def normalize_dwi(weights, b0):
     # Should not happen, but with the noise we never know!
     nb_erroneous_voxels = np.sum(weights > b0)
     if nb_erroneous_voxels != 0:
-        print ("Nb. erroneous voxels: {}".format(nb_erroneous_voxels))
+        print("Nb. erroneous voxels: {}".format(nb_erroneous_voxels))
         weights = np.minimum(weights, b0)
 
     # Normalize dwi using the b0.
@@ -359,7 +375,7 @@ def normalize_dwi(weights, b0):
     return weights_normed
 
 
-def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0.006, data_normalization=True):
+def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0.006, data_normalization=True, normalization_mask_nii=None):
     """ Compute coefficients of the spherical harmonics basis.
 
     Parameters
@@ -377,6 +393,8 @@ def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0
         Lambda-regularization in the SH fit. Default: 0.006.
     data_normalization : bool
         If True, signal will have zero mean and unit variance in each direction for all nonzero voxels
+    normalization_mask_nii : `nibabel.NiftiImage` object
+        Mask defining which voxels should be used for normalization. If None, all non-zero voxels will be used.
 
     Returns
     -------
@@ -407,9 +425,21 @@ def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0
     invB = smooth_pinv(Ba, np.sqrt(smooth) * L)
     data_sh = np.dot(weights, invB.T)
 
+    # Normalization in each direction (zero mean and unit variance)
     if data_normalization:
-        # Normalization in each direction (zero mean and unit variance)
-        idx = data_sh.sum(axis=-1).nonzero()
+        if normalization_mask_nii is None:
+            # If no mask is given, use non-zero voxels
+            nonzero_idx = weights.sum(axis=-1).nonzero()
+            normalization_mask = np.zeros(dwi_weights.shape[:3])
+            normalization_mask[nonzero_idx] = 1.
+        else:
+            # Mask resolution must fit DWI resolution
+            if normalization_mask_nii.get_shape() == weights.shape[:3]:
+                normalization_mask = normalization_mask_nii.get_data()
+            else:
+                normalization_mask = resample_volume(normalization_mask_nii, ref=dwi).get_data()
+
+        idx = np.nonzero(normalization_mask)
         means = data_sh[idx].mean(axis=0)
         stds = data_sh[idx].std(axis=0)
         data_sh[idx] -= means
@@ -418,7 +448,7 @@ def get_spherical_harmonics_coefficients(dwi, bvals, bvecs, sh_order=8, smooth=0
     return data_sh
 
 
-def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, data_normalization=True):
+def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, data_normalization=True, normalization_mask_nii=None):
     """ Resamples a diffusion signal according to a set of directions using spherical harmonics.
 
     Parameters
@@ -440,6 +470,8 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, d
         Lambda-regularization in the SH fit. Default: 0.006.
     data_normalization : bool
         If True, signal will have zero mean and unit variance in each direction for all nonzero voxels
+    normalization_mask_nii : `nibabel.NiftiImage` object
+        Mask defining which voxels should be used for normalization. If None, all non-zero voxels will be used.
 
     Returns
     -------
@@ -457,9 +489,22 @@ def resample_dwi(dwi, bvals, bvecs, directions=None, sh_order=8, smooth=0.006, d
     Ba, m, n = sph_harm_basis(sh_order, sphere.theta, sphere.phi)
     data_resampled = np.dot(data_sh, Ba.T)
 
+    # Normalization in each direction (zero mean and unit variance)
     if data_normalization:
-        # Normalization in each direction (zero mean and unit variance)
-        idx = data_resampled.sum(axis=-1).nonzero()
+        weights = dwi.get_data()
+        if normalization_mask_nii is None:
+            # If no mask is given, use non-zero voxels
+            nonzero_idx = weights.sum(axis=-1).nonzero()
+            normalization_mask = np.zeros(weights.shape[:3])
+            normalization_mask[nonzero_idx] = 1.
+        else:
+            # Mask resolution must fit DWI resolution
+            if normalization_mask_nii.get_shape() == weights.shape[:3]:
+                normalization_mask = normalization_mask_nii.get_data()
+            else:
+                normalization_mask = resample_volume(normalization_mask_nii, ref=dwi).get_data()
+
+        idx = np.nonzero(normalization_mask)
         means = data_resampled[idx].mean(axis=0)
         stds = data_resampled[idx].std(axis=0)
         data_resampled[idx] -= means
@@ -558,3 +603,99 @@ def get_neighborhood_directions(radius):
     axes = np.identity(3)
     directions = np.concatenate(([[0, 0, 0]], axes, -axes)) * radius
     return directions
+
+
+def resample_volume(input, ref=None, resolution=None, iso_min=False, interp='lin', enforce_dimensions=False, verbose=False):
+    """ Resample a dataset to match the resolution of another
+    reference dataset or to the resolution specified as en argument.
+
+    Taken from scil_resample_volume.py
+
+    Parameters
+    ----------
+    input : `nibabel.NiftiImage` object
+        Image to resample
+    ref : `nibabel.NiftiImage` object
+        Reference volume to resample to.
+    resolution : float
+        Resolution to resample to. Given a value of Y, it will resample to an isotropic resolution of Y x Y x Y.
+    iso_min : bool
+        Resample the volume to R x R x R with R being the smallest current voxel dimension
+    interp : str
+        Interpolation mode.
+        choices=['nn', 'lin', 'quad', 'cubic']
+            nn: nearest neighbour
+            lin: linear
+            quad: quadratic
+            cubic: cubic
+        Defaults to linear
+    enforce_dimensions : bool
+        Enforce the reference volume dimension.
+
+    Returns
+    -------
+    output : `nibabel.NiftiImage` object
+        Resampled volume
+
+    """
+
+    def interp_code_to_order(interp_code):
+        orders = {'nn': 0, 'lin': 1, 'quad': 2, 'cubic': 3}
+        return orders[interp_code]
+
+    if ref is None and resolution is None and not iso_min:
+        raise ValueError("One of `ref`, `resolution` or iso_min` must be specified.")
+
+    if ref is not None and resolution is not None:
+        raise ValueError("You can only specify one of `ref` and `resolution`")
+
+    if enforce_dimensions and ref is None:
+        raise ValueError("Cannot enforce dimensions without a reference image")
+
+    img = input
+    data = img.get_data()
+    affine = img.get_affine()
+    original_zooms = img.get_header().get_zooms()[:3]
+
+    if ref is not None:
+        ref_img = ref
+        new_zooms = ref_img.get_header().get_zooms()[:3]
+    elif resolution is not None:
+        new_zooms = (resolution, resolution, resolution)
+    elif iso_min:
+        min_zoom = min(original_zooms)
+        new_zooms = (min_zoom, min_zoom, min_zoom)
+
+    if verbose:
+        print('Data shape: {0}'.format(data.shape))
+        print('Data affine: {0}'.format(affine))
+        print('Data affine setup: {0}'.format(nib.aff2axcodes(affine)))
+
+        print('Resampling data to {0} '.format(new_zooms) + 'with mode {0}'.format(interp))
+
+    interp = interp_code_to_order(interp)
+    data2, affine2 = reslice(data, affine, zooms=original_zooms,
+                             order=interp, new_zooms=new_zooms)
+
+    if verbose:
+        print('Resampled data shape: {0}'.format(data2.shape))
+        print('Resampled data affine: {0}'.format(affine2))
+        print('Resampled data affine setup: {0}'.format(nib.aff2axcodes(affine2)))
+
+    if ref:
+        computed_dims = data2.shape
+        ref_dims = ref_img.shape[:3]
+
+    if enforce_dimensions and computed_dims != ref_dims:
+        fix_dim_volume = np.zeros(ref_dims)
+        x_dim = min(computed_dims[0], ref_dims[0])
+        y_dim = min(computed_dims[1], ref_dims[1])
+        z_dim = min(computed_dims[2], ref_dims[2])
+
+        fix_dim_volume[0:x_dim, 0:y_dim, 0:z_dim] = \
+            data2[0:x_dim, 0:y_dim, 0:z_dim]
+        output = nib.Nifti1Image(fix_dim_volume, affine2)
+    else:
+        output = nib.Nifti1Image(data2, affine2)
+
+    return output

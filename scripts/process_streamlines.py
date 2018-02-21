@@ -35,6 +35,8 @@ def build_argparser():
                 Diffusion signal
             'gradients': :class:`GradientTable` object (from dipy)
                 Diffusion gradients information
+            `wm_mask` : :class:`Nifti1Image` object (from nibabel)
+                Normalization mask
         """)
     p = argparse.ArgumentParser(description=DESCRIPTION, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
@@ -62,6 +64,7 @@ def build_argparser():
     signal_parser.add_argument('bundles', metavar='bundle', type=str, nargs="+", help='list of streamlines bundle files.')
     signal_parser.add_argument('--bvals', help='File containing diffusion gradient lengths (Default: guess it from `signal`).')
     signal_parser.add_argument('--bvecs', help='File containing diffusion gradient directions (Default: guess it from `signal`).')
+    signal_parser.add_argument('--wm-mask', help='File containing WM mask for normalization.')
 
     processed_signal_parser = signal_subparsers.add_parser("processed_signal", parents=[subsampling_parser, general_parser],
                                                            description="Extract signal from a TractographyData (.npz) file, and ignore existing streamlines.")
@@ -95,11 +98,14 @@ def main():
             except FileNotFoundError as e:
                 print("Could not find .bvals/.bvecs or .bval/.bvec files...")
                 raise e
-
-        tracto_data = TractographyData(signal, gradients)
+        wm_mask = None
+        if args.wm_mask is not None:
+            wm_mask = nib.load(args.wm_mask)
+            wm_mask.get_data()  # Force loading volume in-memory.
+        tracto_data = TractographyData(signal, gradients, wm_mask=wm_mask)
     elif args.signal_source == "processed_signal":
         loaded_tracto_data = TractographyData.load(args.tracto_data)
-        tracto_data = TractographyData(loaded_tracto_data.signal, loaded_tracto_data.gradients)
+        tracto_data = TractographyData(loaded_tracto_data.signal, loaded_tracto_data.gradients, loaded_tracto_data.wm_mask)
 
     # Compute matrix that brings streamlines back to diffusion voxel space.
     rasmm2vox_affine = np.linalg.inv(tracto_data.signal.affine)
