@@ -1,4 +1,44 @@
-# Prepare HCP data
+# Basic usage for training and tracking if you already have diffusion data and reference streamlines
+
+## Training a model
+
+The first step is to generate the necessary training files using process_streamlines.py:
+
+`process_streamlines.py --out dataset.npz raw_signal diffusion.nii.gz --bvals diffusion.bvals --bvecs diffusion.bvecs bundle1.tck bundle2.tck`
+
+This will give you the `dataset.npz` file that wraps all the necessary information for training, aka the diffusion, bvals/bvecs and the streamlines.
+
+If you wish, you can split the dataset into training/validation/test sets using `split_dataset.py` :
+
+`split_dataset.py dataset.npz --split 0.7 0.2 0.1`
+
+
+This will output 3 files, namely `dataset_trainset.npz`, `dataset_validset.npz` and `dataset_testset.npz`.
+
+You are then ready to train a model using a basic call to `learn.py`:
+
+
+`learn.py --train-subjects dataset_trainset.npz --valid-subjects dataset_validset.npz --max-epoch 100 --lookahead 10  --batch-size 100 --Adam LR=0.002 --name experiment1 gru_regression --hidden-sizes 500 500`
+
+Once that works, you can play around with the other options.
+
+## Tracking with a trained model
+
+Once you have a trained model, you will need the following before you are ready to track:
+
+- The diffusion data and the bvals/bvecs with the same name as the diffusion (e.g. `diffusion.nii.gz`, `diffusion.bvals`, `diffusion.bvecs`)
+- The binary tracking mask, you can keep it simple and use a WM mask (e.g. `wm.nii.gz`)
+- The binary seeding mask, you need to choose whether you want to seed from all the WM (`wm.nii.gz`) or just the interface (`interface.nii.gz`)
+
+`track.py --seeds wm.nii.gz --nb-seeds-per-voxel 1 --step-size 1 --mask wm.nii.gz --discard-stopped-by-curvature --theta 20 experiment1 diffusion.nii.gz`
+
+Note that the step size is used to scale the length of the model's predicted direction; if not given, the model prediction will be used as is.
+
+
+
+# Other instructions that might be helpful
+
+## Prepare HCP data
 
 HCP data are in LAS and currently our scripts only supports RAS. To convert them simply follow these steps.
 
@@ -23,9 +63,9 @@ If everything went right, clean temporary files.
 
 
 
-# Tractometer scoring (Python 2 only)
+## Tractometer scoring (Python 2 only)
 
-## Prerequisites
+### Prerequisites
 - TractConverter
   - `pip install https://github.com/MarcCote/tractconverter/archive/master.zip`
 
@@ -53,14 +93,13 @@ If everything went right, clean temporary files.
   - `pip install -e .`
 
 
-## Data
+### Data
 
-### ISMRM 2015 Challenge
-Download the scoring data ``
-More data available here `http://tractometer.org/ismrm_2015_challenge/data`
+#### ISMRM 2015 Challenge
+Download the scoring data (More data available here `http://tractometer.org/ismrm_2015_challenge/data`)
 
-## Perform evaluation
+### Perform evaluation
 `python ~/research/src/learn2track/scripts/score.py tractogram.tck scoring_data/ --out tractometer_folder --ismrm-tractometer`
 
-## View score
+### View score
 `python ~/research/src/learn2track/scripts/tractometer/score_viewer.py --scores tractometer_folder/*/scores/*json`
